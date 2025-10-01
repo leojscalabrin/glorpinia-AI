@@ -2,7 +2,6 @@ import os
 import requests
 from dotenv import load_dotenv
 from twitchio.ext import commands
-import json
 
 load_dotenv()
 
@@ -12,22 +11,33 @@ class TwitchBot(commands.Bot):
         self.client_id = os.getenv('TWITCH_CLIENT_ID')
         self.client_secret = os.getenv('TWITCH_CLIENT_SECRET')
         self.bot_nick = os.getenv('TWITCH_BOT_NICK')
-        self.bot_id = os.getenv('TWITCH_BOT_ID')
         self.hf_token = os.getenv('HF_TOKEN')
         self.model_id = os.getenv('HF_MODEL_ID')
 
-        if not self.bot_id:
-            self.bot_id = self.get_twitch_user_id(self.bot_nick)
+        if not all([self.token, self.client_id, self.client_secret, self.bot_nick, os.getenv('TWITCH_CHANNEL'), self.hf_token, self.model_id]):
+            raise ValueError("Missing required environment variables in .env file")
 
-        super().__init__(
-            token=self.token,
-            client_id=self.client_id,
-            client_secret=self.client_secret,
-            bot_id=self.bot_id,
-            nick=self.bot_nick,
-            prefix="!",
-            initial_channels=[os.getenv('TWITCH_CHANNEL')]
-        )
+        init_kwargs = {
+            "token": self.token,
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "nick": self.bot_nick,
+            "prefix": "!",
+            "initial_channels": [os.getenv('TWITCH_CHANNEL')]
+        }
+
+        # check if bot_id is needed and fetch if not provided
+        bot_id = os.getenv('TWITCH_BOT_ID')
+        if not bot_id:
+            bot_id = self.get_twitch_user_id(self.bot_nick)
+            print(f"Fetched bot_id: {bot_id}")
+        if bot_id:
+            init_kwargs["bot_id"] = bot_id
+
+        # explicitly set nick to ensure it's available
+        self.nick = self.bot_nick
+
+        super().__init__(**init_kwargs)
 
     def get_twitch_user_id(self, username):
         """Fetch Twitch User ID for the given username using Twitch API."""
@@ -52,7 +62,6 @@ class TwitchBot(commands.Bot):
         print(f'Wokege')
 
     async def event_message(self, message):
-
         if message.author and message.author.name.lower() == self.nick.lower():
             return
 
