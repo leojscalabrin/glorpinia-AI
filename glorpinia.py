@@ -49,7 +49,7 @@ class TwitchBot(commands.Bot):
             return None
 
     async def event_ready(self):
-        print(f'glorp SIGNAL RECEIVED | Connected as {self.nick}')
+        print(f'Wokege')
 
     async def event_message(self, message):
 
@@ -67,7 +67,7 @@ class TwitchBot(commands.Bot):
         headers = {"Authorization": f"Bearer {self.hf_token}"}
 
         payload = {
-            "inputs": f"<s>[INST] You are an alien catgirl from another galaxy which happens to capture signals from earth and answers shortly and with quirky messages on Twitch chat, your main goal is entertainment: {query} [/INST]",
+            "inputs": f"<s>[INST] You are an alien catgirl from the moon, your main goal is entertainment, answer shortly and with quirky messages: {query} [/INST]",
             "parameters": {"max_new_tokens": 100, "temperature": 0.7}
         }
 
