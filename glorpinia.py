@@ -5,6 +5,7 @@ import websocket
 import threading
 import time
 import logging
+import re  # Para parsing simples de logs
 
 load_dotenv()
 
@@ -26,8 +27,36 @@ class TwitchIRC:
         if not all([self.token, self.bot_nick, self.hf_token, self.model_id]):
             raise ValueError("Missing required environment variables in .env file")
 
+        # Memória: Histórico das últimas 10 trocas (usuário + resposta)
+        self.conversation_history = []
+        self.max_history = 10
+
+        # Carrega exemplos de treinamento de um arquivo (crie chat_examples.txt com logs)
+        self.chat_examples = self.load_chat_examples()
+
         self.ws = None
         self.running = False
+
+    def load_chat_examples(self):
+        """Carrega few-shot examples de um arquivo TXT com logs de chat."""
+        examples = []
+        try:
+            with open("chat_examples.txt", "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                for line in lines:
+                    line = line.strip()
+                    if "|" in line:
+                        user_msg, bot_msg = line.split("|", 1)
+                        examples.append(f"Exemplo: Usuário: {user_msg.strip()} | Glorpinia: {bot_msg.strip()}")
+        except FileNotFoundError:
+            print("[INFO] Arquivo chat_examples.txt não encontrado. Usando exemplos padrão.")
+            # Exemplos padrão com lores, emotes e gírias de Twitch
+            examples = [
+                "Exemplo: Usuário: Pog! Kappa na live de LoL | Glorpinia: Poggers lunar! Kappa me faz pular como um foguete 😹 Vamos subir de elo com magia felina? 🌙",
+                "Exemplo: Usuário: LUL, streamer tiltou com o emote de dança | Glorpinia: LUL na lua! Dança comigo, humano – meu tilt é só fome de atum estelar 😼 Pog!",
+                "Exemplo: Usuário: Lore do jogo: o herói tem uma espada mágica | Glorpinia: Meow! Essa espada mágica me lembra minha garra lunar afiada. Quer uma aventura no lore com emotes? Kappa! ✨"
+            ]
+        return "\n".join(examples)
 
     def get_hf_response(self, query):
         API_URL = "https://router.huggingface.co/v1/chat/completions"
@@ -36,17 +65,30 @@ class TwitchIRC:
             "Content-Type": "application/json"
         }
 
-        user_message = f"<s>[INST] Você é uma garota gato da lua chamada Glorpinia, seu objetivo principal é entretenimento, responda com mensagens curtas e divertidas: {query} [/INST]"
+        # Constrói histórico para memória (últimas trocas)
+        history_str = ""
+        if self.conversation_history:
+            history_str = "Histórico recente:\n" + "\n".join(self.conversation_history[-self.max_history:]) + "\n"
+
+        # Prompt completo: Base + exemplos de treinamento + histórico + query
+        system_prompt = f"""Você é Glorpinia, uma garota gato alienígena da lua. Seu principal objetivo é entretenimento, respostas divertidas e curiosas. Use Twitch emotes, gírias de live, gírias japonesas de gato, emotes de caracteres.
+
+Exemplos de respostas (treinamento com lores de chat):
+{self.chat_examples}
+
+{history_str}Agora responda à query do usuário de forma consistente com o histórico."""
+
+        user_message = f"{system_prompt} Query: {query}"
         messages = [{"role": "user", "content": user_message}]
 
         payload = {
             "model": self.model_id,
             "messages": messages,
-            "max_tokens": 100,
+            "max_tokens": 210,
             "temperature": 0.7,
             "stream": False
         }
-        print(f'[DEBUG] Enviando para HF API (novo endpoint): {user_message[:100]}...')
+        print(f'[DEBUG] Enviando para HF API (com memória e treinamento): {user_message[:210]}...')
 
         # Retry simples para erros transitórios (até 3 tentativas)
         for attempt in range(3):
@@ -59,13 +101,18 @@ class TwitchIRC:
                 if 'choices' in result and len(result['choices']) > 0:
                     generated = result['choices'][0]['message']['content'].strip()
                     if generated:
+                        # Adiciona à memória: query do usuário + resposta
+                        self.conversation_history.append(f"Usuário: {query} | Glorpinia: {generated}")
+                        # Limpa histórico antigo se exceder limite
+                        if len(self.conversation_history) > self.max_history:
+                            self.conversation_history = self.conversation_history[-self.max_history:]
                         return generated
                     else:
                         print("[DEBUG] Texto gerado vazio – fallback loading")
-                        return "glorp carregando cérebro"
+                        return "glorp carregando cérebro . exe"
                 else:
                     print("[DEBUG] Resultado inválido ou vazio – fallback loading")
-                    return "glorp carregando cérebro"
+                    return "glorp carregando cérebro . exe"
                     
             except requests.RequestException as e:
                 print(f"[ERROR] Erro ao chamar HF API (tentativa {attempt + 1}): {e}")
@@ -115,7 +162,19 @@ class TwitchIRC:
                 if query:
                     response = self.get_hf_response(query)
                     print(f"[DEBUG] Resposta da IA: {response[:50]}...")
-                    self.send_message(channel, f"@{author_part} {response[:200]}...")
+                    
+                    # Divide resposta se > 100 chars e envia com delay de 5s
+                    if len(response) > 100:
+                        chunks = [response[i:i+100] for i in range(0, len(response), 100)]
+                        for i, chunk in enumerate(chunks):
+                            if i == 0:
+                                self.send_message(channel, f"@{author_part} {chunk}")
+                            else:
+                                self.send_message(channel, chunk)  # Sem @ nas continuações
+                            if i < len(chunks) - 1:  # Delay só entre chunks
+                                time.sleep(5)
+                    else:
+                        self.send_message(channel, f"@{author_part} {response}")
                 else:
                     print("[DEBUG] Query vazia após menção. Nenhuma resposta da IA.")
 
@@ -128,9 +187,11 @@ class TwitchIRC:
 
     def on_open(self, ws):
         print("[OPEN] Conexão WebSocket aberta!")
+        # Autentica
         ws.send(f"PASS oauth:{self.token}\r\n")
         ws.send(f"NICK {self.bot_nick}\r\n")
         print(f"[AUTH] Autenticando como {self.bot_nick} com token...")
+        # Junta aos canais
         for channel in self.channels:
             ws.send(f"JOIN #{channel}\r\n")
             print(f"[JOIN] Tentando juntar ao canal: #{channel}")
@@ -141,7 +202,7 @@ class TwitchIRC:
 
     def run(self):
         self.running = True
-        websocket.enableTrace(True)  # Para depuração detalhada
+        websocket.enableTrace(True)  # Para depuração detalhada (opcional, remova se quiser menos logs)
         self.ws = websocket.WebSocketApp(
             "wss://irc-ws.chat.twitch.tv:443",
             on_open=self.on_open,
