@@ -163,9 +163,9 @@ Exemplos de respostas (treinamento com lores de chat):
                     response = self.get_hf_response(query)
                     print(f"[DEBUG] Resposta da IA: {response[:50]}...")
                     
-                    # Divide resposta se > 100 chars e envia com delay de 5s
-                    if len(response) > 100:
-                        chunks = [response[i:i+100] for i in range(0, len(response), 100)]
+                    # Divide resposta se > 210 chars e envia com delay de 5s
+                    if len(response) > 210:
+                        chunks = [response[i:i+210] for i in range(0, len(response), 210)]
                         for i, chunk in enumerate(chunks):
                             if i == 0:
                                 self.send_message(channel, f"@{author_part} {chunk}")
