@@ -90,6 +90,10 @@ class TwitchIRC:
             print("[ERROR] Sem refresh_token no .env. Gere um novo.")
             return None
 
+        # Salva tokens antigos para comparação
+        old_access_token = self.access_token
+        old_refresh_token = self.refresh_token
+
         url = "https://id.twitch.tv/oauth2/token"
         data = {
             "grant_type": "refresh_token",
@@ -102,10 +106,15 @@ class TwitchIRC:
             if response.status_code == 200:
                 new_tokens = response.json()
                 self.access_token = new_tokens["access_token"]  # Sem oauth:
-                self.refresh_token = new_tokens["refresh_token"]  # Atualiza o refresh também
+                new_refresh_token = new_tokens["refresh_token"]  # Atualiza o refresh também
                 print(f"[INFO] Token renovado! Expira em {new_tokens['expires_in']}s. Novo token: {self.access_token[:10]}...")
-                # Opcional: Salve no .env (requer cuidado com segurança)
-                # with open('.env', 'a') as f: f.write(f"\nTWITCH_TOKEN=oauth:{self.access_token}\nTWITCH_REFRESH_TOKEN={self.refresh_token}")
+
+                # Nova funcionalidade: Checa se tokens mudaram e atualiza .env se necessário
+                if self.access_token != old_access_token or new_refresh_token != old_refresh_token:
+                    self.update_env_file(self.access_token, new_refresh_token)
+                else:
+                    print("[INFO] Tokens não mudaram, .env não atualizado.")
+
                 return self.access_token
             else:
                 print(f"[ERROR] Falha na renovação: {response.status_code} - {response.text}")
@@ -113,6 +122,28 @@ class TwitchIRC:
         except requests.RequestException as e:
             print(f"[ERROR] Erro na renovação: {e}")
             return None
+
+    def update_env_file(self, new_access_token, new_refresh_token):
+        """Atualiza o arquivo .env com os novos tokens, removendo linhas antigas e adicionando novas."""
+        try:
+            # Lê o arquivo .env atual
+            with open(".env", "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            # Remove linhas antigas de TWITCH_TOKEN e TWITCH_REFRESH_TOKEN
+            lines = [line for line in lines if not line.strip().startswith("TWITCH_TOKEN=") and not line.strip().startswith("TWITCH_REFRESH_TOKEN=")]
+
+            # Adiciona as novas linhas
+            lines.append(f"TWITCH_TOKEN=oauth:{new_access_token}\n")
+            lines.append(f"TWITCH_REFRESH_TOKEN={new_refresh_token}\n")
+
+            # Escreve de volta no arquivo
+            with open(".env", "w", encoding="utf-8") as f:
+                f.writelines(lines)
+
+            print("[INFO] Arquivo .env atualizado com novos tokens.")
+        except Exception as e:
+            print(f"[ERROR] Falha ao atualizar .env: {e}. Tokens renovados, mas .env não foi modificado.")
 
     def get_hf_response(self, query):
         API_URL = "https://router.huggingface.co/v1/chat/completions"
