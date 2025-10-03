@@ -13,7 +13,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name
 
 class TwitchIRC:
     def __init__(self):
-        self.token = os.getenv("TWITCH_TOKEN").replace("oauth:", "")  # Remove prefixo se presente
+        self.access_token = os.getenv("TWITCH_TOKEN").replace("oauth:", "")  # Remove prefixo se presente
+        self.refresh_token = os.getenv("TWITCH_REFRESH_TOKEN")
+        self.client_id = os.getenv("TWITCH_CLIENT_ID")
+        self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
         self.bot_nick = os.getenv("TWITCH_BOT_NICK")
         self.hf_token = os.getenv("HF_TOKEN")
         self.model_id = os.getenv("HF_MODEL_ID")
@@ -24,39 +27,92 @@ class TwitchIRC:
         else:
             raise ValueError("Missing TWITCH_CHANNELS environment variable in .env file")
 
-        if not all([self.token, self.bot_nick, self.hf_token, self.model_id]):
+        if not all([self.access_token, self.bot_nick, self.hf_token, self.model_id]):
             raise ValueError("Missing required environment variables in .env file")
+
+        if not all([self.client_id, self.client_secret, self.refresh_token]):
+            print("[WARNING] Client ID, Secret ou Refresh Token ausentes. Renovação automática pode falhar.")
 
         # Memória: Histórico das últimas 10 trocas (usuário + resposta)
         self.conversation_history = []
         self.max_history = 10
 
-        # Carrega exemplos de treinamento de um arquivo (crie chat_examples.txt com logs)
-        self.chat_examples = self.load_chat_examples()
+        # Carrega o perfil de personalidade de um arquivo separado
+        self.personality_profile = self.load_personality_profile()
 
         self.ws = None
         self.running = False
 
-    def load_chat_examples(self):
-        """Carrega few-shot examples de um arquivo TXT com logs de chat."""
-        examples = []
+        # Valida e renova token se necessário antes de iniciar
+        self.validate_and_refresh_token()
+
+    def load_personality_profile(self):
+        """Carrega o perfil de personalidade de um arquivo TXT separado."""
         try:
-            with open("chat_examples.txt", "r", encoding="utf-8") as f:
-                lines = f.readlines()
-                for line in lines:
-                    line = line.strip()
-                    if "|" in line:
-                        user_msg, bot_msg = line.split("|", 1)
-                        examples.append(f"Exemplo: Usuário: {user_msg.strip()} | Glorpinia: {bot_msg.strip()}")
+            with open("glorpinia_profile.txt", "r", encoding="utf-8") as f:
+                profile = f.read().strip()
+            print("[INFO] Perfil de personalidade carregado de glorpinia_profile.txt.")
+            return profile
         except FileNotFoundError:
-            print("[INFO] Arquivo chat_examples.txt não encontrado. Usando exemplos padrão.")
-            # Exemplos padrão com lores, emotes e gírias de Twitch
-            examples = [
-                "Exemplo: Usuário: Pog! Kappa na live de LoL | Glorpinia: Poggers lunar! Kappa me faz pular como um foguete 😹 Vamos subir de elo com magia felina? 🌙",
-                "Exemplo: Usuário: LUL, streamer tiltou com o emote de dança | Glorpinia: LUL na lua! Dança comigo, humano – meu tilt é só fome de atum estelar 😼 Pog!",
-                "Exemplo: Usuário: Lore do jogo: o herói tem uma espada mágica | Glorpinia: Meow! Essa espada mágica me lembra minha garra lunar afiada. Quer uma aventura no lore com emotes? Kappa! ✨"
-            ]
-        return "\n".join(examples)
+            print("[WARNING] Arquivo glorpinia_profile.txt não encontrado. Usando perfil vazio.")
+            return ""  # Perfil vazio se o arquivo não existir
+
+    def validate_and_refresh_token(self):
+        """Valida o access token e renova se inválido ou expirado."""
+        # Valida o token atual
+        if not self.validate_token():
+            print("[INFO] Token inválido ou expirado. Renovando...")
+            if self.refresh_token:
+                self.refresh_token()
+            else:
+                raise ValueError("Refresh token ausente no .env. Gere um novo token manualmente.")
+
+    def validate_token(self):
+        """Valida o access token via endpoint /validate."""
+        url = "https://id.twitch.tv/oauth2/validate"
+        headers = {"Authorization": f"OAuth {self.access_token}"}
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                print(f"[INFO] Token válido. Usuário: {data.get('login')}, Escopos: {data.get('scopes')}")
+                return True
+            else:
+                print(f"[ERROR] Validação falhou: {response.status_code} - {response.text}")
+                return False
+        except requests.RequestException as e:
+            print(f"[ERROR] Erro na validação: {e}")
+            return False
+
+    def refresh_token(self):
+        """Renova o access token usando o refresh token."""
+        if not self.refresh_token:
+            print("[ERROR] Sem refresh_token no .env. Gere um novo.")
+            return None
+
+        url = "https://id.twitch.tv/oauth2/token"
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self.refresh_token,
+            "client_id": self.client_id,
+            "client_secret": self.client_secret
+        }
+        try:
+            response = requests.post(url, data=data, timeout=10)
+            if response.status_code == 200:
+                new_tokens = response.json()
+                self.access_token = new_tokens["access_token"]  # Sem oauth:
+                self.refresh_token = new_tokens["refresh_token"]  # Atualiza o refresh também
+                print(f"[INFO] Token renovado! Expira em {new_tokens['expires_in']}s. Novo token: {self.access_token[:10]}...")
+                # Opcional: Salve no .env (requer cuidado com segurança)
+                # with open('.env', 'a') as f: f.write(f"\nTWITCH_TOKEN=oauth:{self.access_token}\nTWITCH_REFRESH_TOKEN={self.refresh_token}")
+                return self.access_token
+            else:
+                print(f"[ERROR] Falha na renovação: {response.status_code} - {response.text}")
+                return None
+        except requests.RequestException as e:
+            print(f"[ERROR] Erro na renovação: {e}")
+            return None
 
     def get_hf_response(self, query):
         API_URL = "https://router.huggingface.co/v1/chat/completions"
@@ -70,11 +126,11 @@ class TwitchIRC:
         if self.conversation_history:
             history_str = "Histórico recente:\n" + "\n".join(self.conversation_history[-self.max_history:]) + "\n"
 
-        # Prompt completo: Base + exemplos de treinamento + histórico + query
-        system_prompt = f"""Você é Glorpinia, uma garota gato alienígena da lua. Seu principal objetivo é entretenimento, respostas divertidas e curiosas. Use Twitch emotes, gírias de live, gírias japonesas de gato, emotes de caracteres.
+        # Prompt completo: Perfil de personalidade + histórico + query
+        system_prompt = f"""Você é Glorpinia, uma garota gato alienígena da lua. Siga rigorosamente o perfil de personalidade abaixo para todas as respostas. Responda preferencialmente em português a não ser que o usuário interaja em inglês.
 
-Exemplos de respostas (treinamento com lores de chat):
-{self.chat_examples}
+Perfil de Personalidade:
+{self.personality_profile}
 
 {history_str}Agora responda à query do usuário de forma consistente com o histórico."""
 
@@ -84,11 +140,11 @@ Exemplos de respostas (treinamento com lores de chat):
         payload = {
             "model": self.model_id,
             "messages": messages,
-            "max_tokens": 210,
+            "max_tokens": 100,
             "temperature": 0.7,
             "stream": False
         }
-        print(f'[DEBUG] Enviando para HF API (com memória e treinamento): {user_message[:210]}...')
+        print(f'[DEBUG] Enviando para HF API (com memória e treinamento): {user_message[:100]}...')
 
         # Retry simples para erros transitórios (até 3 tentativas)
         for attempt in range(3):
@@ -163,9 +219,9 @@ Exemplos de respostas (treinamento com lores de chat):
                     response = self.get_hf_response(query)
                     print(f"[DEBUG] Resposta da IA: {response[:50]}...")
                     
-                    # Divide resposta se > 210 chars e envia com delay de 5s
-                    if len(response) > 210:
-                        chunks = [response[i:i+210] for i in range(0, len(response), 210)]
+                    # Divide resposta se > 200 chars e envia com delay de 6s
+                    if len(response) > 200:
+                        chunks = [response[i:i+200] for i in range(0, len(response), 200)]
                         for i, chunk in enumerate(chunks):
                             if i == 0:
                                 self.send_message(channel, f"@{author_part} {chunk}")
@@ -187,8 +243,8 @@ Exemplos de respostas (treinamento com lores de chat):
 
     def on_open(self, ws):
         print("[OPEN] Conexão WebSocket aberta!")
-        # Autentica
-        ws.send(f"PASS oauth:{self.token}\r\n")
+        # Autentica com o token atual (pode ser renovado)
+        ws.send(f"PASS oauth:{self.access_token}\r\n")
         ws.send(f"NICK {self.bot_nick}\r\n")
         print(f"[AUTH] Autenticando como {self.bot_nick} com token...")
         # Junta aos canais
