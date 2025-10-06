@@ -1,5 +1,5 @@
 Ensure you have Python 3.8+ installed. Then, run the following command to install all dependencies:
-pip install twitchio[starlette] transformers torch huggingface_hub requests python-dotenv
+pip install websocket-client transformers torch huggingface_hub requests python-dotenv
 
 ### Environment Setup
 Create a `.env` file in the project root with the following variables:
@@ -8,10 +8,10 @@ TWITCH_BOT_NICK=glorpinia
 TWITCH_CHANNEL=your_channel_name
 TWITCH_CLIENT_ID=your_client_id_here
 TWITCH_CLIENT_SECRET=your_client_secret_here
-
+REFRESH_TOKEN=your_refresh_token_here
 TWITCH_BOT_ID=your_bot_user_id_here
 HF_TOKEN=hf_your_hf_token_here
-HF_MODEL_ID=mistralai/Mistral-7B-Instruct-v0.1
+HF_MODEL_ID=your_model_of_choice_here
 
 Obtain tokens from:
 - Twitch: [Twitch Token Generator](https://twitchtokengenerator.com) (scopes: `chat:read`, `chat:edit`)
