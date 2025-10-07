@@ -207,3 +207,19 @@ marimo/_lsp/
 __marimo__/
 
 test.py
+
+# Dados sensíveis
+training_data.jsonl
+*.faiss
+glorpinia_memory.db
+
+# Modelos e caches
+glorpinia-lora/
+*.bin
+*.safetensors
+__pycache__/
+*.pyc
+
+# IDE/DS Store
+.vscode/
+.DS_Store

@@ -1,6 +1,10 @@
 Ensure you have Python 3.8+ installed. Then, run the following command to install all dependencies:
 pip install python-dotenv requests websocket-client langchain langchain-community langchain-huggingface faiss-cpu
 
+para fine-tuning:
+pip install transformers peft trl datasets accelerate bitsandbytes torch
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+
 ### Environment Setup
 Create a `.env` file in the project root with the following variables:
 TWITCH_TOKEN=oauth:your_token_here
