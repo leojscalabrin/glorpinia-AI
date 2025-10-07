@@ -4,12 +4,12 @@ from peft import LoraConfig, get_peft_model, TaskType
 from trl import SFTTrainer
 from datasets import load_dataset
 
-# Configs (ajuste pro seu HF)
-model_name = "google/gemma-2-2b-it"  # Seu modelo base
-dataset_path = "training_data.jsonl"  # Do export acima
-output_dir = "./glorpinia-lora"  # Pasta local pro modelo tunado
-hf_token = os.getenv("HF_TOKEN")  # Seu token do .env
-repo_name = "seu-username/glorpinia-custom"  # Repo HF privado (crie em huggingface.co)
+# Configs
+model_name = "google/gemma-2-2b-it"
+dataset_path = "training_data.jsonl"
+output_dir = "./glorpinia-lora"
+hf_token = os.getenv("HF_TOKEN_WRITE")
+repo_name = "felinomascarado/glorpinia-custom"
 
 # Carrega dataset (formato JSONL: [{"prompt": "...", "completion": "..."}])
 dataset = load_dataset("json", data_files=dataset_path, split="train")
@@ -29,31 +29,31 @@ if tokenizer.pad_token is None:
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     device_map="auto",
-    load_in_4bit=True,  # QLoRA pra poupar memória
+    load_in_4bit=True,
     trust_remote_code=True
 )
 
-# LoRA config (treina só adapters leves)
+# LoRA config
 lora_config = LoraConfig(
     task_type=TaskType.CAUSAL_LM,
-    r=16,  # Rank baixo pra eficiência
+    r=16,
     lora_alpha=32,
     lora_dropout=0.05,
     target_modules=["q_proj", "v_proj", "k_proj", "o_proj"]  # Módulos Gemma
 )
 model = get_peft_model(model, lora_config)
 
-# Args de treino (ajuste epochs/batch pro seu hardware)
+# Args de treino
 training_args = TrainingArguments(
     output_dir=output_dir,
     num_train_epochs=3,  # 1-5 pra teste; mais pra produção
-    per_device_train_batch_size=4,  # Ajuste se OOM
+    per_device_train_batch_size=4,
     gradient_accumulation_steps=4,
     warmup_steps=100,
     logging_steps=10,
     save_steps=500,
-    evaluation_strategy="no",  # Sem eval pra simplicidade
-    report_to=None  # Sem wandb
+    evaluation_strategy="no",
+    report_to=None
 )
 
 # Trainer
@@ -67,7 +67,6 @@ trainer = SFTTrainer(
     packing=True  # Otimiza batches
 )
 
-# Treina!
 trainer.train()
 
 # Salva local e push pro HF

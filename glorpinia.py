@@ -21,7 +21,7 @@ class TwitchIRC:
         self.client_id = os.getenv("TWITCH_CLIENT_ID")
         self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
         self.bot_nick = os.getenv("TWITCH_BOT_NICK")
-        self.hf_token = os.getenv("HF_TOKEN")
+        self.hf_token = os.getenv("HF_TOKEN_READ")
         self.model_id = os.getenv("HF_MODEL_ID")
 
         channels_str = os.getenv("TWITCH_CHANNELS")
