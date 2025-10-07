@@ -4,7 +4,9 @@ import logging
 import signal
 import sys
 import re
+import threading
 from datetime import datetime
+from collections import deque
 from .twitch_auth import TwitchAuth
 from .hf_client import HFClient
 from .memory_manager import MemoryManager
@@ -13,7 +15,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name
 
 class TwitchIRC:
     def __init__(self):
-        self.auth = TwitchAuth()
+        # Instancia componentes modulares
+        self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
         self.hf_client = HFClient(
             hf_token=self.auth.hf_token,
             model_id=self.auth.model_id,
@@ -24,19 +27,61 @@ class TwitchIRC:
         # Inicializa cache para log anti-spam
         self.last_logged_content = {}  # Por canal
 
+        # Armazenamento de mensagens recentes por canal (deque com timestamp)
+        self.recent_messages = {channel: deque(maxlen=100) for channel in self.auth.channels}  # Limite de 100 msgs por canal
+
         self.ws = None
         self.running = False
 
         # Valida e renova token se necessário (usa auth)
         self.auth.validate_and_refresh_token()
 
-        # Registra handler para shutdown
+        # Registra handler para shutdown gracioso
         signal.signal(signal.SIGINT, self._shutdown_handler)
         signal.signal(signal.SIGTERM, self._shutdown_handler)
 
+        # Inicia thread para timer de comentários periódicos
+        # self.comment_timer_running = True
+        # self.comment_thread = threading.Thread(target=self._periodic_comment_thread, daemon=True)
+        # self.comment_thread.start()
+
+    # def _periodic_comment_thread(self):
+    #     """Thread em background: A cada 30 min, checa contexto e envia comentário se aplicável."""
+    #     while self.comment_timer_running:
+    #         time.sleep(1800)
+
+    #         for channel in self.auth.channels:
+    #             recent_msgs = self.recent_messages.get(channel, deque())
+    #             now = time.time()
+                
+    #             recent_context = [msg for msg in recent_msgs if now - msg['timestamp'] <= 120]
+                
+    #             if len(recent_context) == 0:
+    #                 print(f"[DEBUG] Nenhuma mensagem nas últimas 2 min em {channel}. Pulando comentário.")
+    #                 continue
+                
+    #             # Cria contexto como string
+    #             context_str = "\n".join([f"{msg['author']}: {msg['content']}" for msg in recent_context])
+                
+    #             # Gera comentário via HF (prompt temático)
+    #             comment_query = f"Comente de forma natural e divertida sobre essa conversa recente no chat da live: {context_str[:500]}..."  # Limita pra tokens
+    #             try:
+    #                 comment = self.hf_client.get_response(
+    #                     query=comment_query,
+    #                     channel=channel,
+    #                     author="system",  # Genérico, sem user específico
+    #                     memory_mgr=self.memory_mgr
+    #                 )
+    #                 if len(comment) > 0 and len(comment) <= 200:  # Filtra respostas válidas/curtas
+    #                     self.send_message(channel, comment)
+    #                     print(f"[DEBUG] Comentário enviado em {channel}: {comment[:50]}...")
+    #             except Exception as e:
+    #                 print(f"[ERROR] Falha ao gerar comentário para {channel}: {e}")
+
     def _shutdown_handler(self, signum, frame):
-        """Handler para shutdown com mensagem de despedida."""
+        """Handler para shutdown gracioso com mensagem de despedida."""
         print("[INFO] Sinal de shutdown recebido. Enviando mensagem de despedida...")
+        self.comment_timer_running = False  # Para o thread
         goodbye_msg = "Bedge"
         for channel in self.auth.channels:
             self.send_message(channel, goodbye_msg)
@@ -73,6 +118,17 @@ class TwitchIRC:
 
                 print(f"[CHAT] {author_part}: {content}")
 
+                # NOVO: Adiciona TODAS mensagens recentes ao deque (pra contexto do timer)
+                # Anonimiza pro deque também (pra privacidade)
+                anon_author = f"User{hash(author_part) % 1000}"
+                msg_data = {
+                    'timestamp': time.time(),
+                    'author': anon_author,
+                    'content': content
+                }
+                if channel in self.recent_messages:
+                    self.recent_messages[channel].append(msg_data)
+
                 if author_part.lower() == self.auth.bot_nick.lower():
                     print(f"[DEBUG] Ignorando mensagem do próprio bot: {content}")
                     return
@@ -87,7 +143,7 @@ class TwitchIRC:
                 if author_part.lower() in ignored_bots:
                     print(f"[DEBUG] Ignorando bot conhecido: {author_part}")
                 else:
-                    # Filtros
+                    # Filtros recomendados
                     if (len(content) < 3 or
                         not content or
                         content.startswith('!') or
@@ -96,6 +152,7 @@ class TwitchIRC:
                     ):
                         print(f"[DEBUG] Mensagem filtrada (ruído): {content}")
                     else:
+                        # Anonimiza user
                         anon_user = f"User{hash(author_part) % 1000}"
                         
                         # Atualiza cache anti-spam
@@ -110,12 +167,14 @@ class TwitchIRC:
                         except Exception as e:
                             print(f"[ERROR] Falha no log geral: {e}")
 
+                # Check para palavra EXATA "glorp"
                 if re.search(r'\bglorp\b', content_lower):
                     glorp_response = "glorp"
                     print(f"[DEBUG] 'glorp' (exato) detectado em {content}. Respondendo...")
                     self.send_message(channel, glorp_response)
                     return
 
+                # Check para menção "glorpinia" (queries IA)
                 if "glorpinia" in content_lower:
                     query = content_lower.replace("glorpinia", "", 1).replace("@glorpinia", "", 1).strip()
                     print(f"[DEBUG] Menção a glorpinia detectada: {content}")
