@@ -281,7 +281,7 @@ Perfil de Personalidade:
             print("[PONG] Enviado para manter conexão viva.")
             return
 
-        if "PRIVMSG" in message and "glorpinia" in message.lower():
+        if "PRIVMSG" in message:
             # Extrai autor e conteúdo da mensagem IRC
             parts = message.split(":", 2)
             if len(parts) >= 3:
@@ -296,28 +296,36 @@ Perfil de Personalidade:
                     return
 
                 content_lower = content.lower()
-                query = content_lower.replace("glorpinia", "", 1).replace("@glorpinia", "", 1).strip()
-                print(f"[DEBUG] Menção a glorpinia detectada: {content}")
-                print(f"[DEBUG] Query extraída para a IA: {query}")
 
-                if query:
-                    response = self.get_hf_response(query, channel, author_part)
-                    print(f"[DEBUG] Resposta da IA: {response[:50]}...")
-                    
-                    # Divide resposta se > 200 chars e envia com delay de 5s
-                    if len(response) > 200:
-                        chunks = [response[i:i+200] for i in range(0, len(response), 200)]
-                        for i, chunk in enumerate(chunks):
-                            if i == 0:
-                                self.send_message(channel, f"@{author_part} {chunk}")
-                            else:
-                                self.send_message(channel, chunk)  # Sem @ nas continuações
-                            if i < len(chunks) - 1:  # Delay só entre chunks
-                                time.sleep(5)
+                if "glorp" in content_lower:
+                    glorp_response = "glorp"
+                    print(f"[DEBUG] 'glorp' detectado em {content}. Respondendo...")
+                    self.send_message(channel, f"@{author_part} {glorp_response}")
+                    return
+
+                if "glorpinia" in content_lower:
+                    query = content_lower.replace("glorpinia", "", 1).replace("@glorpinia", "", 1).strip()
+                    print(f"[DEBUG] Menção a glorpinia detectada: {content}")
+                    print(f"[DEBUG] Query extraída para a IA: {query}")
+
+                    if query:
+                        response = self.get_hf_response(query, channel, author_part)
+                        print(f"[DEBUG] Resposta da IA: {response[:50]}...")
+                        
+                        # Divide resposta se > 200 chars e envia com delay de 5s
+                        if len(response) > 200:
+                            chunks = [response[i:i+200] for i in range(0, len(response), 200)]
+                            for i, chunk in enumerate(chunks):
+                                if i == 0:
+                                    self.send_message(channel, f"@{author_part} {chunk}")
+                                else:
+                                    self.send_message(channel, chunk)  # Sem @ nas continuações
+                                if i < len(chunks) - 1:  # Delay só entre chunks
+                                    time.sleep(5)
+                        else:
+                            self.send_message(channel, f"@{author_part} {response}")
                     else:
-                        self.send_message(channel, f"@{author_part} {response}")
-                else:
-                    print("[DEBUG] Query vazia após menção. Nenhuma resposta da IA.")
+                        print("[DEBUG] Query vazia após menção. Nenhuma resposta da IA.")
 
     def on_error(self, ws, error):
         print(f"[ERROR] WebSocket error: {error}")
