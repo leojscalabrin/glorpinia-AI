@@ -1,5 +1,5 @@
 Ensure you have Python 3.8+ installed. Then, run the following command to install all dependencies:
-pip install websocket-client transformers torch huggingface_hub requests python-dotenv
+pip install python-dotenv requests websocket-client langchain langchain-community langchain-huggingface faiss-cpu
 
 ### Environment Setup
 Create a `.env` file in the project root with the following variables:

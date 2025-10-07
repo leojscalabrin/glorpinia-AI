@@ -2,23 +2,21 @@ from dotenv import load_dotenv
 import os
 import requests
 import websocket
-import threading
 import time
 import logging
-import re  # Para parsing simples de logs
+import sqlite3
+from langchain.memory import ConversationBufferMemory
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_core.messages import HumanMessage, AIMessage
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s"
-)
-
+logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
 class TwitchIRC:
     def __init__(self):
-        self.access_token = os.getenv("TWITCH_TOKEN").replace(
-            "oauth:", ""
-        )  # Remove prefixo se presente
+        self.access_token = os.getenv("TWITCH_TOKEN").replace("oauth:", "")
         self.refresh_token_value = os.getenv("TWITCH_REFRESH_TOKEN")
         self.client_id = os.getenv("TWITCH_CLIENT_ID")
         self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
@@ -30,72 +28,67 @@ class TwitchIRC:
         if channels_str:
             self.channels = [c.strip() for c in channels_str.split(",") if c.strip()]
         else:
-            raise ValueError(
-                "Missing TWITCH_CHANNELS environment variable in .env file"
-            )
+            raise ValueError("Missing TWITCH_CHANNELS environment variable in .env file")
 
         if not all([self.access_token, self.bot_nick, self.hf_token, self.model_id]):
             raise ValueError("Missing required environment variables in .env file")
 
         if not all([self.client_id, self.client_secret, self.refresh_token_value]):
-            print(
-                "[WARNING] Client ID, Secret ou Refresh Token ausentes. Renovação automática pode falhar."
-            )
+            print("[WARNING] Client ID, Secret ou Refresh Token ausentes. Renovação automática pode falhar.")
 
-        # Memória: Histórico das últimas 10 trocas (usuário + resposta)
-        self.conversation_history = []
-        self.max_history = 10
-
-        # Carrega o perfil de personalidade de um arquivo separado
         self.personality_profile = self.load_personality_profile()
-
         self.ws = None
         self.running = False
+
+        # Memória LangChain
+        self.memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True,
+            max_token_limit=1000
+        )
+        self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        self.vectorstore = None
+        self.db_path = "glorpinia_memory.db"
+        self.init_memory_db()
 
         # Valida e renova token se necessário antes de iniciar
         self.validate_and_refresh_token()
 
+    def init_memory_db(self):
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS memories
+                     (channel TEXT, user TEXT, vectorstore_path TEXT, last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        conn.commit()
+        conn.close()
+
     def load_personality_profile(self):
-        """Carrega o perfil de personalidade de um arquivo TXT separado."""
         try:
             with open("glorpinia_profile.txt", "r", encoding="utf-8") as f:
-                profile = f.read().strip()
-            print("[INFO] Perfil de personalidade carregado de glorpinia_profile.txt.")
-            return profile
+                return f.read().strip()
         except FileNotFoundError:
-            print(
-                "[WARNING] Arquivo glorpinia_profile.txt não encontrado. Usando perfil vazio."
-            )
-            return ""  # Perfil vazio se o arquivo não existir
+            print("[WARNING] Arquivo glorpinia_profile.txt não encontrado. Usando perfil vazio.")
+            return ""
 
     def validate_and_refresh_token(self):
-        """Valida o access token e renova se inválido ou expirado."""
-        # Valida o token atual
         if not self.validate_token():
             print("[INFO] Token inválido ou expirado. Renovando...")
             if self.refresh_token_value:
                 self.refresh_token()
             else:
-                raise ValueError(
-                    "Refresh token ausente no .env. Gere um novo token manualmente."
-                )
+                raise ValueError("Refresh token ausente no .env. Gere um novo token manualmente.")
 
     def validate_token(self):
-        """Valida o access token via endpoint /validate."""
         url = "https://id.twitch.tv/oauth2/validate"
         headers = {"Authorization": f"OAuth {self.access_token}"}
         try:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                print(
-                    f"[INFO] Token válido. Usuário: {data.get('login')}, Escopos: {data.get('scopes')}"
-                )
+                print(f"[INFO] Token válido. Usuário: {data.get('login')}, Escopos: {data.get('scopes')}")
                 return True
             else:
-                print(
-                    f"[ERROR] Validação falhou: {response.status_code} - {response.text}"
-                )
+                print(f"[ERROR] Validação falhou: {response.status_code} - {response.text}")
                 return False
         except requests.RequestException as e:
             print(f"[ERROR] Erro na validação: {e}")
@@ -106,122 +99,108 @@ class TwitchIRC:
             print("[ERROR] Sem refresh_token no .env. Gere um novo.")
             return None
 
-        # Salva tokens antigos para comparação
         old_access_token = self.access_token
-        old_refresh_token = (
-            self.refresh_token_value
-        )  # <-- Corrigido: usa o nome renomeado
+        old_refresh_token = self.refresh_token_value
 
         url = "https://id.twitch.tv/oauth2/token"
         data = {
             "grant_type": "refresh_token",
             "refresh_token": self.refresh_token_value,
             "client_id": self.client_id,
-            "client_secret": self.client_secret,
+            "client_secret": self.client_secret
         }
         try:
             response = requests.post(url, data=data, timeout=10)
             if response.status_code == 200:
                 new_tokens = response.json()
-                self.access_token = new_tokens["access_token"]  # Sem oauth:
-                new_refresh_token = new_tokens[
-                    "refresh_token"
-                ]  # Atualiza o refresh também
-                print(
-                    f"[INFO] Token renovado! Expira em {new_tokens['expires_in']}s. Novo token: {self.access_token[:10]}..."
-                )
+                self.access_token = new_tokens["access_token"]
+                new_refresh_token = new_tokens["refresh_token"]
+                print(f"[INFO] Token renovado! Expira em {new_tokens['expires_in']}s. Novo token: {self.access_token[:10]}...")
 
-                # Nova funcionalidade: Checa se tokens mudaram e atualiza .env se necessário
-                if (
-                    self.access_token != old_access_token
-                    or new_refresh_token != old_refresh_token
-                ):
-                    self.update_env_file(
-                        self.access_token, new_refresh_token
-                    )  # <-- Params corretos
-                else:
-                    print("[INFO] Tokens não mudaram, .env não atualizado.")
-
+                if self.access_token != old_access_token or new_refresh_token != old_refresh_token:
+                    self.update_env_file(self.access_token, new_refresh_token)
                 return self.access_token
             else:
-                print(
-                    f"[ERROR] Falha na renovação: {response.status_code} - {response.text}"
-                )
+                print(f"[ERROR] Falha na renovação: {response.status_code} - {response.text}")
                 return None
         except requests.RequestException as e:
             print(f"[ERROR] Erro na renovação: {e}")
             return None
 
     def update_env_file(self, new_access_token, new_refresh_token):
-        """Atualiza o arquivo .env com os novos tokens, removendo linhas antigas e adicionando novas."""
-        print(f"[DEBUG] Chamado update_env_file com access: {new_access_token[:10]}... e refresh: {new_refresh_token[:10]}...")
         try:
-            # Lê o arquivo .env atual
             with open(".env", "r", encoding="utf-8") as f:
                 lines = f.readlines()
 
-            # Remove linhas antigas de TWITCH_TOKEN e TWITCH_REFRESH_TOKEN
-            # (Usa strip() para ignorar espaços/extras)
-            lines = [
-                line
-                for line in lines
-                if not line.strip().startswith("TWITCH_TOKEN=")
-                and not line.strip().startswith("TWITCH_REFRESH_TOKEN=")
-            ]
+            lines = [line for line in lines if not line.strip().startswith("TWITCH_TOKEN=") and not line.strip().startswith("TWITCH_REFRESH_TOKEN=")]
+            lines = [line.rstrip('\r\n') + '\n' for line in lines if line.strip()]
 
-            # Limpa e garante \n em cada linha existente (remove \r se Windows)
-            lines = [line.rstrip("\r\n") + "\n" for line in lines if line.strip()]
-
-            # Adiciona as novas linhas no final
             lines.append(f"TWITCH_TOKEN=oauth:{new_access_token}\n")
             lines.append(f"TWITCH_REFRESH_TOKEN={new_refresh_token}\n")
-            lines.append("\n")  # Linha em branco no final para separar futuras edições
+            lines.append("\n")
 
-            # Escreve de volta no arquivo (usa 'w' para overwrite)
-            with open(
-                ".env", "w", encoding="utf-8", newline="\n"
-            ) as f:  # newline='\n' força LF (Unix-style, bom para .env)
+            with open(".env", "w", encoding="utf-8", newline='\n') as f:
                 f.writelines(lines)
 
             print("[INFO] Arquivo .env atualizado com novos tokens.")
-
-            # Debug: Relê e printa as últimas 3 linhas para verificar
-            with open(".env", "r", encoding="utf-8") as f:
-                all_lines = f.readlines()
-                print("[DEBUG] Últimas 3 linhas do .env após update:")
-                for i in range(max(0, len(all_lines) - 3), len(all_lines)):
-                    print(
-                        f"  Linha {i+1}: {repr(all_lines[i].strip())}"
-                    )  # repr() mostra exatos chars/espaços
-
         except Exception as e:
-            print(
-                f"[ERROR] Falha ao atualizar .env: {e}. Tokens renovados, mas .env não foi modificado."
-            )
+            print(f"[ERROR] Falha ao atualizar .env: {e}. Tokens renovados, mas .env não foi modificado.")
 
-    def get_hf_response(self, query):
+    def load_user_memory(self, channel, user):
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute("SELECT vectorstore_path FROM memories WHERE channel=? AND user=?", (channel, user))
+        result = c.fetchone()
+        conn.close()
+        if result:
+            path = result[0]
+            self.vectorstore = FAISS.load_local(path, self.embeddings, allow_dangerous_deserialization=True)
+        else:
+            self.vectorstore = None
+
+    def save_user_memory(self, channel, user, query, response):
+        doc = f"Usuário {user} em {channel}: {query} -> {response}"
+        if self.vectorstore is None:
+            self.vectorstore = FAISS.from_texts([doc], self.embeddings)
+        else:
+            self.vectorstore.add_texts([doc])
+        path = f"memory_{channel}_{user}.faiss"
+        self.vectorstore.save_local(path)
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO memories (channel, user, vectorstore_path) VALUES (?, ?, ?)",
+                  (channel, user, path))
+        conn.commit()
+        conn.close()
+
+    def get_hf_response(self, query, channel, author):
         API_URL = "https://router.huggingface.co/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.hf_token}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Authorization": f"Bearer {self.hf_token}", "Content-Type": "application/json"}
 
-        # Constrói histórico para memória (últimas trocas)
-        history_str = ""
-        if self.conversation_history:
-            history_str = (
-                "Histórico recente:\n"
-                + "\n".join(self.conversation_history[-self.max_history :])
-                + "\n"
-            )
+        # Carrega memória específica do usuário/canal (long-term)
+        self.load_user_memory(channel, author)
+        
+        # Adiciona mensagem atual ao short-term
+        self.memory.chat_memory.add_user_message(HumanMessage(content=query))
+        self.memory.chat_memory.add_ai_message(AIMessage(content=""))  # Placeholder; atualiza depois
 
-        # Prompt completo: Perfil de personalidade + histórico + query
+        # Recupera contexto relevante (short + long-term via RAG)
+        relevant_history = self.memory.load_memory_variables({})["chat_history"][-5:]  # Últimas 5 trocas
+        long_term_context = ""
+        if self.vectorstore:
+            retriever = self.vectorstore.as_retriever(search_kwargs={"k": 3})  # Top 3 chunks antigos
+            docs = retriever.invoke(query)
+            long_term_context = "\n".join([doc.page_content for doc in docs])
+
+        memory_context = f"Histórico recente: {' '.join([msg.content for msg in relevant_history])}\nContexto longo: {long_term_context}\n"
+
+        # Prompt completo: Perfil de personalidade + memória + query
         system_prompt = f"""Você é Glorpinia, uma garota gato alienígena da lua. Siga rigorosamente o perfil de personalidade abaixo para todas as respostas. Responda preferencialmente em português a não ser que o usuário interaja em inglês.
 
 Perfil de Personalidade:
 {self.personality_profile}
 
-{history_str}Agora responda à query do usuário de forma consistente com o histórico."""
+{memory_context}Agora responda à query do usuário de forma consistente com o histórico."""
 
         user_message = f"{system_prompt} Query: {query}"
         messages = [{"role": "user", "content": user_message}]
@@ -231,42 +210,39 @@ Perfil de Personalidade:
             "messages": messages,
             "max_tokens": 100,
             "temperature": 0.7,
-            "stream": False,
+            "stream": False
         }
-        print(
-            f"[DEBUG] Enviando para HF API (com memória e treinamento): {user_message[:100]}..."
-        )
+        print(f'[DEBUG] Enviando para HF API (com memória): {user_message[:100]}...')
 
         # Retry simples para erros transitórios (até 3 tentativas)
         for attempt in range(3):
             try:
-                response = requests.post(
-                    API_URL, headers=headers, json=payload, timeout=30
-                )
+                response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
                 response.raise_for_status()
                 result = response.json()
                 print(f"[DEBUG] Resposta bruta da HF API: {result}")
-
-                if "choices" in result and len(result["choices"]) > 0:
-                    generated = result["choices"][0]["message"]["content"].strip()
+                
+                if 'choices' in result and len(result['choices']) > 0:
+                    generated = result['choices'][0]['message']['content'].strip()
                     if generated:
-                        # Adiciona à memória: query do usuário + resposta
-                        self.conversation_history.append(
-                            f"Usuário: {query} | Glorpinia: {generated}"
-                        )
-                        # Limpa histórico antigo se exceder limite
-                        if len(self.conversation_history) > self.max_history:
-                            self.conversation_history = self.conversation_history[
-                                -self.max_history :
-                            ]
+                        # Atualiza memória short-term
+                        self.memory.chat_memory.add_ai_message(AIMessage(content=generated))
+                        # Salva para long-term
+                        self.save_user_memory(channel, author, query, generated)
                         return generated
                     else:
                         print("[DEBUG] Texto gerado vazio – fallback loading")
+                        # Atualiza com fallback
+                        self.memory.chat_memory.add_ai_message(AIMessage(content="glorp carregando cérebro . exe"))
+                        self.save_user_memory(channel, author, query, "glorp carregando cérebro . exe")
                         return "glorp carregando cérebro . exe"
                 else:
                     print("[DEBUG] Resultado inválido ou vazio – fallback loading")
-                    return "glorp carregando cérebro . exe"
-
+                    fallback = "glorp carregando cérebro . exe"
+                    self.memory.chat_memory.add_ai_message(AIMessage(content=fallback))
+                    self.save_user_memory(channel, author, query, fallback)
+                    return fallback
+                    
             except requests.RequestException as e:
                 print(f"[ERROR] Erro ao chamar HF API (tentativa {attempt + 1}): {e}")
                 if attempt < 2:  # Espera 2s antes de retry
@@ -274,11 +250,15 @@ Perfil de Personalidade:
                     continue
                 else:
                     print("[DEBUG] Todas tentativas falharam – fallback erm")
-                    return (
-                        "glorp sinal com a nave-mãe perdido"  # Fallback temático e fofo
-                    )
+                    fallback = "glorp sinal com a nave-mãe perdido"
+                    self.memory.chat_memory.add_ai_message(AIMessage(content=fallback))
+                    self.save_user_memory(channel, author, query, fallback)
+                    return fallback
 
-        return "glorp deu ruim"  # Fallback final
+        fallback = "glorp deu ruim"
+        self.memory.chat_memory.add_ai_message(AIMessage(content=fallback))
+        self.save_user_memory(channel, author, query, fallback)
+        return fallback
 
     def send_message(self, channel, message):
         if self.ws and self.ws.sock and self.ws.sock.connected:
@@ -286,9 +266,7 @@ Perfil de Personalidade:
             self.ws.send(full_msg)
             print(f"[SEND] {channel}: {message}")
         else:
-            print(
-                f"[ERROR] WebSocket não conectado. Não foi possível enviar: {message}"
-            )
+            print(f"[ERROR] WebSocket não conectado. Não foi possível enviar: {message}")
 
     def on_message(self, ws, message):
         print(f"[IRC] {message.strip()}")
@@ -303,11 +281,7 @@ Perfil de Personalidade:
             if len(parts) >= 3:
                 author_part = parts[1].split("!")[0]
                 content = parts[2].strip()
-                channel = (
-                    message.split("#")[1].split(" :")[0]
-                    if "#" in message
-                    else self.channels[0]
-                )
+                channel = message.split("#")[1].split(" :")[0] if "#" in message else self.channels[0]
 
                 print(f"[CHAT] {author_part}: {content}")
 
@@ -316,30 +290,22 @@ Perfil de Personalidade:
                     return
 
                 content_lower = content.lower()
-                query = (
-                    content_lower.replace("glorpinia", "", 1)
-                    .replace("@glorpinia", "", 1)
-                    .strip()
-                )
+                query = content_lower.replace("glorpinia", "", 1).replace("@glorpinia", "", 1).strip()
                 print(f"[DEBUG] Menção a glorpinia detectada: {content}")
                 print(f"[DEBUG] Query extraída para a IA: {query}")
 
                 if query:
-                    response = self.get_hf_response(query)
+                    response = self.get_hf_response(query, channel, author_part)
                     print(f"[DEBUG] Resposta da IA: {response[:50]}...")
-
-                    # Divide resposta se > 200 chars e envia com delay de 6s
+                    
+                    # Divide resposta se > 200 chars e envia com delay de 5s
                     if len(response) > 200:
-                        chunks = [
-                            response[i : i + 200] for i in range(0, len(response), 200)
-                        ]
+                        chunks = [response[i:i+200] for i in range(0, len(response), 200)]
                         for i, chunk in enumerate(chunks):
                             if i == 0:
                                 self.send_message(channel, f"@{author_part} {chunk}")
                             else:
-                                self.send_message(
-                                    channel, chunk
-                                )  # Sem @ nas continuações
+                                self.send_message(channel, chunk)  # Sem @ nas continuações
                             if i < len(chunks) - 1:  # Delay só entre chunks
                                 time.sleep(5)
                     else:
@@ -372,9 +338,7 @@ Perfil de Personalidade:
     def run(self):
         self.running = True
         try:
-            websocket.enableTrace(
-                True
-            )  # Para depuração detalhada (opcional, remova se quiser menos logs)
+            websocket.enableTrace(True)  # Para depuração detalhada (opcional, remova se quiser menos logs)
         except AttributeError:
             print("[WARNING] enableTrace não disponível; desabilitando trace.")
         self.ws = websocket.WebSocketApp(
@@ -382,10 +346,9 @@ Perfil de Personalidade:
             on_open=self.on_open,
             on_message=self.on_message,
             on_error=self.on_error,
-            on_close=self.on_close,
+            on_close=self.on_close
         )
         self.ws.run_forever()
-
 
 if __name__ == "__main__":
     bot = TwitchIRC()
