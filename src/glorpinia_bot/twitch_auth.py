@@ -1,0 +1,137 @@
+# src/glorpinia_bot/twitch_auth.py
+
+from dotenv import load_dotenv
+import os
+import requests
+
+class TwitchAuth:
+    def __init__(self):
+        load_dotenv()
+
+        self.access_token = os.getenv("TWITCH_TOKEN").replace("oauth:", "") if os.getenv("TWITCH_TOKEN") else None
+        self.refresh_token_value = os.getenv("TWITCH_REFRESH_TOKEN")
+        self.client_id = os.getenv("TWITCH_CLIENT_ID")
+        self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
+        self.bot_nick = os.getenv("TWITCH_BOT_NICK")
+        self.hf_token = os.getenv("HF_TOKEN_READ")  # Token de read pro bot
+        self.model_id = os.getenv("HF_MODEL_ID")
+
+        # Extrai canais
+        channels_str = os.getenv("TWITCH_CHANNELS")
+        if channels_str:
+            self.channels = [c.strip() for c in channels_str.split(",") if c.strip()]
+        else:
+            raise ValueError("Missing TWITCH_CHANNELS environment variable in .env file")
+
+        # Checks de vars requeridas
+        if not all([self.access_token, self.bot_nick, self.hf_token, self.model_id]):
+            raise ValueError("Missing required environment variables in .env file")
+
+        if not all([self.client_id, self.client_secret, self.refresh_token_value]):
+            print("[WARNING] Client ID, Secret ou Refresh Token ausentes. Renovação automática pode falhar.")
+
+        # Carrega perfil de personalidade
+        self.personality_profile = self.load_personality_profile()
+
+    def load_personality_profile(self):
+        """Carrega o perfil de personalidade de um arquivo TXT separado."""
+        try:
+            with open("glorpinia_profile.txt", "r", encoding="utf-8") as f:
+                profile = f.read().strip()
+            print("[INFO] Perfil de personalidade carregado de glorpinia_profile.txt.")
+            return profile
+        except FileNotFoundError:
+            print("[WARNING] Arquivo glorpinia_profile.txt não encontrado. Usando perfil vazio.")
+            return ""  # Perfil vazio se o arquivo não existir
+
+    def validate_and_refresh_token(self):
+        """Valida o access token e renova se inválido ou expirado."""
+        # Valida o token atual
+        if not self.validate_token():
+            print("[INFO] Token inválido ou expirado. Renovando...")
+            if self.refresh_token_value:
+                self.refresh_token()
+            else:
+                raise ValueError("Refresh token ausente no .env. Gere um novo token manualmente.")
+
+    def validate_token(self):
+        """Valida o access token via endpoint /validate."""
+        url = "https://id.twitch.tv/oauth2/validate"
+        headers = {"Authorization": f"OAuth {self.access_token}"}
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                print(f"[INFO] Token válido. Usuário: {data.get('login')}, Escopos: {data.get('scopes')}")
+                return True
+            else:
+                print(f"[ERROR] Validação falhou: {response.status_code} - {response.text}")
+                return False
+        except requests.RequestException as e:
+            print(f"[ERROR] Erro na validação: {e}")
+            return False
+
+    def refresh_token(self):
+        """Renova o access token usando o refresh token."""
+        if not self.refresh_token_value:
+            print("[ERROR] Sem refresh_token no .env. Gere um novo.")
+            return None
+
+        # Salva tokens antigos para comparação
+        old_access_token = self.access_token
+        old_refresh_token = self.refresh_token_value
+
+        url = "https://id.twitch.tv/oauth2/token"
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self.refresh_token_value,
+            "client_id": self.client_id,
+            "client_secret": self.client_secret
+        }
+        try:
+            response = requests.post(url, data=data, timeout=10)
+            if response.status_code == 200:
+                new_tokens = response.json()
+                self.access_token = new_tokens["access_token"]  # Sem oauth:
+                new_refresh_token = new_tokens["refresh_token"]  # Atualiza o refresh também
+                print(f"[INFO] Token renovado! Expira em {new_tokens['expires_in']}s. Novo token: {self.access_token[:10]}...")
+
+                # Checa se tokens mudaram e atualiza .env se necessário
+                if self.access_token != old_access_token or new_refresh_token != old_refresh_token:
+                    self.update_env_file(self.access_token, new_refresh_token)
+                else:
+                    print("[INFO] Tokens não mudaram, .env não atualizado.")
+
+                return self.access_token
+            else:
+                print(f"[ERROR] Falha na renovação: {response.status_code} - {response.text}")
+                return None
+        except requests.RequestException as e:
+            print(f"[ERROR] Erro na renovação: {e}")
+            return None
+
+    def update_env_file(self, new_access_token, new_refresh_token):
+        """Atualiza o arquivo .env com os novos tokens, removendo linhas antigas e adicionando novas."""
+        try:
+            # Lê o arquivo .env atual
+            with open(".env", "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            # Remove linhas antigas de TWITCH_TOKEN e TWITCH_REFRESH_TOKEN
+            lines = [line for line in lines if not line.strip().startswith("TWITCH_TOKEN=") and not line.strip().startswith("TWITCH_REFRESH_TOKEN=")]
+
+            # Limpa e garante \n em cada linha existente
+            lines = [line.rstrip('\r\n') + '\n' for line in lines if line.strip()]
+
+            # Adiciona as novas linhas no final
+            lines.append(f"TWITCH_TOKEN=oauth:{new_access_token}\n")
+            lines.append(f"TWITCH_REFRESH_TOKEN={new_refresh_token}\n")
+            lines.append("\n")  # Linha em branco no final
+
+            # Escreve de volta no arquivo
+            with open(".env", "w", encoding="utf-8", newline='\n') as f:
+                f.writelines(lines)
+
+            print("[INFO] Arquivo .env atualizado com novos tokens.")
+        except Exception as e:
+            print(f"[ERROR] Falha ao atualizar .env: {e}. Tokens renovados, mas .env não foi modificado.")

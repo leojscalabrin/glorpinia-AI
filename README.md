@@ -21,3 +21,6 @@ Obtain tokens from:
 - Twitch: [Twitch Token Generator](https://twitchtokengenerator.com) (scopes: `chat:read`, `chat:edit`)
 - Twitch Client ID/Secret: [Twitch Developer Console](https://dev.twitch.tv/console)
 - Hugging Face: [Hugging Face Tokens](https://huggingface.co/settings/tokens)
+
+### Execution
+python -m src.glorpinia_bot.main
