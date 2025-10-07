@@ -1,5 +1,3 @@
-# src/glorpinia_bot/hf_client.py
-
 import requests
 import time
 from langchain.memory import ConversationBufferMemory
