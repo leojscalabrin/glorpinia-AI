@@ -4,6 +4,7 @@ import logging
 import signal
 import sys
 import re
+from datetime import datetime
 from .twitch_auth import TwitchAuth
 from .hf_client import HFClient
 from .memory_manager import MemoryManager
@@ -12,8 +13,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name
 
 class TwitchIRC:
     def __init__(self):
-        # Instancia componentes modulares
-        self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
+        self.auth = TwitchAuth()
         self.hf_client = HFClient(
             hf_token=self.auth.hf_token,
             model_id=self.auth.model_id,
@@ -21,18 +21,21 @@ class TwitchIRC:
         )
         self.memory_mgr = MemoryManager()  # DB e embeddings
 
+        # Inicializa cache para log anti-spam
+        self.last_logged_content = {}  # Por canal
+
         self.ws = None
         self.running = False
 
         # Valida e renova token se necessário (usa auth)
         self.auth.validate_and_refresh_token()
 
-        # NOVO: Registra handler para shutdown gracioso
+        # Registra handler para shutdown
         signal.signal(signal.SIGINT, self._shutdown_handler)
         signal.signal(signal.SIGTERM, self._shutdown_handler)
 
-    # NOVO MÉTODO: Handler de shutdown com mensagem de despedida
     def _shutdown_handler(self, signum, frame):
+        """Handler para shutdown com mensagem de despedida."""
         print("[INFO] Sinal de shutdown recebido. Enviando mensagem de despedida...")
         goodbye_msg = "Bedge"
         for channel in self.auth.channels:
@@ -44,7 +47,7 @@ class TwitchIRC:
         sys.exit(0)
 
     def send_message(self, channel, message):
-        """Envia mensagem via WebSocket (igual ao original)."""
+        """Envia mensagem via WebSocket."""
         if self.ws and self.ws.sock and self.ws.sock.connected:
             full_msg = f"PRIVMSG #{channel} :{message}\r\n"
             self.ws.send(full_msg)
@@ -76,6 +79,37 @@ class TwitchIRC:
 
                 content_lower = content.lower()
 
+                # Log geral de todas mensagens (com anonimato, filtros e ignore bots)
+                ignored_bots = {
+                    'pokemoncommunitygame', 'fossabot', 'supibot', 
+                    'streamelements', 'nightbot'
+                }
+                if author_part.lower() in ignored_bots:
+                    print(f"[DEBUG] Ignorando bot conhecido: {author_part}")
+                else:
+                    # Filtros
+                    if (len(content) < 3 or
+                        not content or
+                        content.startswith('!') or
+                        re.search(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', content) or
+                        content == self.last_logged_content.get(channel, '')
+                    ):
+                        print(f"[DEBUG] Mensagem filtrada (ruído): {content}")
+                    else:
+                        anon_user = f"User{hash(author_part) % 1000}"
+                        
+                        # Atualiza cache anti-spam
+                        self.last_logged_content[channel] = content
+                        
+                        log_entry = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {channel} | {anon_user}: {content}\n"
+                        log_filename = f"chat_log_{datetime.now().strftime('%Y%m%d')}.txt"
+                        try:
+                            with open(log_filename, "a", encoding="utf-8") as f:
+                                f.write(log_entry)
+                            print(f"[DEBUG] Log geral salvo: {anon_user}: {content[:20]}...")
+                        except Exception as e:
+                            print(f"[ERROR] Falha no log geral: {e}")
+
                 if re.search(r'\bglorp\b', content_lower):
                     glorp_response = "glorp"
                     print(f"[DEBUG] 'glorp' (exato) detectado em {content}. Respondendo...")
@@ -88,12 +122,11 @@ class TwitchIRC:
                     print(f"[DEBUG] Query extraída para a IA: {query}")
 
                     if query:
-                        # Usa hf_client para resposta (integra memória via memory_mgr)
                         response = self.hf_client.get_response(
                             query=query,
                             channel=channel,
                             author=author_part,
-                            memory_mgr=self.memory_mgr  # Passa gerenciador pra load/save
+                            memory_mgr=self.memory_mgr
                         )
                         print(f"[DEBUG] Resposta da IA: {response[:50]}...")
                         
@@ -104,8 +137,8 @@ class TwitchIRC:
                                 if i == 0:
                                     self.send_message(channel, f"@{author_part} {chunk}")
                                 else:
-                                    self.send_message(channel, chunk)  # Sem @ nas continuações
-                                if i < len(chunks) - 1:  # Delay só entre chunks
+                                    self.send_message(channel, chunk)
+                                if i < len(chunks) - 1:
                                     time.sleep(5)
                         else:
                             self.send_message(channel, f"@{author_part} {response}")
@@ -121,15 +154,12 @@ class TwitchIRC:
 
     def on_open(self, ws):
         print("[OPEN] Conexão WebSocket aberta!")
-        # Autentica com o token atual (usa auth)
         ws.send(f"PASS oauth:{self.auth.access_token}\r\n")
         ws.send(f"NICK {self.auth.bot_nick}\r\n")
         print(f"[AUTH] Autenticando como {self.auth.bot_nick} com token...")
-        # Junta aos canais (usa auth.channels)
         for channel in self.auth.channels:
             ws.send(f"JOIN #{channel}\r\n")
             print(f"[JOIN] Tentando juntar ao canal: #{channel}")
-        # Envia mensagem inicial após 2s
         time.sleep(2)
         for channel in self.auth.channels:
             self.send_message(channel, "Wokege")
@@ -137,7 +167,7 @@ class TwitchIRC:
     def run(self):
         self.running = True
         try:
-            websocket.enableTrace(True)  # Para depuração detalhada (opcional)
+            websocket.enableTrace(True)
         except AttributeError:
             print("[WARNING] enableTrace não disponível; desabilitando trace.")
         self.ws = websocket.WebSocketApp(

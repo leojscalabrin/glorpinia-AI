@@ -11,7 +11,7 @@ class TwitchAuth:
         self.client_id = os.getenv("TWITCH_CLIENT_ID")
         self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
         self.bot_nick = os.getenv("TWITCH_BOT_NICK")
-        self.hf_token = os.getenv("HF_TOKEN_READ")  # Token de read pro bot
+        self.hf_token = os.getenv("HF_TOKEN_READ")
         self.model_id = os.getenv("HF_MODEL_ID")
 
         # Extrai canais
@@ -21,12 +21,15 @@ class TwitchAuth:
         else:
             raise ValueError("Missing TWITCH_CHANNELS environment variable in .env file")
 
-        # Checks de vars requeridas
+        # Checks de vars requeridas (presença básica)
         if not all([self.access_token, self.bot_nick, self.hf_token, self.model_id]):
             raise ValueError("Missing required environment variables in .env file")
 
+        # Warning só pra refresh
         if not all([self.client_id, self.client_secret, self.refresh_token_value]):
-            print("[WARNING] Client ID, Secret ou Refresh Token ausentes. Renovação automática pode falhar.")
+            self._refresh_warning = True  # Flag pra usar em refresh
+        else:
+            self._refresh_warning = False
 
         # Carrega perfil de personalidade
         self.personality_profile = self.load_personality_profile()
@@ -40,11 +43,13 @@ class TwitchAuth:
             return profile
         except FileNotFoundError:
             print("[WARNING] Arquivo glorpinia_profile.txt não encontrado. Usando perfil vazio.")
-            return ""  # Perfil vazio se o arquivo não existir
+            return ""
 
     def validate_and_refresh_token(self):
         """Valida o access token e renova se inválido ou expirado."""
-        # Valida o token atual
+        if self._refresh_warning:
+            print("[WARNING] Client ID, Secret ou Refresh Token ausentes. Renovação automática pode falhar.")
+        
         if not self.validate_token():
             print("[INFO] Token inválido ou expirado. Renovando...")
             if self.refresh_token_value:
@@ -75,7 +80,6 @@ class TwitchAuth:
             print("[ERROR] Sem refresh_token no .env. Gere um novo.")
             return None
 
-        # Salva tokens antigos para comparação
         old_access_token = self.access_token
         old_refresh_token = self.refresh_token_value
 
@@ -90,16 +94,12 @@ class TwitchAuth:
             response = requests.post(url, data=data, timeout=10)
             if response.status_code == 200:
                 new_tokens = response.json()
-                self.access_token = new_tokens["access_token"]  # Sem oauth:
-                new_refresh_token = new_tokens["refresh_token"]  # Atualiza o refresh também
+                self.access_token = new_tokens["access_token"]
+                new_refresh_token = new_tokens["refresh_token"]
                 print(f"[INFO] Token renovado! Expira em {new_tokens['expires_in']}s. Novo token: {self.access_token[:10]}...")
 
-                # Checa se tokens mudaram e atualiza .env se necessário
                 if self.access_token != old_access_token or new_refresh_token != old_refresh_token:
                     self.update_env_file(self.access_token, new_refresh_token)
-                else:
-                    print("[INFO] Tokens não mudaram, .env não atualizado.")
-
                 return self.access_token
             else:
                 print(f"[ERROR] Falha na renovação: {response.status_code} - {response.text}")
@@ -109,24 +109,18 @@ class TwitchAuth:
             return None
 
     def update_env_file(self, new_access_token, new_refresh_token):
-        """Atualiza o arquivo .env com os novos tokens, removendo linhas antigas e adicionando novas."""
+        """Atualiza o arquivo .env com os novos tokens."""
         try:
-            # Lê o arquivo .env atual
             with open(".env", "r", encoding="utf-8") as f:
                 lines = f.readlines()
 
-            # Remove linhas antigas de TWITCH_TOKEN e TWITCH_REFRESH_TOKEN
             lines = [line for line in lines if not line.strip().startswith("TWITCH_TOKEN=") and not line.strip().startswith("TWITCH_REFRESH_TOKEN=")]
-
-            # Limpa e garante \n em cada linha existente
             lines = [line.rstrip('\r\n') + '\n' for line in lines if line.strip()]
 
-            # Adiciona as novas linhas no final
             lines.append(f"TWITCH_TOKEN=oauth:{new_access_token}\n")
             lines.append(f"TWITCH_REFRESH_TOKEN={new_refresh_token}\n")
-            lines.append("\n")  # Linha em branco no final
+            lines.append("\n")
 
-            # Escreve de volta no arquivo
             with open(".env", "w", encoding="utf-8", newline='\n') as f:
                 f.writelines(lines)
 
