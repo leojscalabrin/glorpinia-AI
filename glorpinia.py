@@ -5,6 +5,8 @@ import websocket
 import time
 import logging
 import sqlite3
+import signal
+import sys
 from langchain.memory import ConversationBufferMemory
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -53,6 +55,10 @@ class TwitchIRC:
 
         # Valida e renova token se necessário antes de iniciar
         self.validate_and_refresh_token()
+        
+        # Registra handler para shutdown
+        signal.signal(signal.SIGINT, self._shutdown_handler)
+        signal.signal(signal.SIGTERM, self._shutdown_handler)
 
     def init_memory_db(self):
         conn = sqlite3.connect(self.db_path)
@@ -334,6 +340,16 @@ Perfil de Personalidade:
         time.sleep(2)
         for channel in self.channels:
             self.send_message(channel, "Wokege")
+            
+    def _shutdown_handler(self, signum, frame):
+        print("[INFO] Sinal de shutdown recebido. Enviando mensagem de despedida...")
+        goodbye_msg = "Bedge"
+        for channel in self.channels:
+            self.send_message(channel, goodbye_msg)
+            time.sleep(1)  # Delay de 1s por canal pra envio seguro
+        print("[INFO] Mensagem enviada. Encerrando...")
+        self.ws.close()
+        sys.exit(0)
 
     def run(self):
         self.running = True
