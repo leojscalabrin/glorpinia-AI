@@ -4,34 +4,54 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from peft import LoraConfig, get_peft_model, TaskType
 from trl import SFTTrainer
 from datasets import load_dataset
+from transformers import BitsAndBytesConfig
 
 # Configs
 model_name = "google/gemma-2-2b-it"
 dataset_path = "training_data.jsonl"
 output_dir = "./glorpinia-lora"
-hf_token = os.getenv("HF_TOKEN_WRITE")  # Opcional: Só pra push
+hf_token = os.getenv("HF_TOKEN_WRITE")
+max_seq_length = 512
 
 # Carrega dataset
 dataset = load_dataset("json", data_files=dataset_path, split="train")
 
-# Formata pro estilo Gemma
+# Formata e tokeniza
 def formatting_prompts_func(example):
     return f"### Instruction:\nComo Glorpinia, responda: {example['prompt']}\n\n### Response:\n{example['completion']}<|endoftext|>"
 
+# Aplica formatação
 dataset = dataset.map(lambda x: {"text": formatting_prompts_func(x)})
 
 # Tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(
+    model_name,
+    token=hf_token
+)
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
-# Model com quantização 4-bit
+# Tokeniza dataset com truncamento
+def tokenize_function(example):
+    return tokenizer(example["text"], truncation=True, max_length=max_seq_length, padding="max_length")
+
+dataset = dataset.map(tokenize_function, batched=True, remove_columns=["prompt", "completion", "text"])
+
+# Configuração de quantização 4-bit
+quant_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_use_double_quant=True
+)
+
+# Model com quantização
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
+    quantization_config=quant_config,
     device_map="cuda",
-    load_in_4bit=True,
-    torch_dtype=torch.bfloat16,
-    trust_remote_code=True
+    trust_remote_code=True,
+    token=hf_token
 )
 
 # LoRA config
@@ -54,7 +74,7 @@ training_args = TrainingArguments(
     logging_steps=10,
     save_steps=50,
     save_total_limit=2,
-    evaluation_strategy="no",
+    eval_strategy="no",
     report_to=None,
     fp16=True,
     optim="adamw_torch_fused",
@@ -64,14 +84,12 @@ training_args = TrainingArguments(
 # Trainer
 trainer = SFTTrainer(
     model=model,
-    tokenizer=tokenizer,
     train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=512,
     args=training_args,
-    packing=True
+    formatting_func=formatting_prompts_func
 )
 
+# Treina
 trainer.train()
 
 # Salva localmente
@@ -85,10 +103,10 @@ if hf_token:
 
 print(f"Modelo tunado salvo em {output_dir}!")
 
-# Teste local após treino
+# Teste local
 def test_model():
     print("\n[TESTE] Verificando modelo tunado...")
-    prompt = "Oi Glorpinia, me conte uma piada"
+    prompt = "Oi Glorpinia, como você está?"
     inputs = tokenizer(f"### Instruction:\nComo Glorpinia, responda: {prompt}\n\n### Response:\n", return_tensors="pt").to("cuda")
     outputs = model.generate(**inputs, max_new_tokens=100, do_sample=True, temperature=0.7)
     print(tokenizer.decode(outputs[0], skip_special_tokens=True))

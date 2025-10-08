@@ -4,7 +4,7 @@ Ensure you have Python 3.8+ installed. Then, run the following command to instal
 pip install python-dotenv requests websocket-client langchain langchain-community langchain-huggingface faiss-cpu
 
 for fine-tuning:
-pip install transformers datasets peft trl accelerate bitsandbytes
+pip install transformers datasets peft trl accelerate bitsandbytes hf_xet --upgrade
 pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 ### Environment Setup
