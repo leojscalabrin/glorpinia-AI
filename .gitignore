@@ -219,6 +219,7 @@ glorpinia-lora/
 *.safetensors
 __pycache__/
 *.pyc
+*.txt
 
 # IDE/DS Store
 .vscode/
