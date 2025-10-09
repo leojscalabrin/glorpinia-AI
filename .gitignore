@@ -206,7 +206,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-test.py
+
 
 # Dados sensíveis
 training_data.jsonl
@@ -220,6 +220,8 @@ glorpinia-lora/
 __pycache__/
 *.pyc
 *.txt
+test.py
+fine_tune.py
 
 # IDE/DS Store
 .vscode/

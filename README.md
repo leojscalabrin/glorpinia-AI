@@ -16,7 +16,6 @@ TWITCH_CLIENT_SECRET=your_client_Secret
 TWITCH_BOT_ID=twitch_user_ID
 TWITCH_CHANNELS=your_channel
 HF_TOKEN_READ=hf_read_token
-HF_TOKEN_WRITE=hf_write_token
 HF_MODEL_ID=your_model
 TWITCH_TOKEN=oauth:your_token_here
 TWITCH_REFRESH_TOKEN=your_refresh_token
