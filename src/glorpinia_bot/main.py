@@ -224,8 +224,12 @@ class TwitchIRC:
                 else:
                     print("[DEBUG] Query vazia após menção. Nenhuma resposta da IA.")
 
-            # Checa se é comando de toggle
-            if author_part.lower() in [nick.lower() for nick in self.admin_nicks]:
+            # Checa se é comando de toggle ou check
+            if content_lower.startswith("!toggle ") or content_lower == "!check":
+                if author_part.lower() not in [nick.lower() for nick in self.admin_nicks]:
+                    self.send_message(channel, f"@{author_part}, arnoldHalt comando apenas para os chegados")
+                    print(f"[DEBUG] Tentativa de comando por não-admin: {author_part}")
+                    return
                 if content_lower.startswith("!toggle "):
                     parts = content_lower.split(" ")
                     if len(parts) != 3 or parts[1] not in ["chat", "listen", "comment"] or parts[2] not in ["on", "off"]:
@@ -237,7 +241,7 @@ class TwitchIRC:
                         status_msg = "glorp pronta pra bater um papinho | Chat [ON]" if self.chat_enabled else "glorp a mimir | Chat [OFF]"
                     elif feature == "listen":
                         self.listen_enabled = (state == "on")
-                        status_msg = "glorp 📡 Sinal recebido | Listen [ON]" if self.listen_enabled else "glorp 📡Sinal interrompido | Listen [OFF]"
+                        status_msg = "glorp 📡 Sinal recebido | Listen [ON]" if self.listen_enabled else "glorp 📡Sinal interrompido | Chat [OFF]"
                     else:
                         self.comment_enabled = (state == "on")
                         status_msg = "PopNemo Comment [ON]" if self.comment_enabled else "Shush Comment [OFF]"
