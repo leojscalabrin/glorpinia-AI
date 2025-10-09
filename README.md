@@ -7,6 +7,9 @@ for fine-tuning:
 pip install transformers datasets peft trl accelerate bitsandbytes hf_xet --upgrade
 pip install torch --index-url https://download.pytorch.org/whl/cu121
 
+for stream listening
+pip install streamlink pydub openai-whisper
+
 ### Environment Setup
 Create a `.env` file in the project root with the following variables:
 
@@ -24,6 +27,15 @@ Obtain tokens from:
 - Twitch: [Twitch Token Generator](https://twitchtokengenerator.com) (scopes: `chat:read`, `chat:edit`)
 - Twitch Client ID/Secret: [Twitch Developer Console](https://dev.twitch.tv/console)
 - Hugging Face: [Hugging Face Tokens](https://huggingface.co/settings/tokens)
+
+### Features
+CHAT - She will answer on chat when mentioned based on her behavior (all interactions are saved for fine tuning)
+COMMENTS - Every 30 minutes she will make a commentary on the last messages of the chat (about 2 mins of chat) (default: off)
+LISTEN - Listens to the stream every 30 minutes and makes a commentary on chat (default: off) *NEEDS GPU
+
+Use !toggle [chat|listen|comment] [on/off] to toggle commands. (admin only)
+Use !check to check the commands status
+
 
 ### Execution
 python -m src.glorpinia_bot.main
