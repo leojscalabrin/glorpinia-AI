@@ -222,6 +222,7 @@ __pycache__/
 *.txt
 test.py
 fine_tune.py
+upload_to_hf.py
 
 # IDE/DS Store
 .vscode/
