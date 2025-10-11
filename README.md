@@ -1,14 +1,6 @@
 ## AI Assistant with Twitch Integration
 
-Ensure you have Python 3.8+ installed. Then, run the following command to install all dependencies:
-pip install python-dotenv requests websocket-client langchain langchain-community langchain-huggingface faiss-cpu
-
-for fine-tuning:
-pip install transformers datasets peft trl accelerate bitsandbytes hf_xet --upgrade
-pip install torch --index-url https://download.pytorch.org/whl/cu121
-
-for stream listening
-pip install streamlink pydub openai-whisper
+Ensure you have Python 3.8+ installed. Check requirements.txt for all dependencies
 
 ### Environment Setup
 Create a `.env` file in the project root with the following variables:

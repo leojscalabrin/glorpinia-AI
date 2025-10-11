@@ -143,6 +143,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.venv_gpu/
 
 # Spyder project settings
 .spyderproject
@@ -219,7 +220,6 @@ glorpinia-lora/
 *.safetensors
 __pycache__/
 *.pyc
-*.txt
 test.py
 fine_tune.py
 upload_to_hf.py
@@ -227,3 +227,8 @@ upload_to_hf.py
 # IDE/DS Store
 .vscode/
 .DS_Store
+
+# scripts for testing
+scripts
+*.exe
+*.bat

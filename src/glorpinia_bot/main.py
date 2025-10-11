@@ -1,15 +1,15 @@
-import websocket
 import time
 import logging
 import signal
 import sys
 import re
 import threading
+import os
 from datetime import datetime
 from collections import deque
 from .twitch_auth import TwitchAuth
-from .hf_client import HFClient
-from .memory_manager import MemoryManager
+# HFClient and MemoryManager are imported lazily inside TwitchIRC to allow
+# running in capture-only mode without pulling heavy ML dependencies.
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
@@ -17,12 +17,24 @@ class TwitchIRC:
     def __init__(self):
         # Instancia componentes modulares
         self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
-        self.hf_client = HFClient(
-            hf_token=self.auth.hf_token,
-            model_id=self.auth.model_id,
-            personality_profile=self.auth.personality_profile
-        )
-        self.memory_mgr = MemoryManager()  # DB e embeddings
+
+        # Support capture-only mode where we don't need HF client or embeddings.
+        self.capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
+        if self.capture_only:
+            print('[INFO] Running in capture-only mode; HFClient and MemoryManager will not be instantiated.')
+            self.hf_client = None
+            self.memory_mgr = None
+        else:
+            # Instantiate heavy components lazily when needed.
+            from .hf_client import HFClient
+            from .memory_manager import MemoryManager
+
+            self.hf_client = HFClient(
+                hf_token=self.auth.hf_token,
+                model_id=self.auth.model_id,
+                personality_profile=self.auth.personality_profile
+            )
+            self.memory_mgr = MemoryManager()  # DB e embeddings
 
         # Inicializa cache para log anti-spam
         self.last_logged_content = {}  # Por canal
@@ -47,7 +59,7 @@ class TwitchIRC:
         signal.signal(signal.SIGINT, self._shutdown_handler)
         signal.signal(signal.SIGTERM, self._shutdown_handler)
 
-        # Inicia thread para timer de comentários periódicos (se comment_enabled)
+    # Inicia thread para timer de comentários periódicos (se comment_enabled)
         self.comment_timer_running = True
         self.comment_thread = threading.Thread(target=self._periodic_comment_thread, daemon=True)
         self.comment_thread.start()
@@ -56,6 +68,8 @@ class TwitchIRC:
         self.audio_comment_running = True
         self.audio_comment_thread = threading.Thread(target=self._periodic_audio_comment_thread, daemon=True)
         self.audio_comment_thread.start()
+
+    # websocket is optional for capture-only mode; import at run-time
 
     def _periodic_comment_thread(self):
         """Thread em background: A cada 30 min, checa contexto e envia comentário se aplicável (se comment_enabled)."""
@@ -179,6 +193,15 @@ class TwitchIRC:
             if channel in self.recent_messages:
                 self.recent_messages[channel].append(msg_data)
 
+            # Capture-only mode: append sanitized record to training_data.jsonl and skip heavy model calls
+            capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
+            if capture_only:
+                try:
+                    self._append_training_record(channel, author_part, content, None)
+                except Exception as e:
+                    print(f"[ERROR] Falha ao salvar registro de captura: {e}")
+                return
+
             if author_part.lower() == self.auth.bot_nick.lower():
                 print(f"[DEBUG] Ignorando mensagem do próprio bot: {content}")
                 return
@@ -221,6 +244,12 @@ class TwitchIRC:
                             self.send_message(channel, f"@{author_part} {response}")
                     except Exception as e:
                         print(f"[ERROR] Falha ao gerar resposta da IA para {channel}: {e}")
+                    # Always try to save the interaction (bot_response may be missing on error)
+                    try:
+                        bot_resp = locals().get('response', None)
+                        self._append_training_record(channel, author_part, content, bot_resp)
+                    except Exception as ee:
+                        print(f"[ERROR] Falha ao salvar registro: {ee}")
                 else:
                     print("[DEBUG] Query vazia após menção. Nenhuma resposta da IA.")
 
@@ -256,6 +285,13 @@ class TwitchIRC:
         """Captura e transcreve áudio da stream por 'duration' segundos."""
         stream_url = f"https://twitch.tv/{channel}"
         try:
+            # Imports locais para dependências opcionais
+            try:
+                import streamlink
+            except Exception:
+                print("[WARNING] streamlink não instalado — transcrição desabilitada. Instale 'streamlink' para habilitar.")
+                return ""
+
             streams = streamlink.streams(stream_url)
             if "audio_only" in streams:
                 audio_stream = streams["audio_only"]
@@ -275,10 +311,29 @@ class TwitchIRC:
                         break
 
             # Converte pra WAV e transcreve
+            try:
+                from pydub import AudioSegment
+            except Exception:
+                print("[WARNING] pydub não instalado — transcrição desabilitada. Instale 'pydub' e suas dependências.")
+                return ""
+
             audio = AudioSegment.from_mp3(audio_file)
             wav_file = audio_file + ".wav"
             audio.export(wav_file, format="wav")
-            transcription = self.whisper_model.transcribe(wav_file)["text"]
+            try:
+                # Suporte a whisper local (openai-whisper) — se não presente, pula
+                if not hasattr(self, 'whisper_model') or self.whisper_model is None:
+                    try:
+                        import whisper
+                        self.whisper_model = whisper.load_model("small")
+                    except Exception:
+                        print("[WARNING] whisper não disponível — instale 'openai-whisper' para transcrição local.")
+                        return ""
+
+                transcription = self.whisper_model.transcribe(wav_file)["text"]
+            except Exception as e:
+                print(f"[ERROR] Falha na transcrição via whisper: {e}")
+                return ""
 
             # Limpa arquivos temp
             os.remove(audio_file)
@@ -288,6 +343,30 @@ class TwitchIRC:
         except Exception as e:
             print(f"[ERROR] Falha na transcrição para {channel}: {e}")
             return ""
+
+    def _append_training_record(self, channel, author, text, bot_response):
+        """Append a sanitized JSONL record to training_data.jsonl for later fine-tuning.
+
+        The record format is minimal and anonymized.
+        """
+        import json
+        from datetime import datetime
+        user_hash = f"u{abs(hash(author)) % 1000000}"
+        rec = {
+            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "channel": channel,
+            "user_hash": user_hash,
+            "text": text,
+            "bot_response": bot_response,
+            "source": "twitch"
+        }
+        file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'training_data.jsonl')
+        # Append safely
+        try:
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+        except Exception as e:
+            print(f"[ERROR] Could not append training record: {e}")
 
     def on_error(self, ws, error):
         print(f"[ERROR] WebSocket error: {error}")
@@ -310,10 +389,18 @@ class TwitchIRC:
 
     def run(self):
         self.running = True
+        # Import websocket lazily so capture-only mode can instantiate the bot without this dependency
+        try:
+            import websocket
+        except Exception:
+            print('[ERROR] websocket package not installed; run() cannot start the IRC client.')
+            return
+
         try:
             websocket.enableTrace(True)
         except AttributeError:
             print("[WARNING] enableTrace não disponível; desabilitando trace.")
+
         self.ws = websocket.WebSocketApp(
             "wss://irc-ws.chat.twitch.tv:443",
             on_open=self.on_open,

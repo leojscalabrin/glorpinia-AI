@@ -1,0 +1,23 @@
+# GPU-focused requirements (use on machine with CUDA 12.1 compatible drivers)
+python-dotenv
+requests
+websocket-client
+langchain==0.3.27
+langchain-core==0.3.79
+langchain-huggingface==0.3.1
+langchain-community==0.3.31
+transformers==4.42.0
+peft==0.17.1
+bitsandbytes==0.48.1
+accelerate
+safetensors
+sentence-transformers
+# Install a CUDA build of torch suitable to your GPU. Example for CUDA 12.1:
+# python -m pip install torch --index-url https://download.pytorch.org/whl/cu121
+faiss-cpu==1.12.0
+# Optional (stream listening / transcription)
+streamlink
+pydub
+openai-whisper
+# Notes:
+# - bitsandbytes may be tricky on Windows; if install fails, the code will fall back to non-quantized loading.

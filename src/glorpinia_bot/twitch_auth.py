@@ -21,9 +21,17 @@ class TwitchAuth:
         else:
             raise ValueError("Missing TWITCH_CHANNELS environment variable in .env file")
 
-        # Checks de vars requeridas (presença básica)
-        if not all([self.access_token, self.bot_nick, self.hf_token, self.model_id]):
-            raise ValueError("Missing required environment variables in .env file")
+        # Checks de vars requeridas (presença básica).
+        # When running in capture-only mode we do not require HF_TOKEN/HF_MODEL_ID
+        # because we won't call the model. Capture-only can be enabled with
+        # GLORPINIA_CAPTURE_ONLY=1.
+        capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
+        if capture_only:
+            if not all([self.access_token, self.bot_nick]):
+                raise ValueError("Missing required Twitch environment variables (TWITCH_TOKEN, TWITCH_BOT_NICK) in .env file")
+        else:
+            if not all([self.access_token, self.bot_nick, self.hf_token, self.model_id]):
+                raise ValueError("Missing required environment variables in .env file")
 
         # Warning só pra refresh
         if not all([self.client_id, self.client_secret, self.refresh_token_value]):

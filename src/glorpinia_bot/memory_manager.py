@@ -1,12 +1,26 @@
 import sqlite3
 import os
 from datetime import datetime
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
+import logging
+
+# Imports opcionais (langchain-huggingface / langchain-community podem ter nomes/versões diferentes)
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+except Exception:
+    HuggingFaceEmbeddings = None
+
+try:
+    from langchain_community.vectorstores import FAISS
+except Exception:
+    FAISS = None
 
 class MemoryManager:
     def __init__(self, db_path="glorpinia_memory.db"):
         self.db_path = db_path
+        if HuggingFaceEmbeddings is None:
+            logging.error("langchain_huggingface não disponível. Instale 'langchain-huggingface' ou verifique a versão.")
+            raise ImportError("HuggingFaceEmbeddings não disponível — instale 'langchain-huggingface'.")
+
         self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         self.vectorstore = None  # Será setado por load_user_memory
         self.init_memory_db()
