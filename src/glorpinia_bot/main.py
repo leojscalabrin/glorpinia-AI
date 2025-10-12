@@ -20,8 +20,16 @@ class TwitchIRC:
 
         # Support capture-only mode where we don't need HF client or embeddings.
         self.capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
+        # Skip loading the ML model entirely for quick import/startup checks or CI
+        self.skip_model_load = os.environ.get('GLORPINIA_SKIP_MODEL_LOAD') == '1'
+
         if self.capture_only:
             print('[INFO] Running in capture-only mode; HFClient and MemoryManager will not be instantiated.')
+            self.hf_client = None
+            self.memory_mgr = None
+        elif self.skip_model_load:
+            print('[INFO] GLORPINIA_SKIP_MODEL_LOAD=1 set; skipping HFClient and MemoryManager instantiation.')
+            # Keep attributes present but don't load heavy ML deps.
             self.hf_client = None
             self.memory_mgr = None
         else:
@@ -164,7 +172,7 @@ class TwitchIRC:
 
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa hf_client e memory_mgr)."""
-        print(f"[IRC] {message.strip()}")
+        print(f"[IRC] RAW: {message.strip()}")
         if message.startswith("PING"):
             ws.send("PONG :tmi.twitch.tv\r\n")
             print("[PONG] Enviado para manter conexão viva.")
@@ -180,8 +188,14 @@ class TwitchIRC:
             content = parts[2].strip()
             channel = message.split("#")[1].split(" :")[0] if "#" in message else self.auth.channels[0]
 
-            print(f"[CHAT] {author_part}: {content}")
+            print(f"[CHAT] Parsed - author={author_part}, channel={channel}, content={content}")
+            # Extra debug: recent messages snapshot
+            try:
+                print(f"[DEBUG] recent_messages_count={len(self.recent_messages.get(channel, []))}")
+            except Exception:
+                pass
             content_lower = content.lower()
+            print(f"[DEBUG] content_lower='{content_lower}'")
 
             # Adiciona TODAS mensagens recentes ao deque (pra contexto do timer)
             anon_author = f"User{hash(author_part) % 1000}"
@@ -221,14 +235,25 @@ class TwitchIRC:
                 print(f"[DEBUG] Query extraída para a IA: {query}")
 
                 if query:
+                    # If HFClient wasn't instantiated (skip or capture-only), skip generation gracefully.
+                    if self.hf_client is None:
+                        print('[INFO] HFClient not available (capture-only or skip-model-load); skipping generation.')
+                        try:
+                            # Still attempt to log the interaction for later fine-tuning
+                            self._append_training_record(channel, author_part, content, None)
+                        except Exception as ee:
+                            print(f"[ERROR] Falha ao salvar registro: {ee}")
+                        return
+
                     try:
+                        print(f"[DEBUG] Calling HFClient.get_response with query='{query[:120]}'")
                         response = self.hf_client.get_response(
                             query=query,
                             channel=channel,
                             author=author_part,
                             memory_mgr=self.memory_mgr
                         )
-                        print(f"[DEBUG] Resposta da IA: {response[:50]}...")
+                        print(f"[DEBUG] Resposta da IA (len={len(response) if response else 0}): {str(response)[:120]}")
                         
                         # Divide resposta se > 333 chars e envia com delay de 5s
                         if len(response) > 333:
