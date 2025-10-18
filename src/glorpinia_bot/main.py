@@ -1,10 +1,14 @@
+import os
+# os.environ['GLORPINIA_SKIP_MODEL_LOAD'] = '1'
+os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
+os.environ['GLORPINIA_ALLOW_NO_LANGCHAIN'] = '1'
+
 import time
 import logging
 import signal
 import sys
 import re
 import threading
-import os
 from datetime import datetime
 from collections import deque
 from .twitch_auth import TwitchAuth
@@ -46,6 +50,7 @@ class TwitchIRC:
 
         # Inicializa cache para log anti-spam
         self.last_logged_content = {}  # Por canal
+        self.processed_message_ids = deque(maxlen=500) # Armazena IDs de mensagens processadas para deduplicação
 
         # Armazenamento de mensagens recentes por canal (deque com timestamp)
         self.recent_messages = {channel: deque(maxlen=100) for channel in self.auth.channels}  # Limite de 100 msgs por canal
@@ -179,6 +184,7 @@ class TwitchIRC:
             return
 
         if "PRIVMSG" in message:
+
             # Extrai autor e conteúdo da mensagem IRC
             parts = message.split(":", 2)
             if len(parts) < 3:
@@ -207,6 +213,13 @@ class TwitchIRC:
             if channel in self.recent_messages:
                 self.recent_messages[channel].append(msg_data)
 
+            # SIMULAÇÃO DE MENSAGEM DUPLICADA PARA TESTE
+            if content == "!test_duplicate":
+                print("[DEBUG] Simulando mensagem duplicada para teste...")
+                # Simula o recebimento da mesma mensagem novamente
+                self.on_message(ws, message)
+                return
+
             # Capture-only mode: append sanitized record to training_data.jsonl and skip heavy model calls
             capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
             if capture_only:
@@ -220,221 +233,120 @@ class TwitchIRC:
                 print(f"[DEBUG] Ignorando mensagem do próprio bot: {content}")
                 return
 
-            # Check para palavra EXATA "glorp"
-            if re.search(r'\bglorp\b', content_lower):
-                glorp_response = "glorp"
-                print(f"[DEBUG] 'glorp' (exato) detectado em {content}. Respondendo...")
-                self.send_message(channel, glorp_response)
+            # Gera um ID único para a mensagem para deduplicação (autor, canal, conteúdo)
+            # Isso ajuda a evitar processamento duplicado se a mesma mensagem for recebida duas vezes em um curto período
+            unique_message_identifier = f"{author_part}-{channel}-{content}"
+            message_hash = hash(unique_message_identifier)
 
-            # Check para menção ao bot (queries IA, só se chat_enabled)
-            bot_nick_lower = self.auth.bot_nick.lower()
-            print(f"[DEBUG] Verificando menção: content_lower='{content_lower}', bot_nick='{bot_nick_lower}', chat_enabled={self.chat_enabled}")
-            if self.chat_enabled and re.search(r'\b@?' + re.escape(bot_nick_lower) + r'\b', content_lower):
-                print(f"[DEBUG] Menção a {self.auth.bot_nick} detectada: {content}")
-                query = re.sub(r'\b@?' + re.escape(bot_nick_lower) + r'\b', '', content_lower).strip()
-                print(f"[DEBUG] Query extraída para a IA: {query}")
+            if message_hash in self.processed_message_ids:
+                print(f"[INFO] Mensagem duplicada detectada e ignorada: {content}")
+                return
+            self.processed_message_ids.append(message_hash)
+            print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
 
-                if query:
-                    # If HFClient wasn't instantiated (skip or capture-only), skip generation gracefully.
-                    if self.hf_client is None:
-                        print('[INFO] HFClient not available (capture-only or skip-model-load); skipping generation.')
-                        try:
-                            # Still attempt to log the interaction for later fine-tuning
-                            self._append_training_record(channel, author_part, content, None)
-                        except Exception as ee:
-                            print(f"[ERROR] Falha ao salvar registro: {ee}")
-                        return
+            # Processamento de comandos de admin (sempre ativo)
+            if author_part.lower() in self.admin_nicks and content.startswith("!glorpinia"):
+                self.handle_admin_command(content, channel)
+                return
 
-                    try:
-                        print(f"[DEBUG] Calling HFClient.get_response with query='{query[:120]}'")
-                        response = self.hf_client.get_response(
-                            query=query,
-                            channel=channel,
-                            author=author_part,
-                            memory_mgr=self.memory_mgr
-                        )
-                        print(f"[DEBUG] Resposta da IA (len={len(response) if response else 0}): {str(response)[:120]}")
-                        
-                        # Divide resposta se > 333 chars e envia com delay de 5s
-                        if len(response) > 333:
-                            chunks = [response[i:i+333] for i in range(0, len(response), 333)]
-                            for i, chunk in enumerate(chunks):
-                                if i == 0:
-                                    self.send_message(channel, f"@{author_part} {chunk}")
-                                else:
-                                    self.send_message(channel, chunk)
-                                if i < len(chunks) - 1:
-                                    time.sleep(5)
-                        else:
-                            self.send_message(channel, f"@{author_part} {response}")
-                    except Exception as e:
-                        print(f"[ERROR] Falha ao gerar resposta da IA para {channel}: {e}")
-                    # Always try to save the interaction (bot_response may be missing on error)
-                    try:
-                        bot_resp = locals().get('response', None)
-                        self._append_training_record(channel, author_part, content, bot_resp)
-                    except Exception as ee:
-                        print(f"[ERROR] Falha ao salvar registro: {ee}")
-                else:
-                    print("[DEBUG] Query vazia após menção. Nenhuma resposta da IA.")
+            # Processamento de chat geral (respostas a menções)
+            if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
+                print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
+                try:
+                    response = self.hf_client.get_response(content, channel, author_part, self.memory_mgr)
+                    if response:
+                        self.send_message(channel, response)
+                except Exception as e:
+                    print(f"[ERROR] Falha ao gerar resposta: {e}")
 
-            # Checa se é comando de toggle ou check
-            if content_lower.startswith("!toggle ") or content_lower == "!check":
-                if author_part.lower() not in [nick.lower() for nick in self.admin_nicks]:
-                    self.send_message(channel, f"@{author_part}, arnoldHalt comando apenas para os chegados")
-                    print(f"[DEBUG] Tentativa de comando por não-admin: {author_part}")
-                    return
-                if content_lower.startswith("!toggle "):
-                    parts = content_lower.split(" ")
-                    if len(parts) != 3 or parts[1] not in ["chat", "listen", "comment"] or parts[2] not in ["on", "off"]:
-                        self.send_message(channel, "glorp use !toggle [chat|listen|comment] [on/off]")
-                        return
-                    feature, state = parts[1], parts[2]
-                    if feature == "chat":
-                        self.chat_enabled = (state == "on")
-                        status_msg = "glorp pronta pra bater um papinho | Chat [ON]" if self.chat_enabled else "glorp a mimir | Chat [OFF]"
-                    elif feature == "listen":
-                        self.listen_enabled = (state == "on")
-                        status_msg = "glorp 📡 Sinal recebido | Listen [ON]" if self.listen_enabled else "glorp 📡Sinal interrompido | Chat [OFF]"
-                    else:
-                        self.comment_enabled = (state == "on")
-                        status_msg = "PopNemo Comment [ON]" if self.comment_enabled else "Shush Comment [OFF]"
-                    self.send_message(channel, status_msg)
-                    print(f"[DEBUG] {feature.capitalize()} toggled {state} por {author_part}")
-                elif content_lower == "!check":
-                    status = f"glorp chat[{ 'ON' if self.chat_enabled else 'OFF' }] | listen [{ 'ON' if self.listen_enabled else 'OFF' }] | comment [{ 'ON' if self.comment_enabled else 'OFF' }]"
-                    self.send_message(channel, status)
-                    print(f"[DEBUG] Status check por {author_part}")
-
-    def _transcribe_stream(self, channel, duration=60):
-        """Captura e transcreve áudio da stream por 'duration' segundos."""
-        stream_url = f"https://twitch.tv/{channel}"
-        try:
-            # Imports locais para dependências opcionais
-            try:
-                import streamlink
-            except Exception:
-                print("[WARNING] streamlink não instalado — transcrição desabilitada. Instale 'streamlink' para habilitar.")
-                return ""
-
-            streams = streamlink.streams(stream_url)
-            if "audio_only" in streams:
-                audio_stream = streams["audio_only"]
-            elif "worst" in streams:
-                audio_stream = streams["worst"]
-            else:
-                print(f"[ERROR] Nenhum stream encontrado para {channel}")
-                return ""
-
-            # Captura áudio temporariamente
-            audio_file = f"temp_audio_{channel}.mp3"
-            with open(audio_file, "wb") as f:
-                start_time = time.time()
-                for chunk in audio_stream.open():
-                    f.write(chunk)
-                    if time.time() - start_time > duration:
-                        break
-
-            # Converte pra WAV e transcreve
-            try:
-                from pydub import AudioSegment
-            except Exception:
-                print("[WARNING] pydub não instalado — transcrição desabilitada. Instale 'pydub' e suas dependências.")
-                return ""
-
-            audio = AudioSegment.from_mp3(audio_file)
-            wav_file = audio_file + ".wav"
-            audio.export(wav_file, format="wav")
-            try:
-                # Suporte a whisper local (openai-whisper) — se não presente, pula
-                if not hasattr(self, 'whisper_model') or self.whisper_model is None:
-                    try:
-                        import whisper
-                        self.whisper_model = whisper.load_model("small")
-                    except Exception:
-                        print("[WARNING] whisper não disponível — instale 'openai-whisper' para transcrição local.")
-                        return ""
-
-                transcription = self.whisper_model.transcribe(wav_file)["text"]
-            except Exception as e:
-                print(f"[ERROR] Falha na transcrição via whisper: {e}")
-                return ""
-
-            # Limpa arquivos temp
-            os.remove(audio_file)
-            os.remove(wav_file)
-
-            return transcription
-        except Exception as e:
-            print(f"[ERROR] Falha na transcrição para {channel}: {e}")
-            return ""
-
-    def _append_training_record(self, channel, author, text, bot_response):
-        """Append a sanitized JSONL record to training_data.jsonl for later fine-tuning.
-
-        The record format is minimal and anonymized.
-        """
-        import json
-        from datetime import datetime
-        user_hash = f"u{abs(hash(author)) % 1000000}"
-        rec = {
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+    def _append_training_record(self, channel, author, user_message, bot_response):
+        """Salva um registro de interação em formato JSONL para futuro treinamento do modelo."""
+        record = {
+            "timestamp": datetime.utcnow().isoformat(),
             "channel": channel,
-            "user_hash": user_hash,
-            "text": text,
-            "bot_response": bot_response,
-            "source": "twitch"
+            "author": author,
+            "user_message": user_message,
+            "bot_response": bot_response
         }
-        file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'training_data.jsonl')
-        # Append safely
         try:
-            with open(file_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+            with open("training_data.jsonl", "a", encoding="utf-8") as f:
+                f.write(f"{str(record)}\n")
+            
+            # Log com menos frequência para evitar spam
+            last_log_time = self.last_logged_content.get(channel, 0)
+            if time.time() - last_log_time > 60:
+                print(f"[INFO] Registro de treinamento salvo para a mensagem: {user_message[:30]}...")
+                self.last_logged_content[channel] = time.time()
         except Exception as e:
-            print(f"[ERROR] Could not append training record: {e}")
+            print(f"[ERROR] Falha ao escrever no arquivo de treinamento: {e}")
 
-    def on_error(self, ws, error):
-        print(f"[ERROR] WebSocket error: {error}")
+    def handle_admin_command(self, command, channel):
+        """Processa comandos de admin (ex: !glorpinia chat on/off)."""
+        parts = command.split()
+        if len(parts) < 3:
+            self.send_message(channel, "Comando inválido. Use: !glorpinia <feature> <on|off>")
+            return
 
-    def on_close(self, ws, close_status_code, close_msg):
-        print(f"[CLOSE] Conexão fechada: {close_status_code} - {close_msg}")
-        self.running = False
+        feature = parts[1].lower()
+        state = parts[2].lower()
+
+        if feature == "chat":
+            self.chat_enabled = (state == "on")
+            status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
+            self.send_message(channel, f"O modo CHAT foi {status}.")
+        elif feature == "listen":
+            self.listen_enabled = (state == "on")
+            status = "ATIVADO" if self.listen_enabled else "DESATIVADO"
+            self.send_message(channel, f"O modo LISTEN foi {status}.")
+        elif feature == "comment":
+            self.comment_enabled = (state == "on")
+            status = "ATIVADO" if self.comment_enabled else "DESATIVADO"
+            self.send_message(channel, f"O modo COMMENT foi {status}.")
+        else:
+            self.send_message(channel, f"Funcionalidade desconhecida: {feature}")
+
+    def run(self):
+        """Inicia a conexão WebSocket e o loop de mensagens."""
+        import websocket
+
+        self.running = True
+        while self.running:
+            try:
+                self.ws = websocket.WebSocketApp(
+                    "wss://irc-ws.chat.twitch.tv:443",
+                    on_message=self.on_message,
+                    on_error=self.on_error,
+                    on_close=self.on_close,
+                    on_open=self.on_open
+                )
+                self.ws.run_forever()
+            except Exception as e:
+                print(f"[ERROR] WebSocket encontrou um erro: {e}")
+                print("[INFO] Tentando reconectar em 10 segundos...")
+                time.sleep(10)
 
     def on_open(self, ws):
-        print("[OPEN] Conexão WebSocket aberta!")
-        ws.send(f"PASS oauth:{self.auth.access_token}\r\n")
+        """Handler para quando a conexão WebSocket é aberta."""
+        token_for_send = self.auth.access_token
+        ws.send(f"PASS oauth:{token_for_send}\r\n")
         ws.send(f"NICK {self.auth.bot_nick}\r\n")
         print(f"[AUTH] Autenticando como {self.auth.bot_nick} com token...")
         for channel in self.auth.channels:
             ws.send(f"JOIN #{channel}\r\n")
             print(f"[JOIN] Tentando juntar ao canal: #{channel}")
-        time.sleep(2)
-        for channel in self.auth.channels:
+            time.sleep(2) # Adiciona um delay de 2s entre joins
             self.send_message(channel, "Wokege")
 
-    def run(self):
-        self.running = True
-        # Import websocket lazily so capture-only mode can instantiate the bot without this dependency
-        try:
-            import websocket
-        except Exception:
-            print('[ERROR] websocket package not installed; run() cannot start the IRC client.')
-            return
+    def on_error(self, ws, error):
+        """Handler para erros do WebSocket."""
+        print(f"[ERROR] WebSocket error: {error}")
 
-        try:
-            websocket.enableTrace(True)
-        except AttributeError:
-            print("[WARNING] enableTrace não disponível; desabilitando trace.")
+    def on_close(self, ws, close_status_code, close_msg):
+        """Handler para quando a conexão WebSocket é fechada."""
+        print(f"[INFO] Conexão WebSocket fechada. Código: {close_status_code}, Msg: {close_msg}")
 
-        self.ws = websocket.WebSocketApp(
-            "wss://irc-ws.chat.twitch.tv:443",
-            on_open=self.on_open,
-            on_message=self.on_message,
-            on_error=self.on_error,
-            on_close=self.on_close
-        )
-        self.ws.run_forever()
 
 if __name__ == "__main__":
     bot = TwitchIRC()
     bot.run()
+

@@ -1,21 +1,14 @@
-# Core requirements for Glorpinia bot (CPU-friendly)
-python-dotenv
-requests
-websocket-client
-langchain==0.3.27
-langchain-core==0.3.79
-langchain-huggingface==0.3.1
-langchain-community==0.3.31
-transformers>=4.35.0,<5.0.0
-peft==0.17.1
+twitchio
+huggingface_hub
+torch
+transformers
 accelerate
-safetensors
-sentence-transformers
-faiss-cpu==1.12.0
-# Optional (stream listening / transcription)
-streamlink
-pydub
-openai-whisper
-# Notes:
-# - If you plan to fine-tune or load large tuned models with quantization on GPU, use requirements-gpu.txt
-# - pydub requires ffmpeg on PATH (install separately)
+websocket-client
+
+
+python-dotenv
+
+
+langchain
+langchain-core
+

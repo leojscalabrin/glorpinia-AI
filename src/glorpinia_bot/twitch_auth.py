@@ -25,7 +25,7 @@ class TwitchAuth:
         # When running in capture-only mode we do not require HF_TOKEN/HF_MODEL_ID
         # because we won't call the model. Capture-only can be enabled with
         # GLORPINIA_CAPTURE_ONLY=1.
-        capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
+        capture_only = os.environ.get("GLORPINIA_CAPTURE_ONLY") == "1"
         if capture_only:
             if not all([self.access_token, self.bot_nick]):
                 raise ValueError("Missing required Twitch environment variables (TWITCH_TOKEN, TWITCH_BOT_NICK) in .env file")
@@ -43,9 +43,10 @@ class TwitchAuth:
         self.personality_profile = self.load_personality_profile()
 
     def load_personality_profile(self):
-        """Carrega o perfil de personalidade de um arquivo TXT separado."""
         try:
-            with open("glorpinia_profile.txt", "r", encoding="utf-8") as f:
+            # Path relativo: assume glorpinia_profile.txt na root, e twitch_auth.py em src/glorpinia_bot/
+            profile_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'glorpinia_profile.txt'))
+            with open(profile_path, "r", encoding="utf-8") as f:
                 profile = f.read().strip()
             print("[INFO] Perfil de personalidade carregado de glorpinia_profile.txt.")
             return profile
@@ -123,7 +124,7 @@ class TwitchAuth:
                 lines = f.readlines()
 
             lines = [line for line in lines if not line.strip().startswith("TWITCH_TOKEN=") and not line.strip().startswith("TWITCH_REFRESH_TOKEN=")]
-            lines = [line.rstrip('\r\n') + '\n' for line in lines if line.strip()]
+            lines = [line.rstrip("\r\n") + "\n" for line in lines if line.strip()]
 
             lines.append(f"TWITCH_TOKEN=oauth:{new_access_token}\n")
             lines.append(f"TWITCH_REFRESH_TOKEN={new_refresh_token}\n")
@@ -135,3 +136,4 @@ class TwitchAuth:
             print("[INFO] Arquivo .env atualizado com novos tokens.")
         except Exception as e:
             print(f"[ERROR] Falha ao atualizar .env: {e}. Tokens renovados, mas .env não foi modificado.")
+
