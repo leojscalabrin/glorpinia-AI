@@ -7,7 +7,9 @@ from langchain_community.vectorstores import FAISS
 
 # Configs
 db_path = "glorpinia_memory.db"
-output_file = "training_data.jsonl"
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+output_file = f"exported_memory_{timestamp}.jsonl"
+
 embeddings_model = "sentence-transformers/all-MiniLM-L6-v2"
 
 # Carrega embeddings

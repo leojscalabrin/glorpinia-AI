@@ -232,3 +232,4 @@ upload_to_hf.py
 scripts
 *.exe
 *.bat
+local_test_chat.py
