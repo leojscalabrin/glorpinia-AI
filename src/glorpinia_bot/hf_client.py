@@ -69,7 +69,7 @@ class HFClient:
         self.hf_token = hf_token
         self.model_id = model_id
         self.personality_profile = personality_profile
-        if os.environ.get("GLORPINIA_SKIP_MODEL_LOAD") == "1": # Corrigido para "1"
+        if os.environ.get("GLORPINIA_SKIP_MODEL_LOAD") == "0":
             print("[INFO] GLORPINIA_SKIP_MODEL_LOAD=1 — skipping model load (smoke test mode)")
             self.memory = None
             self.model = None
@@ -125,7 +125,6 @@ class HFClient:
 
         if not base_model_name_or_path:
             # Fallback to a known base model if adapter config doesn't specify one
-            # This is a placeholder, user should specify their base model if needed
             base_model_name_or_path = "mistralai/Mistral-7B-v0.1" # Example base model
             print(f"[WARNING] Base model not found in adapter config for {self.model_id}. Using default: {base_model_name_or_path}")
 
@@ -192,36 +191,30 @@ class HFClient:
         memory_mgr.load_user_memory(channel, author)
         vectorstore = memory_mgr.vectorstore
         
-        # OBTENÇÃO DA TAG DE MENÇÃO
-        mention_tag = f"@{author}, "
-
-        # Adicionar input do usuário ANTES de gerar a resposta
         self.memory.chat_memory.add_user_message(HumanMessage(content=query))
+        self.memory.chat_memory.add_ai_message(AIMessage(content=""))
         
-        # Usa o histórico completo (com a nova mensagem)
         relevant_history = self.memory.load_memory_variables({})["chat_history"][-5:]
-        
-        # Formatando o histórico recente de forma legível para o LLM
-        history_str = "\n".join([f"{'Humano' if isinstance(msg, HumanMessage) else 'Glorpinia'}: {msg.content}" for msg in relevant_history])
-        
         long_term_context = ""
         if vectorstore:
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
             docs = retriever.invoke(query)
             long_term_context = "\n".join([doc.page_content for doc in docs])
 
-        memory_context = f"**HISTÓRICO DA CONVERSA:**\n{history_str}\n\n**CONTEXTO LONGO (se houver):**\n{long_term_context}\n"
+        memory_context = f"Histórico recente: {' '.join([msg.content for msg in relevant_history])}\nContexto longo: {long_term_context}\n"
 
         system_prompt = f'''Você é Glorpinia, uma garota gato alienígena da lua. Siga rigorosamente o perfil de personalidade abaixo para todas as respostas. Responda preferencialmente em português a não ser que o usuário interaja em inglês.
 
 Perfil de Personalidade:
 {self.personality_profile}
 
-{memory_context}Agora responda à query do usuário de forma consistente com o histórico. Sua resposta DEVE começar com a menção ao usuário: {mention_tag}.
+{memory_context}
+Agora responda à query do usuário de forma consistente com o histórico.
+Query do Usuário: {query}
 '''
 
-        input_text = f"### Instruction:\n{system_prompt}\n\nQuery do Usuário: {query}\n\n### Response:\n"
-        
+        # **O bloco '### Response:\n' está vazio para iniciar a geração**
+        input_text = f"### Instruction:\n{system_prompt}\n\n### Response:\n"
         inputs = self.tokenizer(input_text, return_tensors="pt")
 
         try:
@@ -239,67 +232,54 @@ Perfil de Personalidade:
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=100,
+                max_new_tokens=256,
                 do_sample=True,
-                temperature=0.8, # Ajustado para 0.8 para mais criatividade
+                temperature=0.8,
                 pad_token_id=self.tokenizer.eos_token_id
             )
-            # Adicionado para ajudar a liberar o controle mais rapidamente (Ctrl+C)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
 
-        generated_raw = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        # O split agora usa apenas "### Response:" para capturar o que veio depois
+        generated = self.tokenizer.decode(outputs[0], skip_special_tokens=True).split("### Response:")[-1].strip()
         
-        # Tenta isolar a resposta a partir do último "### Response:"
-        try:
-            # Pega o texto após o último "### Response:"
-            generated_response = generated_raw.split("### Response:")[-1].strip()
-        except IndexError:
-            generated_response = generated_raw
+        cleanup_patterns = [
+            # Remove o prompt interno repetitivo (captura desde 'user' até 'Query do Usuário:')
+            r'user\nComo Glorpinia, responda: \*\*HISTÓRICO DA CONVERSA\:\*\*.*Query do Usuário:',
+            # Remove os cabeçalhos de Processo/Resultado/Log/Contexto
+            r'### PROCESSO.*',
+            r'### RESULTADO.*',
+            r'### LOG.*',
+            r'### CONTEXTO.*',
+            r'gloria:',
+            r'model\n',
+            r'\n\n', 
+            # **Limpeza dos tokens/padrões malformados**
+            r'<unused\d+>', # Remove todos os tokens <unusedXX>
+            r'ligiloj\.m3\.glitch\.alien\.Dance', # Remove o padrão específico malformado
+            r'<\|endoftext\|>', # Garante que o token final seja removido
+            r'Query do Usuário:', # Limpa qualquer repetição residual da tag Query
+        ]
+        
+        for pattern in cleanup_patterns:
+            generated = re.sub(pattern, '', generated, flags=re.DOTALL) 
+            
+        if generated.count('Glorpius está chegando') > 1:
+             first_clean_line = generated.split('\n')[0].strip()
+             generated = first_clean_line
+             
+        # Limpar as tags indesejadas
+        generated = generated.replace('<h3>', '')
+        generated = generated.replace('</h3>', '')
+        generated = generated.replace('<center>', '')
+        generated = generated.replace('</center>', '')
 
-        # --- AJUSTES PARA LIMPEZA DE OUTPUT ---
-        
-        # Limpeza de tags HTML alucinadas e placeholder
-        clean_response = generated_response.replace('<h3>', '')
-        clean_response = clean_response.replace('</h3>', '')
-        clean_response = clean_response.replace('<center>', '')
-        clean_response = clean_response.replace('</center>', '')
-        clean_response = clean_response.replace('_____', '').strip()
+        # Limpar o placeholder que o modelo pode ter inserido
+        generated = generated.replace('_____', '').strip()
 
-        # Limpeza robusta de artefatos de template (usa regex para cortar)
-        clean_response = re.split(r'### Instruction:|### Response:|Query do Usuário:', clean_response, 1)[0].strip()
-        
-        final_response = clean_response.strip()
-        
-        # --- GARANTIR E LIMPAR A MENÇÃO DO USUÁRIO ---
-        if final_response:
-            
-            # Use regex para encontrar e simplificar sequências de menções no início.
-            # Captura a primeira menção (@palavra,) e remove qualquer menção subsequente
-            
-            # Padrão: ((@\w+,\s*)+) procura por uma ou mais repetições de (@palavra, espaço)
-            mention_sequence_match = re.match(r'((@\w+,\s*)+)', final_response, re.IGNORECASE)
-            
-            if mention_sequence_match:
-                # tags é uma lista com as menções encontradas (ex: ['@felinomascarado', '@felinescarmado'])
-                sequence = mention_sequence_match.group(1).strip()
-                tags = [tag.strip() for tag in sequence.split(',') if tag.strip()]
-                
-                if tags:
-                    # Manter apenas a primeira tag e adicionar a vírgula e espaço
-                    first_tag = tags[0] + ', '
-                    
-                    # Encontrar a posição final da sequência original na string
-                    end_of_sequence = final_response.find(tags[-1]) + len(tags[-1])
-                    
-                    # Reconstroi a resposta com apenas a primeira tag e o restante do texto
-                    final_response = first_tag + final_response[end_of_sequence:].strip()
-            
-            # Salvar e Retornar
-            self.memory.chat_memory.add_ai_message(AIMessage(content=final_response))
+        if generated:
+            self.memory.chat_memory.add_ai_message(AIMessage(content=generated))
             print(f"[DEBUG] Saving interaction to memory_mgr for user={author} channel={channel}")
-            memory_mgr.save_user_memory(channel, author, query, final_response)
-            return final_response
+            memory_mgr.save_user_memory(channel, author, query, generated)
+            return generated
         else:
             print("[DEBUG] Texto gerado vazio – fallback loading")
             fallback = "glorp carregando cérebro . exe"
