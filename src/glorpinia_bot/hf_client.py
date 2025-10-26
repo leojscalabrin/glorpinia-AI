@@ -83,7 +83,6 @@ class HFClient:
             max_token_limit=1000
         )
 
-        # self.model_path is the PEFT adapter path, which is self.model_id
         self.model_path = self.model_id
 
         self._load_tuned_model()
@@ -103,7 +102,6 @@ class HFClient:
         base_model_name_or_path = None
         config = None
         
-        # Try to load PeftConfig from self.model_id (which is the adapter ID)
         if PeftConfig is not None:
             try:
                 config = PeftConfig.from_pretrained(self.model_id)
@@ -112,7 +110,6 @@ class HFClient:
                 print(f"[WARNING] Failed to load PeftConfig.from_pretrained from {self.model_id}: {_cfg_err}")
 
         if not base_model_name_or_path:
-            # If PeftConfig didn't provide base model, try to find it in adapter_config.json if model_id is a local path
             try:
                 cfg_path = os.path.join(self.model_id, 'adapter_config.json')
                 if os.path.exists(cfg_path):
@@ -124,8 +121,7 @@ class HFClient:
                 print(f"[WARNING] Failed to read adapter_config.json from {self.model_id}: {_ac_err}")
 
         if not base_model_name_or_path:
-            # Fallback to a known base model if adapter config doesn't specify one
-            base_model_name_or_path = "mistralai/Mistral-7B-v0.1" # Example base model
+            base_model_name_or_path = "mistralai/Mistral-7B-v0.1"
             print(f"[WARNING] Base model not found in adapter config for {self.model_id}. Using default: {base_model_name_or_path}")
 
         quant_config = None
@@ -160,7 +156,7 @@ class HFClient:
 
         if PeftModel is not None:
             try:
-                self.model = PeftModel.from_pretrained(base_model, self.model_id) # Use model_id here for adapter
+                self.model = PeftModel.from_pretrained(base_model, self.model_id)
             except Exception as e:
                 print(f"[WARNING] Failed to apply PEFT adapter ({e}). Falling back to base model.")
                 self.model = base_model
@@ -174,7 +170,7 @@ class HFClient:
             pass
 
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id) # Use model_id here for tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         except Exception:
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
@@ -213,7 +209,6 @@ Agora responda à query do usuário de forma consistente com o histórico.
 Query do Usuário: {query}
 '''
 
-        # **O bloco '### Response:\n' está vazio para iniciar a geração**
         input_text = f"### Instruction:\n{system_prompt}\n\n### Response:\n"
         inputs = self.tokenizer(input_text, return_tensors="pt")
 
@@ -232,57 +227,77 @@ Query do Usuário: {query}
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=256,
+                max_new_tokens=100,
                 do_sample=True,
-                temperature=0.8,
+                temperature=0.6,
                 pad_token_id=self.tokenizer.eos_token_id
             )
-
-        # O split agora usa apenas "### Response:" para capturar o que veio depois
-        generated = self.tokenizer.decode(outputs[0], skip_special_tokens=True).split("### Response:")[-1].strip()
         
-        cleanup_patterns = [
-            # Remove o prompt interno repetitivo (captura desde 'user' até 'Query do Usuário:')
-            r'user\nComo Glorpinia, responda: \*\*HISTÓRICO DA CONVERSA\:\*\*.*Query do Usuário:',
-            # Remove os cabeçalhos de Processo/Resultado/Log/Contexto
-            r'### PROCESSO.*',
-            r'### RESULTADO.*',
-            r'### LOG.*',
-            r'### CONTEXTO.*',
-            r'gloria:',
-            r'model\n',
-            r'\n\n', 
-            # **Limpeza dos tokens/padrões malformados**
-            r'<unused\d+>', # Remove todos os tokens <unusedXX>
-            r'ligiloj\.m3\.glitch\.alien\.Dance', # Remove o padrão específico malformado
-            r'<\|endoftext\|>', # Garante que o token final seja removido
-            r'Query do Usuário:', # Limpa qualquer repetição residual da tag Query
-        ]
+        decoded_output = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         
-        for pattern in cleanup_patterns:
-            generated = re.sub(pattern, '', generated, flags=re.DOTALL) 
-            
-        if generated.count('Glorpius está chegando') > 1:
-             first_clean_line = generated.split('\n')[0].strip()
-             generated = first_clean_line
+        # Segmentação da resposta: Remove o prompt de entrada.
+        if "### Response:" in decoded_output:
+            generated = decoded_output.split("### Response:")[-1].strip()
+        else:
+            generated = decoded_output
+        
+        # Limpeza de repetição de prompt interno
+        if "### Instruction:" in generated:
+             generated = generated.split("### Instruction:")[-1].strip()
              
-        # Limpar as tags indesejadas
+        if generated.startswith("Como Glorpinia, responda:"):
+             generated = generated.split(":", 1)[-1].strip()
+             
+        if generated.startswith("Query do Usuário:"):
+             generated = generated.split(":", 1)[-1].strip()
+
+        # Limpeza Agresiva de Tags e Logs Internos
+        generated = generated.replace('<speech bubble>', '').strip()
+        generated = generated.replace('### RESPONSE ###', '').strip()
+        generated = generated.replace('### TEXTO ###', '').strip()
+        generated = generated.replace('### LOG ###', '').strip()
+        generated = generated.replace('### RESPOSTA DO ROBOT:', '').strip()
+        generated = generated.replace('### TEXTO DO ROBOT:', '').strip()
+        
+        generated = re.sub(r'glorious\.space:|glorpinia:|glorp:', '', generated).strip()
+
+        generated = generated.replace('MLLoade', '').strip()
+        generated = generated.replace('purpoſe]]', '').strip()
+        generated = generated.replace('imperatriz galáctica', '').strip()
+        generated = generated.replace('glitch glorp', '').strip()
+
+        if 'purpoſe]]:' in generated:
+             generated = generated.split('purpoſe]]:')[0].strip()
+
+        # Ajuste no final para garantir que o token <|endoftext|> malformado seja cortado
+        if '<|endoftext|>' in generated:
+            generated = generated.split('<|endoftext|>')[0].strip()
+        
         generated = generated.replace('<h3>', '')
         generated = generated.replace('</h3>', '')
         generated = generated.replace('<center>', '')
         generated = generated.replace('</center>', '')
-
-        # Limpar o placeholder que o modelo pode ter inserido
+        generated = generated.replace('<unused43>', '')
+        
+        generated = re.sub(r'[#]+$', '', generated).strip()
+        generated = re.sub(r'\s*\.{3,}\s*', '...', generated).strip()
         generated = generated.replace('_____', '').strip()
+        
+        # Forçar brevidade em caso de loop de linha
+        if '\n' in generated:
+             generated = generated.split('\n')[0]
 
         if generated:
             self.memory.chat_memory.add_ai_message(AIMessage(content=generated))
             print(f"[DEBUG] Saving interaction to memory_mgr for user={author} channel={channel}")
             memory_mgr.save_user_memory(channel, author, query, generated)
-            return generated
+            
+            # HARDCODED para mencionar o autor no Twitch
+            final_response = f"@{author}, {generated}"
+            return final_response
         else:
             print("[DEBUG] Texto gerado vazio – fallback loading")
-            fallback = "glorp carregando cérebro . exe"
+            fallback = "Meow. Glorp-glorp." 
+            final_fallback = f"@{author}, {fallback}"
             self.memory.chat_memory.add_ai_message(AIMessage(content=fallback))
-            memory_mgr.save_user_memory(channel, author, query, fallback)
-            return fallback
+            return final_fallback

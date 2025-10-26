@@ -6,8 +6,9 @@ langchain==0.3.27
 langchain-core==0.3.79
 langchain-huggingface==0.3.1
 langchain-community==0.3.31
-transformers==4.42.0
-peft==0.17.1
+transformers
+peft
+trl
 bitsandbytes==0.48.1
 accelerate
 safetensors
