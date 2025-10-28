@@ -67,7 +67,7 @@ class OllamaClient:
         system_prompt = f'''
         Você é Glorpinia. Sua personalidade está definida no seu sistema.
         Use o seguinte **CONTEXTO APRENDIDO** para enriquecer sua resposta se for relevante.
-        Lembre-se da REGRA CRÍTICA DE EMOTES (espaço antes e depois).
+        Lembre-se da REGRA CRÍTICA DE EMOTES
         '''
 
         # Montagem da Mensagem no formato da API Ollama
@@ -82,7 +82,7 @@ class OllamaClient:
             "stream": False,
             "options": {
                 "temperature": 0.7, 
-                "num_ctx": 4096 # Garante espaço suficiente para o RAG
+                "num_ctx": 4096
             }
         }
         
@@ -96,19 +96,19 @@ class OllamaClient:
             
         except requests.exceptions.RequestException as e:
             logging.error(f"[ERROR] Falha na comunicação com Ollama API: {e}")
-            generated = "glorp-glorp. O portal está instável. Eu não consigo me comunicar. Sadge"
+            generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
         # Limpeza Final e Salvamento de Memória
         generated = self._clean_response(generated)
 
-        if generated and generated != "glorp-glorp. O portal está instável. Eu não consigo me comunicar. Sadge":
+        if generated and generated != "O portal está instável. Eu não consigo me comunicar. Sadge":
             # Salva a interação query/response na memória de longo prazo (RAG)
             memory_mgr.save_user_memory(channel, author, query, generated)
             
             final_response = f"@{author}, {generated}"
             return final_response
         else:
-            fallback = "Meow. O portal de Glorp está com lag. Tente novamente! 😸"
+            fallback = "Meow. O portal está com lag. Tente novamente! 😸"
             final_fallback = f"@{author}, {fallback}"
             return final_fallback
 
@@ -116,12 +116,8 @@ class OllamaClient:
         generated = generated.strip()
         
         generated = re.sub(r'\*([A-Za-z0-9]+)\*', r'\1', generated)
-        
-        generated = generated.replace(" espaco ", " ").strip()
-        generated = generated.replace(" espaco", " ").strip()
-        generated = generated.replace("espaco ", " ").strip()
-        generated = generated.replace("*EMOTE*:", "").strip() # Remove este lixo de template
-        generated = generated.replace("bacia", "Kissahomie").strip() # Limpa a literal
+
+        generated = generated.replace("*EMOTE*:", "").strip()
 
         generated = re.sub(r'\[/INST\]', '', generated).strip()
         generated = re.sub(r'<\|eot_id\|>', '', generated).strip()
