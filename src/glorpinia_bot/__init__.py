@@ -1,7 +1,7 @@
 """Lightweight package init: avoid importing heavy runtime modules here.
 
 Import submodules explicitly where needed, e.g.:
-    from glorpinia_bot.hf_client import HFClient
+    from glorpinia_bot.ollama_client import OllamaClient
 
 This prevents `import glorpinia_bot` from executing network or audio deps.
 """
@@ -10,6 +10,6 @@ This prevents `import glorpinia_bot` from executing network or audio deps.
 __all__ = [
     'TwitchIRC',
     'TwitchAuth',
-    'HFClient',
+    'OllamaClient', 
     'MemoryManager'
 ]

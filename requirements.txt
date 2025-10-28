@@ -1,14 +1,11 @@
 twitchio
-huggingface_hub
-torch
-transformers
-accelerate
 websocket-client
-
-
 python-dotenv
+requests
+sentence-transformers
 
 
 langchain
 langchain-core
-
+langchain-huggingface
+langchain-community

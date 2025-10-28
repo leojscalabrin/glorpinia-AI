@@ -1,7 +1,9 @@
+## DESUSADO COM O USO DO OLLAMA
 import os
 import torch
 import logging
 import re
+import json # Import adicionado para o _load_tuned_model
 
 # Inicialize variáveis fora dos try-except para evitar UnboundLocalError
 ConversationBufferMemory = None
@@ -83,6 +85,7 @@ class HFClient:
             max_token_limit=1000
         )
 
+        # self.model_path is the PEFT adapter path, which is self.model_id
         self.model_path = self.model_id
 
         self._load_tuned_model()
@@ -102,6 +105,7 @@ class HFClient:
         base_model_name_or_path = None
         config = None
         
+        # Try to load PeftConfig from self.model_id (which is the adapter ID)
         if PeftConfig is not None:
             try:
                 config = PeftConfig.from_pretrained(self.model_id)
@@ -110,6 +114,7 @@ class HFClient:
                 print(f"[WARNING] Failed to load PeftConfig.from_pretrained from {self.model_id}: {_cfg_err}")
 
         if not base_model_name_or_path:
+            # If PeftConfig didn't provide base model, try to find it in adapter_config.json if model_id is a local path
             try:
                 cfg_path = os.path.join(self.model_id, 'adapter_config.json')
                 if os.path.exists(cfg_path):
@@ -121,7 +126,8 @@ class HFClient:
                 print(f"[WARNING] Failed to read adapter_config.json from {self.model_id}: {_ac_err}")
 
         if not base_model_name_or_path:
-            base_model_name_or_path = "mistralai/Mistral-7B-v0.1"
+            # Fallback to a known base model if adapter config doesn't specify one
+            base_model_name_or_path = "mistralai/Mistral-7B-v0.1" # Example base model
             print(f"[WARNING] Base model not found in adapter config for {self.model_id}. Using default: {base_model_name_or_path}")
 
         quant_config = None
@@ -156,7 +162,7 @@ class HFClient:
 
         if PeftModel is not None:
             try:
-                self.model = PeftModel.from_pretrained(base_model, self.model_id)
+                self.model = PeftModel.from_pretrained(base_model, self.model_id) # Use model_id here for adapter
             except Exception as e:
                 print(f"[WARNING] Failed to apply PEFT adapter ({e}). Falling back to base model.")
                 self.model = base_model
@@ -170,7 +176,7 @@ class HFClient:
             pass
 
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id) # Use model_id here for tokenizer
         except Exception:
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
@@ -209,6 +215,7 @@ Agora responda à query do usuário de forma consistente com o histórico.
 Query do Usuário: {query}
 '''
 
+        # **O bloco '### Response:\n' está vazio para iniciar a geração**
         input_text = f"### Instruction:\n{system_prompt}\n\n### Response:\n"
         inputs = self.tokenizer(input_text, return_tensors="pt")
 
@@ -227,72 +234,80 @@ Query do Usuário: {query}
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=100,
+                max_new_tokens=100, # AJUSTE: Aumentado para 100
                 do_sample=True,
-                temperature=0.6,
+                temperature=0.6, # AJUSTE: Mantido em 0.6 para estabilidade
                 pad_token_id=self.tokenizer.eos_token_id
             )
         
+        # 1. Segmentação da resposta: Remove o prompt de entrada.
         decoded_output = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         
-        # Segmentação da resposta: Remove o prompt de entrada.
         if "### Response:" in decoded_output:
             generated = decoded_output.split("### Response:")[-1].strip()
         else:
             generated = decoded_output
         
-        # Limpeza de repetição de prompt interno
-        if "### Instruction:" in generated:
-             generated = generated.split("### Instruction:")[-1].strip()
-             
+        # 2. Limpeza de repetição de prompt interno e contexto vazado (REGEX AGRESSIVO)
+        # Remove qualquer coisa que comece com o cabeçalho do prompt e o seu conteúdo vazado
+        generated = re.sub(
+            r'(Glorpinia: user|### Instruction:).*?(Query do Usuário:|model)', 
+            '', 
+            generated, 
+            flags=re.DOTALL | re.IGNORECASE
+        ).strip()
+        
+        # Remove tags de contexto vazadas
+        generated = re.sub(r'\*\*HISTÓRICO DA CONVERSA\:\*\*.*', '', generated, flags=re.DOTALL).strip()
+        generated = re.sub(r'\*\*CONTEXTO LONGO \(se houver\)\:\*\*.*', '', generated, flags=re.DOTALL).strip()
+        generated = re.sub(r'Agora responda à query do usuário de forma consistente com o histórico\.?', '', generated, flags=re.DOTALL).strip()
+        
+        # Limpa o cabeçalho 'Como Glorpinia, responda:' se o modelo o incluir
         if generated.startswith("Como Glorpinia, responda:"):
              generated = generated.split(":", 1)[-1].strip()
              
+        # Limpa Query residual
         if generated.startswith("Query do Usuário:"):
              generated = generated.split(":", 1)[-1].strip()
 
-        # Limpeza Agresiva de Tags e Logs Internos
-        generated = generated.replace('<speech bubble>', '').strip()
-        generated = generated.replace('### RESPONSE ###', '').strip()
-        generated = generated.replace('### TEXTO ###', '').strip()
-        generated = generated.replace('### LOG ###', '').strip()
-        generated = generated.replace('### RESPOSTA DO ROBOT:', '').strip()
-        generated = generated.replace('### TEXTO DO ROBOT:', '').strip()
+        # 3. Limpeza Agresiva de Tags, HTML, Logs e Tokens de Lixo
+        # Limpa logs internos (### ...) e tags HTML
+        generated = re.sub(r'<center>.*?<\/center>', '', generated, flags=re.DOTALL).strip()
+        generated = re.sub(r'### \s*?\.\.\. .*?\.', '', generated).strip()
+        generated = re.sub(r'### \s*?\.\.\. .*?', '', generated).strip()
         
-        generated = re.sub(r'glorious\.space:|glorpinia:|glorp:', '', generated).strip()
-
+        # Limpa tokens de lixo e variações de persona
+        generated = generated.replace('<speech bubble>', '').strip()
+        generated = re.sub(r'glorious\.space:|glorpinia:|glorp:|gloria:', '', generated).strip()
+        
+        # Limpa tokens finais
+        generated = generated.replace('<h3>', '').replace('</h3>', '').replace('<center>', '').replace('</center>', '')
+        generated = generated.replace('<unused43>', '').replace('<|endoftext|>', '').strip()
         generated = generated.replace('MLLoade', '').strip()
         generated = generated.replace('purpoſe]]', '').strip()
-        generated = generated.replace('imperatriz galáctica', '').strip()
-        generated = generated.replace('glitch glorp', '').strip()
-
-        if 'purpoſe]]:' in generated:
-             generated = generated.split('purpoſe]]:')[0].strip()
-
-        # Ajuste no final para garantir que o token <|endoftext|> malformado seja cortado
-        if '<|endoftext|>' in generated:
-            generated = generated.split('<|endoftext|>')[0].strip()
+        generated = generated.replace('glorp carregando cérebro . exe', '').strip()
         
-        generated = generated.replace('<h3>', '')
-        generated = generated.replace('</h3>', '')
-        generated = generated.replace('<center>', '')
-        generated = generated.replace('</center>', '')
-        generated = generated.replace('<unused43>', '')
-        
+        # 4. Limpar lixo repetitivo
         generated = re.sub(r'[#]+$', '', generated).strip()
         generated = re.sub(r'\s*\.{3,}\s*', '...', generated).strip()
         generated = generated.replace('_____', '').strip()
         
-        # Forçar brevidade em caso de loop de linha
+        # 5. Forçar brevidade em caso de loop de linha, pegando só a primeira linha limpa
         if '\n' in generated:
-             generated = generated.split('\n')[0]
+             # Pega a primeira linha, mas garante que não seja apenas uma tag limpa
+             first_line = generated.split('\n')[0].strip()
+             if first_line and not first_line.startswith('###'):
+                 generated = first_line
+             else:
+                 # Se a primeira linha é lixo, tenta a segunda linha
+                 lines = generated.split('\n')
+                 generated = next((line.strip() for line in lines if line.strip() and not line.strip().startswith('###')), first_line)
 
         if generated:
             self.memory.chat_memory.add_ai_message(AIMessage(content=generated))
             print(f"[DEBUG] Saving interaction to memory_mgr for user={author} channel={channel}")
             memory_mgr.save_user_memory(channel, author, query, generated)
             
-            # HARDCODED para mencionar o autor no Twitch
             final_response = f"@{author}, {generated}"
             return final_response
         else:

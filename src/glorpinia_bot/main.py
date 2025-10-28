@@ -1,6 +1,4 @@
 import os
-# os.environ['GLORPINIA_SKIP_MODEL_LOAD'] = '1'
-os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 os.environ['GLORPINIA_ALLOW_NO_LANGCHAIN'] = '1'
 
 import time
@@ -12,8 +10,8 @@ import threading
 from datetime import datetime
 from collections import deque
 from .twitch_auth import TwitchAuth
-# HFClient and MemoryManager are imported lazily inside TwitchIRC to allow
-# running in capture-only mode without pulling heavy ML dependencies.
+from .ollama_client import OllamaClient 
+from .memory_manager import MemoryManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
@@ -22,28 +20,22 @@ class TwitchIRC:
         # Instancia componentes modulares
         self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
 
-        # Support capture-only mode where we don't need HF client or embeddings.
+        # Suporte ao modo capture-only (mantido)
         self.capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
-        # Skip loading the ML model entirely for quick import/startup checks or CI
-        self.skip_model_load = os.environ.get('GLORPINIA_SKIP_MODEL_LOAD') == '1'
 
+        # Logica de skip_model_load e HFClient/MemoryManager atualizada para Ollama
         if self.capture_only:
-            print('[INFO] Running in capture-only mode; HFClient and MemoryManager will not be instantiated.')
-            self.hf_client = None
-            self.memory_mgr = None
-        elif self.skip_model_load:
-            print('[INFO] GLORPINIA_SKIP_MODEL_LOAD=1 set; skipping HFClient and MemoryManager instantiation.')
-            # Keep attributes present but don't load heavy ML deps.
-            self.hf_client = None
+            print('[INFO] Running in capture-only mode; OllamaClient and MemoryManager will not be instantiated.')
+            self.hf_client = None # Mantido 'hf_client' como nome do atributo para simplificar as chamadas subsequentes
             self.memory_mgr = None
         else:
-            # Instantiate heavy components lazily when needed.
-            from .hf_client import HFClient
+            # Instancia componentes pesados
+            # NOVO: Importa o cliente Ollama
+            from .ollama_client import OllamaClient 
             from .memory_manager import MemoryManager
 
-            self.hf_client = HFClient(
-                hf_token=self.auth.hf_token,
-                model_id=self.auth.model_id,
+            # NOVO: Instancia o OllamaClient (nao precisa de token ou model_id HF)
+            self.hf_client = OllamaClient(
                 personality_profile=self.auth.personality_profile
             )
             self.memory_mgr = MemoryManager()  # DB e embeddings
@@ -66,26 +58,24 @@ class TwitchIRC:
         self.ws = None
         self.running = False
 
-        # Valida e renova token se necessário (usa auth)
+        # Valida e renova token se necessario (usa auth)
         self.auth.validate_and_refresh_token()
 
         signal.signal(signal.SIGINT, self._shutdown_handler)
         signal.signal(signal.SIGTERM, self._shutdown_handler)
 
-    # Inicia thread para timer de comentários periódicos (se comment_enabled)
+    # Inicia thread para timer de comentarios periodicos (se comment_enabled)
         self.comment_timer_running = True
         self.comment_thread = threading.Thread(target=self._periodic_comment_thread, daemon=True)
         self.comment_thread.start()
 
-        # Inicia thread para transcrição de áudio se listen_enabled
+        # Inicia thread para transcricao de audio se listen_enabled
         self.audio_comment_running = True
         self.audio_comment_thread = threading.Thread(target=self._periodic_audio_comment_thread, daemon=True)
         self.audio_comment_thread.start()
 
-    # websocket is optional for capture-only mode; import at run-time
-
     def _periodic_comment_thread(self):
-        """Thread em background: A cada 30 min, checa contexto e envia comentário se aplicável (se comment_enabled)."""
+        """Thread em background: A cada 30 min, checa contexto e envia comentario se aplicavel (se comment_enabled)."""
         while self.comment_timer_running:
             if not self.comment_enabled:
                 time.sleep(10)  # Espera curta se desabilitado, checa periodicamente
@@ -96,67 +86,67 @@ class TwitchIRC:
                 recent_msgs = self.recent_messages.get(channel, deque())
                 now = time.time()
                 
-                # Filtra msgs das últimas 2 min
+                # Filtra msgs das ultimas 2 min
                 recent_context = [msg for msg in recent_msgs if now - msg['timestamp'] <= 120]
                 
                 if len(recent_context) == 0:
-                    print(f"[DEBUG] Nenhuma mensagem nas últimas 2 min em {channel}. Pulando comentário.")
+                    print(f"[DEBUG] Nenhuma mensagem nas ultimas 2 min em {channel}. Pulando comentario.")
                     continue  # Ignora se vazio
                 
                 # Cria contexto como string
                 context_str = "\n".join([f"{msg['author']}: {msg['content']}" for msg in recent_context])
                 
-                # Gera comentário via HF (prompt temático)
-                comment_query = f"Comente de forma natural e divertida sobre essa conversa recente no chat da live: {context_str[:500]}..."  # Limita pra tokens
+                # Gera comentario via cliente LLM
+                comment_query = f"Comente de forma natural e divertida sobre essa conversa recente no chat da live: {context_str[:500]}..."
                 try:
-                    comment = self.hf_client.get_response(
+                    comment = self.hf_client.get_response( # Chamada mantida
                         query=comment_query,
                         channel=channel,
-                        author="system",  # Genérico, sem user específico
+                        author="system",  # Generico, sem user especifico
                         memory_mgr=self.memory_mgr
                     )
-                    if len(comment) > 0 and len(comment) <= 200:  # Filtra respostas válidas/curtas
+                    if len(comment) > 0 and len(comment) <= 200:  # Filtra respostas validas/curtas
                         self.send_message(channel, comment)
-                        print(f"[DEBUG] Comentário enviado em {channel}: {comment[:50]}...")
+                        print(f"[DEBUG] Comentario enviado em {channel}: {comment[:50]}...")
                 except Exception as e:
-                    print(f"[ERROR] Falha ao gerar comentário para {channel}: {e}")
+                    print(f"[ERROR] Falha ao gerar comentario para {channel}: {e}")
 
     def _periodic_audio_comment_thread(self):
-        """Thread em background: A cada 30 min, transcreve áudio e comenta se relevante (se listen_enabled)."""
+        """Thread em background: A cada 30 min, transcreve audio e comenta se relevante (se listen_enabled)."""
         while self.audio_comment_running:
             if not self.listen_enabled:
                 time.sleep(10)  # Espera curta se desabilitado, checa periodicamente
                 continue
-            time.sleep(1800)  # 30 minutos em segundos
+            time.sleep(1800)
 
             for channel in self.auth.channels:
-                # Captura áudio da stream por 60s
+                # Captura audio da stream por 60s
                 transcription = self._transcribe_stream(channel, duration=60)
                 
                 if not transcription or len(transcription) < 10:  # Ignora se vazio ou curto
-                    print(f"[DEBUG] Transcrição vazia ou curta em {channel}. Pulando comentário.")
+                    print(f"[DEBUG] Transcricao vazia ou curta em {channel}. Pulando comentario.")
                     continue
                 
-                # Gera comentário via HF com contexto de áudio
+                # Gera comentario via cliente LLM com contexto de audio
                 comment_query = f"Comente de forma natural e divertida sobre o que foi dito na live: {transcription[:500]}..."  # Limita pra tokens
                 try:
                     comment = self.hf_client.get_response(
                         query=comment_query,
                         channel=channel,
-                        author="system",  # Genérico
+                        author="system",  # Generico
                         memory_mgr=self.memory_mgr
                     )
-                    if 0 < len(comment) <= 200:  # Filtra válidas/curtas
+                    if 0 < len(comment) <= 200:  # Filtra validas/curtas
                         self.send_message(channel, comment)
-                        print(f"[DEBUG] Comentário de áudio enviado em {channel}: {comment[:50]}...")
+                        print(f"[DEBUG] Comentario de audio enviado em {channel}: {comment[:50]}...")
                 except Exception as e:
-                    print(f"[ERROR] Falha ao gerar comentário de áudio para {channel}: {e}")
+                    print(f"[ERROR] Falha ao gerar comentario de audio para {channel}: {e}")
 
     def _shutdown_handler(self, signum, frame):
         """Handler para shutdown gracioso com mensagem de despedida."""
         print("[INFO] Sinal de shutdown recebido. Enviando mensagem de despedida...")
-        self.comment_timer_running = False  # Para o thread de comentários
-        self.audio_comment_running = False  # Para o thread de áudio
+        self.comment_timer_running = False  # Para o thread de comentarios
+        self.audio_comment_running = False  # Para o thread de audio
         goodbye_msg = "Bedge"
         for channel in self.auth.channels:
             self.send_message(channel, goodbye_msg)
@@ -173,22 +163,22 @@ class TwitchIRC:
             self.ws.send(full_msg)
             print(f"[SEND] {channel}: {message}")
         else:
-            print(f"[ERROR] WebSocket não conectado. Não foi possível enviar: {message}")
+            print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
 
     def on_message(self, ws, message):
-        """Handler de mensagens IRC (usa hf_client e memory_mgr)."""
+        """Handler de mensagens IRC (usa o cliente LLM)."""
         print(f"[IRC] RAW: {message.strip()}")
         if message.startswith("PING"):
             ws.send("PONG :tmi.twitch.tv\r\n")
-            print("[PONG] Enviado para manter conexão viva.")
+            print("[PONG] Enviado para manter conexao viva.")
             return
 
         if "PRIVMSG" in message:
 
-            # Extrai autor e conteúdo da mensagem IRC
+            # Extrai autor e conteudo da mensagem IRC
             parts = message.split(":", 2)
             if len(parts) < 3:
-                print(f"[DEBUG] Mensagem PRIVMSG inválida: {message}")
+                print(f"[DEBUG] Mensagem PRIVMSG invalida: {message}")
                 return
             author_part = parts[1].split("!")[0]
             content = parts[2].strip()
@@ -213,7 +203,7 @@ class TwitchIRC:
             if channel in self.recent_messages:
                 self.recent_messages[channel].append(msg_data)
 
-            # SIMULAÇÃO DE MENSAGEM DUPLICADA PARA TESTE
+            # SIMULACAO DE MENSAGEM DUPLICADA PARA TESTE
             if content == "!test_duplicate":
                 print("[DEBUG] Simulando mensagem duplicada para teste...")
                 # Simula o recebimento da mesma mensagem novamente
@@ -230,11 +220,9 @@ class TwitchIRC:
                 return
 
             if author_part.lower() == self.auth.bot_nick.lower():
-                print(f"[DEBUG] Ignorando mensagem do próprio bot: {content}")
+                print(f"[DEBUG] Ignorando mensagem do proprio bot: {content}")
                 return
 
-            # Gera um ID único para a mensagem para deduplicação (autor, canal, conteúdo)
-            # Isso ajuda a evitar processamento duplicado se a mesma mensagem for recebida duas vezes em um curto período
             unique_message_identifier = f"{author_part}-{channel}-{content}"
             message_hash = hash(unique_message_identifier)
 
@@ -249,18 +237,18 @@ class TwitchIRC:
                 self.handle_admin_command(content, channel)
                 return
 
-            # Processamento de chat geral (respostas a menções)
+            # Processamento de chat geral (respostas a mencoes)
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
                 print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
                 try:
-                    response = self.hf_client.get_response(content, channel, author_part, self.memory_mgr)
+                    response = self.hf_client.get_response(content, channel, author_part, self.memory_mgr) # Chamada mantida
                     if response:
                         self.send_message(channel, response)
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar resposta: {e}")
 
     def _append_training_record(self, channel, author, user_message, bot_response):
-        """Salva um registro de interação em formato JSONL para futuro treinamento do modelo."""
+        """Salva um registro de interacao em formato JSONL para futuro treinamento do modelo."""
         record = {
             "timestamp": datetime.utcnow().isoformat(),
             "channel": channel,
@@ -272,7 +260,7 @@ class TwitchIRC:
             with open("training_data.jsonl", "a", encoding="utf-8") as f:
                 f.write(f"{str(record)}\n")
             
-            # Log com menos frequência para evitar spam
+            # Log com menos frequencia para evitar spam
             last_log_time = self.last_logged_content.get(channel, 0)
             if time.time() - last_log_time > 60:
                 print(f"[INFO] Registro de treinamento salvo para a mensagem: {user_message[:30]}...")
@@ -284,7 +272,7 @@ class TwitchIRC:
         """Processa comandos de admin (ex: !glorpinia chat on/off)."""
         parts = command.split()
         if len(parts) < 3:
-            self.send_message(channel, "Comando inválido. Use: !glorpinia <feature> <on|off>")
+            self.send_message(channel, "Comando invalido. Use: !glorpinia <feature> <on|off>")
             return
 
         feature = parts[1].lower()
@@ -306,7 +294,7 @@ class TwitchIRC:
             self.send_message(channel, f"Funcionalidade desconhecida: {feature}")
 
     def run(self):
-        """Inicia a conexão WebSocket e o loop de mensagens."""
+        """Inicia a conexao WebSocket e o loop de mensagens."""
         import websocket
 
         self.running = True
@@ -326,7 +314,7 @@ class TwitchIRC:
                 time.sleep(10)
 
     def on_open(self, ws):
-        """Handler para quando a conexão WebSocket é aberta."""
+        """Handler para quando a conexao WebSocket é aberta."""
         token_for_send = self.auth.access_token
         ws.send(f"PASS oauth:{token_for_send}\r\n")
         ws.send(f"NICK {self.auth.bot_nick}\r\n")
@@ -342,11 +330,10 @@ class TwitchIRC:
         print(f"[ERROR] WebSocket error: {error}")
 
     def on_close(self, ws, close_status_code, close_msg):
-        """Handler para quando a conexão WebSocket é fechada."""
-        print(f"[INFO] Conexão WebSocket fechada. Código: {close_status_code}, Msg: {close_msg}")
+        """Handler para quando a conexao WebSocket é fechada."""
+        print(f"[INFO] Conexao WebSocket fechada. Codigo: {close_status_code}, Msg: {close_msg}")
 
 
 if __name__ == "__main__":
     bot = TwitchIRC()
     bot.run()
-
