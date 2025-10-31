@@ -353,15 +353,15 @@ class TwitchIRC:
         if feature == "chat":
             self.chat_enabled = (state == "on")
             status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
-            self.send_message(channel, f"glorp O modo CHAT foi {status}.")
+            self.send_message(channel, f"peepoChat O modo CHAT foi {status}.")
         elif feature == "listen":
             self.listen_enabled = (state == "on")
             status = "ATIVADO" if self.listen_enabled else "DESATIVADO"
-            self.send_message(channel, f"glorp O modo LISTEN foi {status}.")
+            self.send_message(channel, f"glorp 📡 O modo LISTEN foi {status}.")
         elif feature == "comment":
             self.comment_enabled = (state == "on")
             status = "ATIVADO" if self.comment_enabled else "DESATIVADO"
-            self.send_message(channel, f"glorp O modo COMMENT foi {status}.")
+            self.send_message(channel, f"peepoTalk O modo COMMENT foi {status}.")
         else:
             self.send_message(channel, f"glorp Funcionalidade desconhecida: {feature}")
 
