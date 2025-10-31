@@ -10,7 +10,7 @@ import threading
 from datetime import datetime
 from collections import deque
 from .twitch_auth import TwitchAuth
-from .ollama_client import OllamaClient 
+from .gemini_client import GeminiClient
 from .memory_manager import MemoryManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
@@ -20,25 +20,21 @@ class TwitchIRC:
         # Instancia componentes modulares
         self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
 
-        # Suporte ao modo capture-only (mantido)
         self.capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
 
-        # Logica de skip_model_load e HFClient/MemoryManager atualizada para Ollama
         if self.capture_only:
             print('[INFO] Running in capture-only mode; OllamaClient and MemoryManager will not be instantiated.')
-            self.hf_client = None # Mantido 'hf_client' como nome do atributo para simplificar as chamadas subsequentes
+            self.gemini_client = None
             self.memory_mgr = None
         else:
             # Instancia componentes pesados
-            # NOVO: Importa o cliente Ollama
             from .ollama_client import OllamaClient 
             from .memory_manager import MemoryManager
 
-            # NOVO: Instancia o OllamaClient (nao precisa de token ou model_id HF)
-            self.hf_client = OllamaClient(
+            self.gemini_client = GeminiClient(
                 personality_profile=self.auth.personality_profile
             )
-            self.memory_mgr = MemoryManager()  # DB e embeddings
+            self.memory_mgr = MemoryManager()
 
         # Inicializa cache para log anti-spam
         self.last_logged_content = {}  # Por canal
@@ -99,7 +95,7 @@ class TwitchIRC:
                 # Gera comentario via cliente LLM
                 comment_query = f"Comente de forma natural e divertida sobre essa conversa recente no chat da live: {context_str[:500]}..."
                 try:
-                    comment = self.hf_client.get_response( # Chamada mantida
+                    comment = self.gemini_client.get_response( # Chamada mantida
                         query=comment_query,
                         channel=channel,
                         author="system",  # Generico, sem user especifico
@@ -130,7 +126,7 @@ class TwitchIRC:
                 # Gera comentario via cliente LLM com contexto de audio
                 comment_query = f"Comente de forma natural e divertida sobre o que foi dito na live: {transcription[:500]}..."  # Limita pra tokens
                 try:
-                    comment = self.hf_client.get_response(
+                    comment = self.gemini_client.get_response(
                         query=comment_query,
                         channel=channel,
                         author="system",  # Generico
@@ -164,6 +160,66 @@ class TwitchIRC:
             print(f"[SEND] {channel}: {message}")
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
+    
+    # ... (Logo após a função send_message)
+
+    def _send_message_part(self, channel, part, delay):
+        """[HELPER] Espera (em um thread) e envia uma parte da mensagem."""
+        try:
+            time.sleep(delay)
+            self.send_message(channel, part)
+        except Exception as e:
+            print(f"[ERROR] Falha ao enviar parte da mensagem no thread: {e}")
+
+    def send_long_message(self, channel, message, max_length=450, split_delay_sec=3):
+        """
+        Envia uma mensagem para o canal, dividindo-a em partes se exceder 
+        'max_length'. Usa threads para os delays não bloquearem o bot.
+        """
+        # Limite seguro (Twitch tem limite de ~500 bytes)
+        if len(message) <= max_length:
+            self.send_message(channel, message)
+            return
+
+        print(f"[INFO] Resposta longa detectada ({len(message)} chars). Dividindo em partes...")
+        
+        # Divide a mensagem por palavras para não quebrar no meio
+        words = message.split()
+        parts = []
+        current_part = ""
+
+        for word in words:
+            # Verifica se adicionar a proxima palavra + espaço excede o limite
+            if len(current_part) + len(word) + 1 > max_length:
+                # Parte atual está cheia, salva e começa uma nova
+                if current_part: # Garante que não adiciona parte vazia
+                    parts.append(current_part.strip())
+                current_part = word + " "
+            else:
+                current_part += word + " "
+        
+        # Adiciona a última parte restante
+        if current_part:
+            parts.append(current_part.strip())
+
+        # Envia as partes com delay usando threads
+        current_delay = 0
+        for i, part in enumerate(parts):
+            # Adiciona um indicador (ex: (1/3), (2/3))
+            part_with_indicator = f"({i+1}/{len(parts)}) {part}"
+            
+            # Ajusta se o indicador estourar o limite
+            if len(part_with_indicator) > max_length:
+                part_with_indicator = part[:max_length-10] + "..."
+
+            # Cria e inicia um thread para cada parte
+            # O primeiro (delay 0) é enviado imediatamente
+            t = threading.Thread(target=self._send_message_part, 
+                                 args=(channel, part_with_indicator, current_delay))
+            t.daemon = True
+            t.start()
+            
+            current_delay += split_delay_sec
 
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
@@ -241,7 +297,7 @@ class TwitchIRC:
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
                 print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
                 try:
-                    response = self.hf_client.get_response(content, channel, author_part, self.memory_mgr) # Chamada mantida
+                    response = self.gemini_client.get_response(content, channel, author_part, self.memory_mgr) # Chamada mantida
                     if response:
                         self.send_message(channel, response)
                 except Exception as e:

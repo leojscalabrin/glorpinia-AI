@@ -2,10 +2,12 @@ twitchio
 websocket-client
 python-dotenv
 requests
-sentence-transformers
 
+google-generativeai
 
 langchain
 langchain-core
 langchain-huggingface
 langchain-community
+sentence-transformers
+faiss-cpu

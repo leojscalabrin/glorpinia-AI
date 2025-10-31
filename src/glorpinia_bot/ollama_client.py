@@ -1,3 +1,4 @@
+## DESUSADO COM O USO DO GEMINI
 import os
 import requests
 import re
