@@ -327,6 +327,22 @@ class TwitchIRC:
     def handle_admin_command(self, command, channel):
         """Processa comandos de admin (ex: !glorpinia chat on/off)."""
         parts = command.split()
+        
+        if len(parts) == 2 and parts[1].lower() == "check":
+            # Monta a mensagem de status
+            chat_status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
+            listen_status = "ATIVADO" if self.listen_enabled else "DESATIVADO"
+            comment_status = "ATIVADO" if self.comment_enabled else "DESATIVADO"
+            
+            status_msg = (
+                f"Status: "
+                f"Chat peepoChat  {chat_status} | "
+                f"Listen glorp 📡  {listen_status} | "
+                f"Comment peepoTalk {comment_status}"
+            )
+            self.send_message(channel, status_msg)
+            return
+        
         if len(parts) < 3:
             self.send_message(channel, "Comando invalido. Use: !glorpinia <feature> <on|off>")
             return
@@ -337,17 +353,17 @@ class TwitchIRC:
         if feature == "chat":
             self.chat_enabled = (state == "on")
             status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
-            self.send_message(channel, f"O modo CHAT foi {status}.")
+            self.send_message(channel, f"glorp O modo CHAT foi {status}.")
         elif feature == "listen":
             self.listen_enabled = (state == "on")
             status = "ATIVADO" if self.listen_enabled else "DESATIVADO"
-            self.send_message(channel, f"O modo LISTEN foi {status}.")
+            self.send_message(channel, f"glorp O modo LISTEN foi {status}.")
         elif feature == "comment":
             self.comment_enabled = (state == "on")
             status = "ATIVADO" if self.comment_enabled else "DESATIVADO"
-            self.send_message(channel, f"O modo COMMENT foi {status}.")
+            self.send_message(channel, f"glorp O modo COMMENT foi {status}.")
         else:
-            self.send_message(channel, f"Funcionalidade desconhecida: {feature}")
+            self.send_message(channel, f"glorp Funcionalidade desconhecida: {feature}")
 
     def run(self):
         """Inicia a conexao WebSocket e o loop de mensagens."""
