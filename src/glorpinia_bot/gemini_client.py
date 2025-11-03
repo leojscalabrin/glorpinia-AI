@@ -2,7 +2,7 @@ import os
 import re
 import logging
 import google.generativeai as genai
-from langchain.schema import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from .memory_manager import MemoryManager
 from dotenv import load_dotenv
 
