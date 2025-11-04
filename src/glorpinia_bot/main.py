@@ -12,6 +12,8 @@ from collections import deque
 from .twitch_auth import TwitchAuth
 from .gemini_client import GeminiClient
 from .memory_manager import MemoryManager
+import subprocess
+from google.cloud import speech
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
@@ -52,8 +54,10 @@ class TwitchIRC:
         self.last_audio_comment_time = 0
         self.loop_sleep_interval = 10 # Intervalo de verificação (10 segundos)
 
-        # Lista de admins
-        self.admin_nicks = ["felinomascarado", "srdkeijoo", "fabinho7x"]
+        # Lista de admins (Lendo do .env, como corrigimos)
+        admin_nicks_str = os.getenv("ADMIN_NICKS", "felinomascarado", "srdkeijoo", "fabinho7x") 
+        self.admin_nicks = [nick.strip().lower() for nick in admin_nicks_str.split(',')]
+        print(f"[AUTH] Admins carregados: {self.admin_nicks}")
 
         self.ws = None
         self.running = False
@@ -81,41 +85,35 @@ class TwitchIRC:
         while self.comment_timer_running:
             time.sleep(self.loop_sleep_interval) 
             
-            # Checa o estado A CADA 10 segundos
             if not self.comment_enabled:
-                continue # Se estiver desligado, apenas volta ao início do loop e dorme de novo
+                continue 
 
-            # Se estiver ligado, verifica se já passaram 30 minutos (1800s)
             now = time.time()
             if now - self.last_comment_time < 1800:
                 continue
             
-            # --- Passaram-se 30 minutos E a feature está ligada ---
-            self.last_comment_time = now # Reseta o timer IMEDIATAMENTE
+            self.last_comment_time = now 
 
             for channel in self.auth.channels:
                 recent_msgs = self.recent_messages.get(channel, deque())
                 
-                # Filtra msgs das ultimas 2 min
                 recent_context = [msg for msg in recent_msgs if now - msg['timestamp'] <= 120]
                 
                 if len(recent_context) == 0:
                     print(f"[DEBUG] Nenhuma mensagem nas ultimas 2 min em {channel}. Pulando comentario.")
-                    continue  # Ignora se vazio
+                    continue  
                 
-                # Cria contexto como string
                 context_str = "\n".join([f"{msg['author']}: {msg['content']}" for msg in recent_context])
                 
-                # Gera comentario via cliente LLM
                 comment_query = f"Comente de forma natural e divertida sobre essa conversa recente no chat da live: {context_str[:500]}..."
                 try:
-                    comment = self.gemini_client.get_response( # Chamada mantida
+                    comment = self.gemini_client.get_response(
                         query=comment_query,
                         channel=channel,
-                        author="system",  # Generico, sem user especifico
+                        author="system",
                         memory_mgr=self.memory_mgr
                     )
-                    if len(comment) > 0 and len(comment) <= 200:  # Filtra respostas validas/curtas
+                    if len(comment) > 0 and len(comment) <= 200:
                         self.send_message(channel, comment)
                         print(f"[DEBUG] Comentario enviado em {channel}: {comment[:50]}...")
                 except Exception as e:
@@ -126,43 +124,125 @@ class TwitchIRC:
         self.last_audio_comment_time = time.time() # Inicializa o timer
 
         while self.audio_comment_running:
-            # Dorme primeiro
             time.sleep(self.loop_sleep_interval)
 
-            # Checa o estado A CADA 10 segundos
             if not self.listen_enabled:
-                continue # Desligado, volta ao início
+                continue 
 
-            # Se estiver ligado, verifica se já passaram 30 minutos (1800s)
             now = time.time()
             if now - self.last_audio_comment_time < 1800:
-                continue # Ainda não deu o tempo, volta ao início
+                continue 
             
-            # --- Passaram-se 30 minutos E a feature está ligada ---
-            self.last_audio_comment_time = now # Reseta o timer
+            self.last_audio_comment_time = now 
 
             for channel in self.auth.channels:
-                # Captura audio da stream por 60s
-                transcription = "" # Placeholder para evitar crash da função faltante
                 
+                transcription = self._transcribe_stream(channel, duration=60)
+
                 if not transcription or len(transcription) < 10:  # Ignora se vazio ou curto
-                    print(f"[DEBUG] Transcricao vazia ou curta em {channel} (função _transcribe_stream não implementada). Pulando comentario.")
+                    print(f"[DEBUG] Transcricao vazia ou curta em {channel}. Pulando comentario.")
                     continue
                 
-                # Gera comentario via cliente LLM com contexto de audio
-                comment_query = f"Comente de forma natural e divertida sobre o que foi dito na live: {transcription[:500]}..."  # Limita pra tokens
+                comment_query = f"Comente de forma natural e divertida sobre o que foi dito na live: {transcription[:500]}..."
                 try:
                     comment = self.gemini_client.get_response(
                         query=comment_query,
                         channel=channel,
-                        author="system",  # Generico
+                        author="system",
                         memory_mgr=self.memory_mgr
                     )
-                    if 0 < len(comment) <= 200:  # Filtra validas/curtas
+                    if 0 < len(comment) <= 200:
                         self.send_message(channel, comment)
                         print(f"[DEBUG] Comentario de audio enviado em {channel}: {comment[:50]}...")
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar comentario de audio para {channel}: {e}")
+
+    def _transcribe_stream(self, channel, duration=60):
+        """
+        Captura audio da stream (via streamlink/ffmpeg) e transcreve (via Google Speech-to-Text).
+        """
+        print(f"[LISTEN] Iniciando captura de áudio para o canal: {channel}")
+        temp_audio_file = f"/tmp/glorpinia_audio_{channel}.wav" 
+        stream_url = ""
+
+        try:
+            # Obter a URL do áudio da stream
+            print(f"[LISTEN] Buscando URL da stream para twitch.tv/{channel}...")
+            streamlink_cmd = [
+                "streamlink", 
+                f"twitch.tv/{channel}", 
+                "audio_only", 
+                "--stream-url"
+            ]
+            
+            result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=10, check=True)
+            stream_url = result.stdout.strip()
+
+            if not stream_url:
+                print(f"[LISTEN ERROR] Stream offline ou não foi possível obter a URL (streamlink).")
+                return ""
+            
+            print(f"[LISTEN] URL da stream obtida com sucesso.")
+
+            # Passo 2: Capturar o áudio com ffmpeg
+            print(f"[LISTEN] Gravando áudio por {duration} segundos...")
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-i", stream_url,
+                "-t", str(duration), # Duração da gravação
+                "-vn",               # Sem vídeo
+                "-c:a", "pcm_s16le", # Codec WAV (LINEAR16)
+                "-ar", "16000",      # Sample rate de 16kHz
+                "-ac", "1",          # Mono
+                temp_audio_file,
+                "-y"                 # Sobrescrever arquivo
+            ]
+
+            subprocess.run(ffmpeg_cmd, timeout=duration + 10, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"[LISTEN] Captura de áudio salva em: {temp_audio_file}")
+
+            # Enviar para Google Speech-to-Text
+            client = speech.SpeechClient()
+
+            with open(temp_audio_file, "rb") as audio_file:
+                content = audio_file.read()
+            
+            audio = speech.RecognitionAudio(content=content)
+            config = speech.RecognitionConfig(
+                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=16000,
+                language_code="pt-BR", # Definido para Português do Brasil
+                audio_channel_count=1,
+            )
+
+            print(f"[LISTEN] Enviando áudio para a API Google Speech...")
+            response = client.recognize(config=config, audio=audio)
+
+            # Extrair transcrição
+            transcription = "".join([result.alternatives[0].transcript for result in response.results])
+            
+            if transcription:
+                print(f"[LISTEN] Transcrição recebida: {transcription[:50]}...")
+            else:
+                print(f"[LISTEN] API não retornou nenhuma transcrição.")
+                
+            return transcription
+
+        except subprocess.CalledProcessError as e:
+            print(f"[LISTEN ERROR] Falha no subprocesso (streamlink/ffmpeg): {e}")
+            return ""
+        except subprocess.TimeoutExpired:
+            print(f"[LISTEN ERROR] Timeout ao capturar áudio.")
+            return ""
+        except Exception as e:
+            print(f"[LISTEN ERROR] Erro inesperado na transcrição: {e}")
+            return ""
+        
+        finally:
+            # Limpeza
+            if os.path.exists(temp_audio_file):
+                os.remove(temp_audio_file)
+                print(f"[LISTEN] Arquivo temporário removido: {temp_audio_file}")
 
     def _shutdown_handler(self, signum, frame):
         """Handler para shutdown gracioso com mensagem de despedida."""
@@ -334,7 +414,6 @@ class TwitchIRC:
         """Processa comandos de admin (ex: !glorp chat on/off)."""
         parts = command.split()
         
-        # Lógica para comandos de 2 partes (check, commands)
         if len(parts) == 2:
             command_name = parts[1].lower()
 
@@ -356,7 +435,6 @@ class TwitchIRC:
                 self.send_message(channel, "glorp pergunta para o felino")
                 return
         
-        # Lógica para comandos on/off (precisa de 3 partes)
         if len(parts) < 3:
             # Mensagem de ajuda atualizada
             self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on|off>, !glorp check, ou !glorp commands")

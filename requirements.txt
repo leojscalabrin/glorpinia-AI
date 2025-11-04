@@ -1,9 +1,9 @@
-twitchio
 websocket-client
 python-dotenv
 requests
 
 google-generativeai
+google-cloud-speech
 
 langchain
 langchain-core
