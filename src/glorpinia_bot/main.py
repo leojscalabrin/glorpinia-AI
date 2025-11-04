@@ -28,7 +28,6 @@ class TwitchIRC:
             self.memory_mgr = None
         else:
             # Instancia componentes pesados
-            from .ollama_client import OllamaClient 
             from .memory_manager import MemoryManager
 
             self.gemini_client = GeminiClient(
@@ -48,8 +47,13 @@ class TwitchIRC:
         self.listen_enabled = False  # Para transcrição de áudio (OFF por default)
         self.comment_enabled = False  # Para comentários periódicos (OFF por default)
 
+        # Adiciona timestamps para controlar os timers sem block
+        self.last_comment_time = 0
+        self.last_audio_comment_time = 0
+        self.loop_sleep_interval = 10 # Intervalo de verificação (10 segundos)
+
         # Lista de admins
-        self.admin_nicks = ["felinomascarado"]
+        self.admin_nicks = ["felinomascarado, srdkeijoo, fabinho7x"]
 
         self.ws = None
         self.running = False
@@ -72,15 +76,25 @@ class TwitchIRC:
 
     def _periodic_comment_thread(self):
         """Thread em background: A cada 30 min, checa contexto e envia comentario se aplicavel (se comment_enabled)."""
+        self.last_comment_time = time.time() # Inicializa o timer
+
         while self.comment_timer_running:
+            time.sleep(self.loop_sleep_interval) 
+            
+            # Checa o estado A CADA 10 segundos
             if not self.comment_enabled:
-                time.sleep(10)  # Espera curta se desabilitado, checa periodicamente
+                continue # Se estiver desligado, apenas volta ao início do loop e dorme de novo
+
+            # Se estiver ligado, verifica se já passaram 30 minutos (1800s)
+            now = time.time()
+            if now - self.last_comment_time < 1800:
                 continue
-            time.sleep(1800)
+            
+            # --- Passaram-se 30 minutos E a feature está ligada ---
+            self.last_comment_time = now # Reseta o timer IMEDIATAMENTE
 
             for channel in self.auth.channels:
                 recent_msgs = self.recent_messages.get(channel, deque())
-                now = time.time()
                 
                 # Filtra msgs das ultimas 2 min
                 recent_context = [msg for msg in recent_msgs if now - msg['timestamp'] <= 120]
@@ -109,18 +123,30 @@ class TwitchIRC:
 
     def _periodic_audio_comment_thread(self):
         """Thread em background: A cada 30 min, transcreve audio e comenta se relevante (se listen_enabled)."""
+        self.last_audio_comment_time = time.time() # Inicializa o timer
+
         while self.audio_comment_running:
+            # Dorme primeiro
+            time.sleep(self.loop_sleep_interval)
+
+            # Checa o estado A CADA 10 segundos
             if not self.listen_enabled:
-                time.sleep(10)  # Espera curta se desabilitado, checa periodicamente
-                continue
-            time.sleep(1800)
+                continue # Desligado, volta ao início
+
+            # Se estiver ligado, verifica se já passaram 30 minutos (1800s)
+            now = time.time()
+            if now - self.last_audio_comment_time < 1800:
+                continue # Ainda não deu o tempo, volta ao início
+            
+            # --- Passaram-se 30 minutos E a feature está ligada ---
+            self.last_audio_comment_time = now # Reseta o timer
 
             for channel in self.auth.channels:
                 # Captura audio da stream por 60s
-                transcription = self._transcribe_stream(channel, duration=60)
+                transcription = "" # Placeholder para evitar crash da função faltante
                 
                 if not transcription or len(transcription) < 10:  # Ignora se vazio ou curto
-                    print(f"[DEBUG] Transcricao vazia ou curta em {channel}. Pulando comentario.")
+                    print(f"[DEBUG] Transcricao vazia ou curta em {channel} (função _transcribe_stream não implementada). Pulando comentario.")
                     continue
                 
                 # Gera comentario via cliente LLM com contexto de audio
@@ -161,8 +187,6 @@ class TwitchIRC:
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
     
-    # ... (Logo após a função send_message)
-
     def _send_message_part(self, channel, part, delay):
         """[HELPER] Espera (em um thread) e envia uma parte da mensagem."""
         try:
@@ -176,44 +200,34 @@ class TwitchIRC:
         Envia uma mensagem para o canal, dividindo-a em partes se exceder 
         'max_length'. Usa threads para os delays não bloquearem o bot.
         """
-        # Limite seguro (Twitch tem limite de ~500 bytes)
         if len(message) <= max_length:
             self.send_message(channel, message)
             return
 
         print(f"[INFO] Resposta longa detectada ({len(message)} chars). Dividindo em partes...")
         
-        # Divide a mensagem por palavras para não quebrar no meio
         words = message.split()
         parts = []
         current_part = ""
 
         for word in words:
-            # Verifica se adicionar a proxima palavra + espaço excede o limite
             if len(current_part) + len(word) + 1 > max_length:
-                # Parte atual está cheia, salva e começa uma nova
-                if current_part: # Garante que não adiciona parte vazia
+                if current_part: 
                     parts.append(current_part.strip())
                 current_part = word + " "
             else:
                 current_part += word + " "
         
-        # Adiciona a última parte restante
         if current_part:
             parts.append(current_part.strip())
 
-        # Envia as partes com delay usando threads
         current_delay = 0
         for i, part in enumerate(parts):
-            # Adiciona um indicador (ex: (1/3), (2/3))
             part_with_indicator = f"({i+1}/{len(parts)}) {part}"
             
-            # Ajusta se o indicador estourar o limite
             if len(part_with_indicator) > max_length:
                 part_with_indicator = part[:max_length-10] + "..."
 
-            # Cria e inicia um thread para cada parte
-            # O primeiro (delay 0) é enviado imediatamente
             t = threading.Thread(target=self._send_message_part, 
                                  args=(channel, part_with_indicator, current_delay))
             t.daemon = True
@@ -231,7 +245,6 @@ class TwitchIRC:
 
         if "PRIVMSG" in message:
 
-            # Extrai autor e conteudo da mensagem IRC
             parts = message.split(":", 2)
             if len(parts) < 3:
                 print(f"[DEBUG] Mensagem PRIVMSG invalida: {message}")
@@ -241,7 +254,6 @@ class TwitchIRC:
             channel = message.split("#")[1].split(" :")[0] if "#" in message else self.auth.channels[0]
 
             print(f"[CHAT] Parsed - author={author_part}, channel={channel}, content={content}")
-            # Extra debug: recent messages snapshot
             try:
                 print(f"[DEBUG] recent_messages_count={len(self.recent_messages.get(channel, []))}")
             except Exception:
@@ -249,7 +261,6 @@ class TwitchIRC:
             content_lower = content.lower()
             print(f"[DEBUG] content_lower='{content_lower}'")
 
-            # Adiciona TODAS mensagens recentes ao deque (pra contexto do timer)
             anon_author = f"User{hash(author_part) % 1000}"
             msg_data = {
                 'timestamp': time.time(),
@@ -259,14 +270,11 @@ class TwitchIRC:
             if channel in self.recent_messages:
                 self.recent_messages[channel].append(msg_data)
 
-            # SIMULACAO DE MENSAGEM DUPLICADA PARA TESTE
             if content == "!test_duplicate":
                 print("[DEBUG] Simulando mensagem duplicada para teste...")
-                # Simula o recebimento da mesma mensagem novamente
                 self.on_message(ws, message)
                 return
 
-            # Capture-only mode: append sanitized record to training_data.jsonl and skip heavy model calls
             capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
             if capture_only:
                 try:
@@ -288,8 +296,7 @@ class TwitchIRC:
             self.processed_message_ids.append(message_hash)
             print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
 
-            # Processamento de comandos de admin (sempre ativo)
-            if author_part.lower() in self.admin_nicks and content.startswith("!glorpinia"):
+            if author_part.lower() in self.admin_nicks and content.startswith("!glorp"):
                 self.handle_admin_command(content, channel)
                 return
 
@@ -299,7 +306,7 @@ class TwitchIRC:
                 try:
                     response = self.gemini_client.get_response(content, channel, author_part, self.memory_mgr) # Chamada mantida
                     if response:
-                        self.send_message(channel, response)
+                        self.send_long_message(channel, response)
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar resposta: {e}")
 
@@ -316,7 +323,6 @@ class TwitchIRC:
             with open("training_data.jsonl", "a", encoding="utf-8") as f:
                 f.write(f"{str(record)}\n")
             
-            # Log com menos frequencia para evitar spam
             last_log_time = self.last_logged_content.get(channel, 0)
             if time.time() - last_log_time > 60:
                 print(f"[INFO] Registro de treinamento salvo para a mensagem: {user_message[:30]}...")
@@ -325,26 +331,35 @@ class TwitchIRC:
             print(f"[ERROR] Falha ao escrever no arquivo de treinamento: {e}")
 
     def handle_admin_command(self, command, channel):
-        """Processa comandos de admin (ex: !glorpinia chat on/off)."""
+        """Processa comandos de admin (ex: !glorp chat on/off)."""
         parts = command.split()
         
-        if len(parts) == 2 and parts[1].lower() == "check":
-            # Monta a mensagem de status
-            chat_status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
-            listen_status = "ATIVADO" if self.listen_enabled else "DESATIVADO"
-            comment_status = "ATIVADO" if self.comment_enabled else "DESATIVADO"
+        # Lógica para comandos de 2 partes (check, commands)
+        if len(parts) == 2:
+            command_name = parts[1].lower()
+
+            if command_name == "check":
+                chat_status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
+                listen_status = "ATIVADO" if self.listen_enabled else "DESATIVADO"
+                comment_status = "ATIVADO" if self.comment_enabled else "DESATIVADO"
+                
+                status_msg = (
+                    f"Status: "
+                    f"Chat peepoChat  {chat_status} | "
+                    f"Listen glorp 📡  {listen_status} | "
+                    f"Comment peepoTalk {comment_status}"
+                )
+                self.send_message(channel, status_msg)
+                return
             
-            status_msg = (
-                f"Status: "
-                f"Chat peepoChat  {chat_status} | "
-                f"Listen glorp 📡  {listen_status} | "
-                f"Comment peepoTalk {comment_status}"
-            )
-            self.send_message(channel, status_msg)
-            return
+            elif command_name == "commands":
+                self.send_message(channel, "glorp pergunta para o felino")
+                return
         
+        # Lógica para comandos on/off (precisa de 3 partes)
         if len(parts) < 3:
-            self.send_message(channel, "Comando invalido. Use: !glorpinia <feature> <on|off>")
+            # Mensagem de ajuda atualizada
+            self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on|off>, !glorp check, ou !glorp commands")
             return
 
         feature = parts[1].lower()

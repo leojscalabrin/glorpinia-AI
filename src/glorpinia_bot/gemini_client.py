@@ -65,14 +65,13 @@ class GeminiClient:
                 logging.error(f"[RAG ERROR] Falha ao buscar contexto: {e}")
 
         # Montagem do Prompt Final (RAG + Query)
-        # O System Prompt já foi definido no __init__ do modelo.
         prompt = f"""
         {long_term_context}
 
         **Query do Usuário:** {query}
         """
 
-        # hamada à API do Gemini
+        # chamada à API do Gemini
         try:
             response = self.model.generate_content(prompt)
 
@@ -97,20 +96,34 @@ class GeminiClient:
             logging.error(f"[ERROR] Falha na comunicação com a API Gemini: {e}")
             generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
-        # impeza Final e Salvamento de Memória
+        # Limpeza Final e Salvamento de Memória
         generated = self._clean_response(generated)
 
-        if generated and "glorp-glorp" not in generated:
-            # Salva a interação query/response na memória de longo prazo (RAG)
-            memory_mgr.save_user_memory(channel, author, query, generated)
+        fallback = "Meow. O portal está com lag. Tente novamente! 😸"
             
-            final_response = f"@{author}, {generated}"
-            return final_response
-        else:
-            fallback = "Meow. O portal está com lag. Tente novamente! 😸"
-            final_fallback = f"@{author}, {fallback}"
-            return final_fallback
+        # Verifica se o autor é 'system'. Se for, não adiciona @tag e não salva na memória.
+        is_system_message = (author.lower() == "system")
 
+        if generated:
+            
+            if is_system_message:
+                # É um 'comment' ou 'listen'. Retorna a resposta limpa.
+                return generated
+            else:
+                # É uma resposta a um usuário. Salva na memória e adiciona a tag.
+                memory_mgr.save_user_memory(channel, author, query, generated)
+                final_response = f"@{author}, {generated}"
+                return final_response
+        else:
+            # Lógica de fallback
+            if is_system_message:
+                return fallback # Retorna o fallback limpo
+            else:
+                final_fallback = f"@{author}, {fallback}" # Retorna o fallback com tag
+                return final_fallback
+            
+            return final_fallback
+    
     def _clean_response(self, generated):
         
         generated = generated.strip()
