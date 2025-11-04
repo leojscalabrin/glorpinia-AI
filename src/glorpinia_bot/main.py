@@ -53,7 +53,7 @@ class TwitchIRC:
         self.loop_sleep_interval = 10 # Intervalo de verificação (10 segundos)
 
         # Lista de admins
-        self.admin_nicks = ["felinomascarado, srdkeijoo, fabinho7x"]
+        self.admin_nicks = ["felinomascarado", "srdkeijoo", "fabinho7x"]
 
         self.ws = None
         self.running = False
