@@ -23,6 +23,7 @@ TWITCH_REFRESH_TOKEN=your_refresh_token
 
 -Bot Configuration
 TWITCH_CHANNELS=channel_to_join
+ADMIN_NICKS=admin_nick
 
 Obtain tokens from:
 - Twitch: [Twitch Token Generator](https://twitchtokengenerator.com) (scopes: `chat:read`, `chat:edit`)

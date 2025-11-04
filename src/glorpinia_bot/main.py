@@ -54,8 +54,7 @@ class TwitchIRC:
         self.last_audio_comment_time = 0
         self.loop_sleep_interval = 10 # Intervalo de verificação (10 segundos)
 
-        # Lista de admins (Lendo do .env, como corrigimos)
-        admin_nicks_str = os.getenv("ADMIN_NICKS", "felinomascarado", "srdkeijoo", "fabinho7x") 
+        admin_nicks_str = os.getenv("ADMIN_NICKS") 
         self.admin_nicks = [nick.strip().lower() for nick in admin_nicks_str.split(',')]
         print(f"[AUTH] Admins carregados: {self.admin_nicks}")
 
@@ -211,7 +210,7 @@ class TwitchIRC:
             config = speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
                 sample_rate_hertz=16000,
-                language_code="pt-BR", # Definido para Português do Brasil
+                language_code="pt-BR",
                 audio_channel_count=1,
             )
 
