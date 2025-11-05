@@ -19,6 +19,8 @@ from .memory_manager import MemoryManager
 from .features.comment import Comment
 from .features.listen import Listen
 from .features.training_logger import TrainingLogger
+from .features.eight_ball import EightBall
+from .features.fortune_cookie import FortuneCookie
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
@@ -40,6 +42,8 @@ class TwitchIRC:
         self.comment_feature = None
         self.listen_feature = None
         self.training_logger = None # Logger de dados
+        self.eight_ball_feature = None
+        self.fortune_cookie_feature = None
 
         if self.capture_only:
             print('[INFO] Running in capture-only mode.')
@@ -63,6 +67,8 @@ class TwitchIRC:
             self.comment_feature = Comment(self)
             self.listen_feature = Listen(self, self.speech_client)
             self.training_logger = TrainingLogger(self)
+            self.eight_ball_feature = EightBall(self)
+            self.fortune_cookie_feature = FortuneCookie(self)
 
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
@@ -221,16 +227,48 @@ class TwitchIRC:
                 self.send_message(channel, 'glorp')
                 return
 
-            # Delega para o handle_admin_command
-            if author_part.lower() in self.admin_nicks and content.startswith("!glorp"):
-                self.handle_admin_command(content, channel)
+            if content_lower.startswith("!glorp 8ball"):
+                # Extrai a pergunta (tudo depois de "!glorp 8ball ")
+                question = content[len("!glorp 8ball"):].strip()
+                if not question:
+                    self.send_message(channel, f"@{author_part}, você precisa me perguntar algo! glorp")
+                    return
+
+                # Delega para a feature (que já usa um thread)
+                self.eight_ball_feature.get_8ball_response(question, channel, author_part)
                 return
+            
+            if content_lower == "!glorp cookie":
+                self.fortune_cookie_feature.get_fortune(channel, author_part)
+                return
+            
+            self.last_oziell_command_time = 0
+            if "oziell" in content_lower:
+                now = time.time()
+                cooldown_seconds = 1800
+
+                if (now - self.last_oziell_time) > cooldown_seconds:
+                    self.last_oziell_time = now
+                    self.send_message(channel, "Olá @oziell ! Tudo bem @oziell ? Tchau @oziell !")
+                else:
+                    print(f"[DEBUG] Trigger 'oziell' em cooldown. Ignorando.")
+                
+                return
+            
+            # Delega para o handle_admin_command
+            if content.startswith("!glorp"):
+                if author_part.lower() in self.admin_nicks:
+                    self.handle_admin_command(content, channel)
+                    return
+                else:
+                    self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
+                    return
 
             # Processamento de chat geral (respostas a mencoes)
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
                 print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
                 try:
-                    # Loga a interação ANTES de gerar a resposta
+                    # Loga a interação antes de gerar a resposta
                     self.training_logger.log_interaction(channel, author_part, content, None) # Loga a query
                     
                     response = self.gemini_client.get_response(content, channel, author_part, self.memory_mgr)
@@ -268,7 +306,7 @@ class TwitchIRC:
                 return
             
             elif command_name == "commands":
-                self.send_message(channel, "glorp pergunta para o felino")
+                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie")
                 return
             
             elif command_name == "scan":
