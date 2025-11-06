@@ -5,11 +5,12 @@ import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
+# Importa a biblioteca de embedding da Google
 try:
-    from langchain_huggingface import HuggingFaceEmbeddings
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
 except ImportError:
-    HuggingFaceEmbeddings = None
-    logging.warning("HuggingFaceEmbeddings nao encontrado. O RAG sera desabilitado. Instale 'langchain-huggingface'.")
+    GoogleGenerativeAIEmbeddings = None
+    logging.warning("langchain-google-genai nao encontrado. O RAG sera desabilitado. Instale 'langchain-google-genai'.")
 
 try:
     from langchain_community.vectorstores import FAISS
@@ -33,14 +34,15 @@ class MemoryManager:
 
         force_sqlite = os.environ.get('GLORPINIA_FORCE_SQLITE') == '1'
         
-        if not force_sqlite and HuggingFaceEmbeddings is not None and FAISS is not None:
+        # Verifica se as bibliotecas (Google + FAISS) estão prontas
+        if not force_sqlite and GoogleGenerativeAIEmbeddings is not None and FAISS is not None:
             try:
-                # Otimizacao: Tenta instanciar os embeddings. Se falhar, volta para SQLite.
-                self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                # Usa o embedding da Google, que usa a mesma API_KEY do .env
+                self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
                 self._use_faiss = True
-                logging.info("[GLORP-MEMORY] FAISS/RAG ATIVADO. Glorpinia tera memoria de longo prazo!")
+                logging.info("[GLORP-MEMORY] FAISS/RAG ATIVADO (usando Google Embeddings).")
             except Exception as e:
-                logging.error(f"[GLORP-MEMORY] Falha ao carregar HuggingFaceEmbeddings (RAG desativado): {e}")
+                logging.error(f"[GLORP-MEMORY] Falha ao carregar GoogleGenerativeAIEmbeddings (RAG desativado): {e}")
                 self._use_faiss = False
         
         if not self._use_faiss:
@@ -53,7 +55,6 @@ class MemoryManager:
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         
-        # Tabela para mapear user/channel para o FAISS file (metadata)
         c.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 channel TEXT NOT NULL,
@@ -64,7 +65,6 @@ class MemoryManager:
             )
         """)
         
-        # Tabela de interacoes bruta (fallback se FAISS estiver desativado)
         c.execute("""
             CREATE TABLE IF NOT EXISTS interactions (
                 channel TEXT,
@@ -91,7 +91,6 @@ class MemoryManager:
 
         if row and row[0] and os.path.exists(row[0]):
             try:
-                # Necessario allow_dangerous_deserialization=True para carregar FAISS de arquivo local
                 self.vectorstore = FAISS.load_local(
                     row[0], self.embeddings, allow_dangerous_deserialization=True
                 )
@@ -106,7 +105,6 @@ class MemoryManager:
     def save_user_memory(self, channel, user, query, response):
         """Salva nova interação (query -> response) na memória long-term (FAISS + DB)."""
         
-        # Se FAISS nao estiver ativo, salva no fallback SQLite e retorna
         if not self._use_faiss:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
@@ -117,23 +115,18 @@ class MemoryManager:
             logging.debug(f"[GLORP-MEMORY] Interaction saved to SQLite fallback for {user} in {channel}")
             return
 
-        # Cria doc no formato salvo (o que sera embeddado e buscado)
         doc = f"Usuário {user} em {channel}: {query} -> {response}"
 
-        # Adiciona ao vectorstore (cria se nao existir)
         if self.vectorstore is None:
             self.vectorstore = FAISS.from_texts([doc], self.embeddings)
         else:
-            # Adiciona novos textos ao vectorstore carregado
             self.vectorstore.add_texts([doc])
 
-        # Path unico por user/channel
         path = f"memory_{channel}_{user}.faiss"
         self.vectorstore.save_local(path)
         
         logging.info(f"[GLORP-MEMORY] Interaction saved and FAISS updated for {user} in {channel}")
 
-        # Atualiza DB (metadata)
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         c.execute("INSERT OR REPLACE INTO memories (channel, user, vectorstore_path, last_updated) VALUES (?, ?, ?, ?)",
@@ -143,10 +136,8 @@ class MemoryManager:
 
     @property
     def vectorstore(self):
-        """Getter para o vectorstore atualmente carregado."""
         return self._vectorstore
 
     @vectorstore.setter
     def vectorstore(self, value):
-        """Setter para o vectorstore, usado em load_user_memory."""
         self._vectorstore = value
