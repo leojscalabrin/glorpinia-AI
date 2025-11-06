@@ -2,13 +2,12 @@ import os
 import re
 import logging
 import google.generativeai as genai
-from google.generativeai.types import Tool, FunctionDeclaration 
-from google.ai.generativelanguage import Schema, Type
 
 from langchain_core.messages import HumanMessage, AIMessage
 from .memory_manager import MemoryManager
 from dotenv import load_dotenv
 
+# Importa a ferramenta que faz a busca
 from .features.search import SearchTool
 
 load_dotenv()
@@ -21,8 +20,8 @@ except Exception as e:
 
 class GeminiClient:
     """
-    Cliente para interagir com o modelo Gemini, agora configurado
-    como um "Agente de Ferramentas" que pode decidir usar a busca.
+    Cliente para interagir com o modelo Gemini, agora com
+    memória de curto prazo, longo prazo (RAG) e busca na web.
     """
     def __init__(self, personality_profile):
         self.personality_profile = personality_profile
@@ -38,49 +37,51 @@ class GeminiClient:
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
+
+        self.model = genai.GenerativeModel(
+            model_name="gemini-flash-latest",
+            generation_config=self.generation_config,
+            safety_settings=self.safety_settings,
+            system_instruction=self.personality_profile 
+        )
         
-        # Esta é a ferramenta de Python que executa a busca
+        # Inicializa a ferramenta de busca
         try:
             self.search_tool = SearchTool()
         except Exception as e:
             logging.error(f"[GeminiClient] Falha ao inicializar SearchTool: {e}")
             self.search_tool = None
+        
+        # Lista de gatilhos
+        self.SEARCH_TRIGGERS = [
+            'quem é', 'o que é', 'onde é', 'quando', 'notícia', 
+            'aconteceu', 'resultado do jogo', 'previsão do tempo',
+            'qual a previsão', 'temperatura'
+        ]
 
-        # Esta é a definição que ensina o Gemini a usar a ferramenta de busca
-        self.web_search_tool = Tool(
-            function_declarations=[
-                FunctionDeclaration(
-                    name="web_search",
-                    description="Busca na internet em tempo real por fatos, notícias, clima, ou informações recentes que o modelo não possui ou se sentiu confuso para responder.",
-                    parameters=Schema(
-                        type=Type.OBJECT,
-                        properties={
-                            "query": Schema(
-                                type=Type.STRING, 
-                                description="A pergunta ou termo de busca a ser pesquisado. Ex: 'previsão do tempo são paulo hoje' ou 'quem ganhou a copa de 2024'"
-                            )
-                        },
-                        required=["query"]
-                    ),
-                )
-            ]
-        )
-
-        # Inicializa o modelo, passando as ferramentas que ele pode usar
-        self.model = genai.GenerativeModel(
-            model_name="gemini-flash-latest",
-            generation_config=self.generation_config,
-            safety_settings=self.safety_settings,
-            system_instruction=self.personality_profile,
-            tools=[self.web_search_tool] if self.search_tool else None
-        )
-
+    def _should_search(self, query: str) -> bool:
+        """
+        Decide se uma query deve ou não disparar uma busca na web.
+        """
+        if not self.search_tool:
+            return False # Sem ferramenta de busca
+            
+        query_lower = query.lower()
+        
+        # Não busca se for um comando
+        if query_lower.startswith('!'):
+            return False
+            
+        # Busca se a query terminar com "?" E contiver um gatilho
+        if query_lower.endswith('?'):
+            for trigger in self.SEARCH_TRIGGERS:
+                if trigger in query_lower:
+                    return True
+        return False
 
     def get_response(self, query, channel, author, memory_mgr: 'MemoryManager', recent_chat_history=None):
         """
-        Gera uma resposta. Agora é um loop que pode:
-        1. Responder diretamente.
-        2. Pausar, chamar a ferramenta de busca, e então responder.
+        Gera uma resposta usando API Gemini, com memórias e busca na web.
         """
         
         # Preparar Memória de Longo Prazo (RAG)
@@ -107,68 +108,50 @@ class GeminiClient:
                 ])
                 short_term_context = f"**HISTÓRICO RECENTE (MEMÓRIA IMEDIATA):**\n{formatted_history}"
         
-        # Montagem do Prompt Inicial
+        # Preparar Contexto da Web (Se necessário)
+        web_context = ""
+        if self._should_search(query):
+            search_results = self.search_tool.perform_search(query)
+            if search_results:
+                web_context = f"**CONTEXTO DA INTERNET (BUSCA EM TEMPO REAL):**\n{search_results}"
+        
+        # Montagem do Prompt Final (Todas Memórias + Query)
         prompt = f"""
         {short_term_context}
+
         {long_term_context}
+
+        {web_context}
 
         **Query do Usuário:** {query}
         """
-        
-        # Inicia uma sessão de chat (necessário para 'tool use')
-        chat_session = self.model.start_chat()
-        
-        try:
-            # TURNO 1: Envia o prompt inicial
-            response = chat_session.send_message(prompt)
-            
-            # Analisa a resposta do Modelo
-            response_part = response.parts[0]
-            
-            if response_part.function_call:
-                # O MODELO DECIDIU USAR A FERRAMENTA DE BUSCA
-                logging.debug(f"[GeminiClient] IA decidiu usar a ferramenta de busca.")
-                
-                function_call = response_part.function_call
-                
-                if function_call.name == "web_search":
-                    # Executa a ferramenta de busca
-                    search_query = function_call.args['query']
-                    logging.info(f"[GeminiClient] IA está buscando por: {search_query}")
-                    
-                    search_results = self.search_tool.perform_search(search_query)
-                    
-                    if not search_results:
-                        search_results = "A busca na internet não retornou nada."
-                    
-                    # TURNO 2: Envia os resultados da busca de volta para a IA
-                    response = chat_session.send_message(
-                        # Resposta da Função (não é um texto do usuário)
-                        genai.Part(
-                            function_response={
-                                "name": "web_search",
-                                "response": {"result": search_results}
-                            }
-                        )
-                    )
-                    # A IA agora vai gerar a resposta final com base nos resultados
-                    generated = response.text.strip()
-                
-                else:
-                    # A IA tentou chamar uma ferramenta que não existe
-                    generated = "Ocorreu um glitch estranho nas minhas anteninhas... Sadge."
 
+        # Chamada à API do Gemini
+        try:
+            # Revertido para a chamada 'generate_content' simples
+            response = self.model.generate_content(prompt)
+
+            if not response.parts:
+                finish_reason = "DESCONHECIDO"
+                if response.candidates and response.candidates[0].finish_reason:
+                     finish_reason = response.candidates[0].finish_reason.name
+
+                logging.error(f"[ERROR] A API Gemini não retornou 'parts'. Finish Reason: {finish_reason}")
+                
+                if finish_reason == "SAFETY":
+                    generated = "Minha resposta foi bloqueada pelos filtros de segurança. Tente reformular. Sadge."
+                else:
+                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge."
             else:
-                # O MODELO RESPONDEU DIRETAMENTE (Não precisou de busca)
                 generated = response.text.strip()
 
         except Exception as e:
-            logging.error(f"[ERROR] Falha na comunicação com a API Gemini (Tool Use): {e}")
+            logging.error(f"[ERROR] Falha na comunicação com a API Gemini: {e}")
             generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
         # Limpeza Final e Salvamento de Memória
         generated = self._clean_response(generated)
-        fallback = "Meow. O portal está com lag. Tente novamente! glorp"
+        fallback = "Meow. O portal está com lag. Tente novamente! 😸"
         is_system_message = (author.lower() == "system")
 
         if generated:
@@ -189,6 +172,7 @@ class GeminiClient:
         """Limpa a resposta dos prefixos de prompt."""
         generated = generated.strip()
         
+        # Remove os novos marcadores de prompt
         generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         
