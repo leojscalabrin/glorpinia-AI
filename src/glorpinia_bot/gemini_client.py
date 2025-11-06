@@ -2,7 +2,8 @@ import os
 import re
 import logging
 import google.generativeai as genai
-from google.generativeai.types import Tool, FunctionDeclaration, Schema, Type
+from google.generativeai.types import Tool, FunctionDeclaration 
+from google.ai.generativelanguage import Schema, Type
 
 from langchain_core.messages import HumanMessage, AIMessage
 from .memory_manager import MemoryManager
