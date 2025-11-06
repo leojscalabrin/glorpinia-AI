@@ -24,7 +24,7 @@ class GeminiClient:
         # Configurações de geração (segurança e parâmetros)
         self.generation_config = {
             "temperature": 0.7,
-            "max_output_tokens": 1024,
+            "max_output_tokens": 1024, 
         }
         
         # Configurações de segurança (para permitir o roleplay)
@@ -35,7 +35,7 @@ class GeminiClient:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
-        # Inicializa o modelo
+        # Inicializa o modelo (usando -latest)
         self.model = genai.GenerativeModel(
             model_name="gemini-flash-latest",
             generation_config=self.generation_config,
@@ -43,14 +43,16 @@ class GeminiClient:
             system_instruction=self.personality_profile 
         )
 
-    def get_response(self, query, channel, author, memory_mgr: 'MemoryManager'):
+
+    def get_response(self, query, channel, author, memory_mgr: 'MemoryManager', recent_chat_history=None):
         """
-        Gera uma resposta usando a API Gemini, injetando RAG como contexto.
+        Gera uma resposta usando a API Gemini, injetando
+        Memória de Curto Prazo (histórico) e Longo Prazo (RAG).
         """
+        
+        # Preparar Memória de Longo Prazo (RAG)
         memory_mgr.load_user_memory(channel, author)
         vectorstore = memory_mgr.vectorstore
-        
-        # Recuperação de Contexto (RAG/Memória de Longo Prazo)
         long_term_context = ""
         if vectorstore:
             try:
@@ -60,76 +62,83 @@ class GeminiClient:
                 if docs:
                     long_term_context = "\n".join([doc.page_content for doc in docs])
                     # Formata o RAG para o prompt do Gemini
-                    long_term_context = f"**CONTEXTO APRENDIDO (MEMÓRIA GLORPINIA):** {long_term_context}"
+                    long_term_context = f"**CONTEXTO APRENDIDO (MEMÓRIA GLORPINIA):**\n{long_term_context}"
             except Exception as e:
                 logging.error(f"[RAG ERROR] Falha ao buscar contexto: {e}")
-
-        # Montagem do Prompt Final (RAG + Query)
+        
+        # Preparar Memória de Curto Prazo (Histórico Recente)
+        short_term_context = ""
+        if recent_chat_history:
+            # Pega as últimas 10 mensagens do deque
+            recent_messages = list(recent_chat_history)[-10:] 
+            if recent_messages:
+                # Formata o histórico
+                formatted_history = "\n".join([
+                    f"{msg['author']}: {msg['content']}" for msg in recent_messages
+                ])
+                short_term_context = f"**HISTÓRICO RECENTE (MEMÓRIA IMEDIATA):**\n{formatted_history}"
+        
+        # Montagem do Prompt Final (Ambas Memórias + Query)
         prompt = f"""
+        {short_term_context}
+
         {long_term_context}
 
         **Query do Usuário:** {query}
         """
 
-        # chamada à API do Gemini
+        # 4Chamada à API do Gemini (Com verificação de SAFETY)
         try:
             response = self.model.generate_content(prompt)
 
-            # Verificação de segurança ANTES de tentar ler o .text
             if not response.parts:
-                # A resposta foi bloqueada ou veio vazia
                 finish_reason = "DESCONHECIDO"
                 if response.candidates and response.candidates[0].finish_reason:
-                    finish_reason = response.candidates[0].finish_reason.name # Pega o nome (ex: SAFETY)
+                     finish_reason = response.candidates[0].finish_reason.name
 
                 logging.error(f"[ERROR] A API Gemini não retornou 'parts'. Finish Reason: {finish_reason}")
                 
                 if finish_reason == "SAFETY":
-                    generated = "glorp [REDACTED]"
+                    generated = "Estou sendo bloqueada por sinais da Nave-Mãe. Tente reformular. glorp"
                 else:
-                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge"
+                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge."
             else:
-                # Se tudo estiver OK, agora sim podemos ler o texto
                 generated = response.text.strip()
 
         except Exception as e:
             logging.error(f"[ERROR] Falha na comunicação com a API Gemini: {e}")
             generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
-        # Limpeza Final e Salvamento de Memória
+        # 5. Limpeza Final e Salvamento de Memória
         generated = self._clean_response(generated)
-
+        
+        # Define o fallback
         fallback = "Meow. O portal está com lag. Tente novamente! 😸"
-            
-        # Verifica se o autor é 'system'. Se for, não adiciona @tag e não salva na memória.
+
         is_system_message = (author.lower() == "system")
 
         if generated:
-            
             if is_system_message:
-                # É um 'comment' ou 'listen'. Retorna a resposta limpa.
                 return generated
             else:
-                # É uma resposta a um usuário. Salva na memória e adiciona a tag.
+                # Salva na memória de LONGO PRAZO (RAG)
                 memory_mgr.save_user_memory(channel, author, query, generated)
                 final_response = f"@{author}, {generated}"
                 return final_response
         else:
             # Lógica de fallback
             if is_system_message:
-                return fallback # Retorna o fallback limpo
+                return fallback
             else:
-                final_fallback = f"@{author}, {fallback}" # Retorna o fallback com tag
+                final_fallback = f"@{author}, {fallback}"
                 return final_fallback
-            
-            return final_fallback
-    
+
     def _clean_response(self, generated):
-        
+        """Limpa a resposta dos prefixos de prompt."""
         generated = generated.strip()
         
-        # Limpeza de lixo de RAG (se a memória antiga ainda estiver suja)
-        generated = re.sub(r'\*\*CONTEXTO APRENDIDO\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE).strip()
-        generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE).strip()
+        # Remove os novos marcadores de prompt
+        generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
+        generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         
         return generated

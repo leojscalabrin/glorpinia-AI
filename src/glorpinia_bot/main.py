@@ -213,36 +213,29 @@ class TwitchIRC:
                 print(f"[DEBUG] Ignorando mensagem do proprio bot: {content}")
                 return
 
-            unique_message_identifier = f"{author_part}-{channel}-{content}"
-            message_hash = hash(unique_message_identifier)
+            # PROCESSA COMANDOS E TRIGGERS PRIMEIRO
+            # Comandos não devem ser filtrados por duplicatas.
 
-            if message_hash in self.processed_message_ids:
-                print(f"[INFO] Mensagem duplicada detectada e ignorada: {content}")
-                return
-            self.processed_message_ids.append(message_hash)
-            print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
-            
             # Responde "glorp" se a mensagem for exatamente "glorp"
             if content_lower == 'glorp':
                 self.send_message(channel, 'glorp')
                 return
 
+            # Comando 8-Ball (público)
             if content_lower.startswith("!glorp 8ball"):
-                # Extrai a pergunta (tudo depois de "!glorp 8ball ")
                 question = content[len("!glorp 8ball"):].strip()
                 if not question:
                     self.send_message(channel, f"@{author_part}, você precisa me perguntar algo! glorp")
                     return
-
-                # Delega para a feature (que já usa um thread)
                 self.eight_ball_feature.get_8ball_response(question, channel, author_part)
                 return
             
+            # Comando Fortune Cookie (público)
             if content_lower == "!glorp cookie":
                 self.fortune_cookie_feature.get_fortune(channel, author_part)
                 return
-            
-            self.last_oziell_command_time = 0
+
+            # Trigger "oziell" (público, com cooldown)
             if "oziell" in content_lower:
                 now = time.time()
                 cooldown_seconds = 1800
@@ -254,16 +247,28 @@ class TwitchIRC:
                     print(f"[DEBUG] Trigger 'oziell' em cooldown. Ignorando.")
                 
                 return
-            
-            # Delega para o handle_admin_command
+
+            # Comandos de Admin
             if content.startswith("!glorp"):
                 if author_part.lower() in self.admin_nicks:
                     self.handle_admin_command(content, channel)
                     return
                 else:
+                    # É uma tentativa de comando de admin por um não-admin
                     self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
                     return
+            
+            # SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
+            unique_message_identifier = f"{author_part}-{channel}-{content}"
+            message_hash = hash(unique_message_identifier)
 
+            if message_hash in self.processed_message_ids:
+                print(f"[INFO] Mensagem duplicada detectada e ignorada: {content}")
+                return
+            self.processed_message_ids.append(message_hash)
+            print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
+
+            # SE NÃO FOR COMANDO NEM DUPLICATA, PROCESSA MENÇÕES À IA
             # Processamento de chat geral (respostas a mencoes)
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
                 print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
@@ -271,12 +276,24 @@ class TwitchIRC:
                     # Loga a interação antes de gerar a resposta
                     self.training_logger.log_interaction(channel, author_part, content, None) # Loga a query
                     
-                    response = self.gemini_client.get_response(content, channel, author_part, self.memory_mgr)
+                    # Pega o histórico recente deste canal
+                    recent_history = self.recent_messages.get(channel)
+                    
+                    # Passa o histórico (memória de curto prazo) para o get_response
+                    response = self.gemini_client.get_response(
+                        content, 
+                        channel, 
+                        author_part, 
+                        self.memory_mgr,
+                        recent_history
+                    )
+                    
                     if response:
                         self.send_long_message(channel, response)
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar resposta: {e}")
-
+            
+            
     def handle_admin_command(self, command, channel):
         """
         Processa comandos de admin e DELEGA para as classes de feature apropriadas.
