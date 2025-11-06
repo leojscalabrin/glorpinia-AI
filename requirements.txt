@@ -4,6 +4,7 @@ requests
 
 google-generativeai
 google-cloud-speech
+google-api-python-client
 
 langchain
 langchain-core
