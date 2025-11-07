@@ -73,6 +73,9 @@ class TwitchIRC:
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
         self.recent_messages = {channel: deque(maxlen=100) for channel in self.auth.channels}
+        
+        # Cooldown timer para o trigger "oziell"
+        self.last_oziell_time = 0
 
         # Lista de Admins
         admin_nicks_str = os.getenv("ADMIN_NICKS") 
@@ -213,43 +216,23 @@ class TwitchIRC:
                 print(f"[DEBUG] Ignorando mensagem do proprio bot: {content}")
                 return
 
-            # PROCESSA COMANDOS E TRIGGERS PRIMEIRO
-            # Comandos não devem ser filtrados por duplicatas.
-
-            # Responde "glorp" se a mensagem for exatamente "glorp"
-            if content_lower == 'glorp':
-                self.send_message(channel, 'glorp')
-                return
-
-            # Comando 8-Ball (público)
-            if content_lower.startswith("!glorp 8ball"):
-                question = content[len("!glorp 8ball"):].strip()
-                if not question:
-                    self.send_message(channel, f"@{author_part}, você precisa me perguntar algo! glorp")
-                    return
-                self.eight_ball_feature.get_8ball_response(question, channel, author_part)
-                return
-            
-            # Comando Fortune Cookie (público)
-            if content_lower == "!glorp cookie":
-                self.fortune_cookie_feature.get_fortune(channel, author_part)
-                return
-
-            # Trigger "oziell" (público, com cooldown)
-            if "oziell" in content_lower:
-                now = time.time()
-                cooldown_seconds = 1800
-
-                if (now - self.last_oziell_time) > cooldown_seconds:
-                    self.last_oziell_time = now
-                    self.send_message(channel, "Olá @oziell ! Tudo bem @oziell ? Tchau @oziell !")
-                else:
-                    print(f"[DEBUG] Trigger 'oziell' em cooldown. Ignorando.")
-                
-                return
-
-            # Comandos de Admin
+            # PROCESSA COMANDOS (PÚBLICOS E ADMIN)
             if content.startswith("!glorp"):
+                
+                # Comandos Públicos (Abertos a todos)
+                if content_lower.startswith("!glorp 8ball"):
+                    question = content[len("!glorp 8ball"):].strip()
+                    if not question:
+                        self.send_message(channel, f"@{author_part}, você precisa me perguntar algo! glorp")
+                        return
+                    self.eight_ball_feature.get_8ball_response(question, channel, author_part)
+                    return
+                
+                if content_lower == "!glorp cookie":
+                    self.fortune_cookie_feature.get_fortune(channel, author_part)
+                    return
+
+                # Comandos de Admin
                 if author_part.lower() in self.admin_nicks:
                     self.handle_admin_command(content, channel)
                     return
@@ -258,18 +241,7 @@ class TwitchIRC:
                     self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
                     return
             
-            # SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
-            unique_message_identifier = f"{author_part}-{channel}-{content}"
-            message_hash = hash(unique_message_identifier)
-
-            if message_hash in self.processed_message_ids:
-                print(f"[INFO] Mensagem duplicada detectada e ignorada: {content}")
-                return
-            self.processed_message_ids.append(message_hash)
-            print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
-
-            # SE NÃO FOR COMANDO NEM DUPLICATA, PROCESSA MENÇÕES À IA
-            # Processamento de chat geral (respostas a mencoes)
+            # PROCESSA MENÇÕES DIRETAS À IA
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
                 print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
                 try:
@@ -292,7 +264,42 @@ class TwitchIRC:
                         self.send_long_message(channel, response)
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar resposta: {e}")
+                
+                return
+
+            # PROCESSA TRIGGERS PASSIVOS
             
+            # Responde "glorp" se a palavra estiver na mensagem
+            if 'glorp' in content_lower:
+                self.send_message(channel, 'glorp')
+                return
+
+            # Trigger "oziell" (público, com cooldown)
+            if "oziell" in content_lower:
+                now = time.time()
+                cooldown_seconds = 1800
+
+                if (now - self.last_oziell_time) > cooldown_seconds:
+                    self.last_oziell_time = now
+                    self.send_message(channel, "Olá @oziell ! Tudo bem @oziell ? Tchau @oziell !")
+                else:
+                    print(f"[DEBUG] Trigger 'oziell' em cooldown. Ignorando.")
+                
+                return
+
+            # SE NÃO FOR COMANDO, MENÇÃO OU TRIGGER, CHECA DUPLICATAS DE CHAT
+            unique_message_identifier = f"{author_part}-{channel}-{content}"
+            message_hash = hash(unique_message_identifier)
+
+            if message_hash in self.processed_message_ids:
+                print(f"[INFO] Mensagem duplicada detectada e ignorada: {content}")
+                return
+            self.processed_message_ids.append(message_hash)
+            print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
+            
+            # Chamado a cada mensagem, se estiver ATIVADO
+            if self.comment_feature:
+                self.comment_feature.roll_for_comment(channel)
             
     def handle_admin_command(self, command, channel):
         """
@@ -311,7 +318,7 @@ class TwitchIRC:
                 # Obtém status de todas as features
                 chat_status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
                 listen_status = self.listen_feature.get_status()
-                comment_status = self.comment_feature.get_status()
+                comment_status = self.comment_feature.get_status() 
                 
                 status_msg = (
                     f"Status: "
@@ -333,7 +340,7 @@ class TwitchIRC:
         
         # Comandos On/Off (3 partes)
         if len(parts) < 3:
-            self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on|off>, !glorp check ou !glorp commands para mais informações glorp")
+            self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on/off>, !glorp check ou !glorp commands para mais informações glorp")
             return
 
         feature = parts[1].lower()
@@ -353,7 +360,7 @@ class TwitchIRC:
         elif feature == "comment":
             # Delega para a feature de Comment
             self.comment_feature.set_enabled(state)
-            status = self.comment_feature.get_status()
+            status = self.comment_feature.get_status() 
             self.send_message(channel, f"peepoTalk O modo COMMENT foi {status}.")
         
         else:

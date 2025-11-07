@@ -20,7 +20,7 @@ except Exception as e:
 class GeminiClient:
     """
     Cliente para interagir com o modelo Gemini, com
-    memória de curto prazo, longo prazo (RAG) e busca na web (via gatilho).
+    memória de curto prazo, longo prazo (RAG) e busca na web (via Análise de IA).
     """
     def __init__(self, personality_profile):
         self.personality_profile = personality_profile
@@ -37,11 +37,19 @@ class GeminiClient:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
+        # Modelo principal (para respostas)
         self.model = genai.GenerativeModel(
             model_name="gemini-flash-latest",
             generation_config=self.generation_config,
             safety_settings=self.safety_settings,
             system_instruction=self.personality_profile 
+        )
+
+        # Usamos 'temperature: 0.0' para que ele seja 100% literal (SIM/NÃO)
+        self.analysis_model = genai.GenerativeModel(
+            model_name="gemini-flash-latest",
+            generation_config={"temperature": 0.0},
+            safety_settings=self.safety_settings 
         )
         
         # Inicializa a ferramenta de busca
@@ -50,39 +58,64 @@ class GeminiClient:
         except Exception as e:
             logging.error(f"[GeminiClient] Falha ao inicializar SearchTool: {e}")
             self.search_tool = None
-        
-        # Lista de gatilhos
-        self.SEARCH_TRIGGERS = [
-            'quem é', 'o que é', 'onde é', 'quando', 'notícia', 
-            'aconteceu', 'resultado do jogo', 'previsão do tempo',
-            'google', 'procure', 'pesquise', 'qual a previsão'
-        ]
+
+    def _build_search_analysis_prompt(self, query: str) -> str:
+        """
+        Cria um prompt específico para a IA decidir se a busca é necessária.
+        """
+        return f"""
+        Você é um assistente de análise de busca. Sua única tarefa é decidir se a pergunta do usuário precisa de uma busca na internet para ser respondida.
+        A IA (Glorpinia) NÃO tem conhecimento de eventos após 2023, pessoas específicas pouco conhecidas, ou dados em tempo real (como clima ou resultados de jogos).
+
+        Responda APENAS 'SIM' ou 'NÃO'.
+
+        Responda 'SIM' se a pergunta for sobre:
+        - Eventos recentes (notícias de hoje, "o que aconteceu ontem")
+        - Pessoas, lugares ou fatos históricos/reais (ex: "quem é o presidente da frança?", "quem venceu a Primeira Guerra Mundial'?")
+        - Informações em tempo real (ex: "vai chover hoje?", "qual o resultado do jogo X?")
+
+        Responda 'NÃO' se a pergunta for:
+        - Uma conversa fiada (ex: "oi, tudo bem?", "qual sua cor favorita?")
+        - Uma pergunta sobre a PRÓPRIA IA (ex: "você é uma IA?", "qual seu nome?")
+        - Um comando (ex: "!glorp cookie")
+
+        Pergunta do Usuário: "{query}"
+        Decisão (SIM/NÃO):
+        """
 
     def _should_search(self, query: str) -> bool:
         """
-        Decide se uma query deve ou não disparar uma busca na web.
+        Decide se uma query deve ou não disparar uma busca na web,
+        perguntando a um modelo de IA (Passagem 1).
         """
         if not self.search_tool:
             return False # Sem ferramenta de busca
-            
-        query_lower = query.lower()
-        
-        # Não busca se for um comando
-        if query_lower.startswith('!'):
+
+        # Se for um comando, nunca pesquise.
+        if query.lower().startswith('!'):
             return False
+
+        # Monta o prompt de análise
+        analysis_prompt = self._build_search_analysis_prompt(query)
+        
+        try:
+            # Chama o modelo de análise
+            response = self.analysis_model.generate_content(analysis_prompt)
+            decision = response.text.strip().upper()
             
-        # Busca se a query terminar com "?" E contiver um gatilho
-        if query_lower.endswith('?'):
-            for trigger in self.SEARCH_TRIGGERS:
-                if trigger in query_lower:
-                    return True
-        return False
+            logging.info(f"[SearchTool] Análise de busca para '{query}'. Decisão da IA: {decision}")
+            return decision == "SIM"
+        except Exception as e:
+            logging.error(f"[SearchTool] Erro na ANÁLISE de busca: {e}")
+            return False # Falha segura, não busca
+
 
     def get_response(self, query, channel, author, memory_mgr: 'MemoryManager', recent_chat_history=None):
         """
-        Gera uma resposta usando API Gemini, com memórias e busca na web.
+        Gera uma resposta (Passagem 2), com memórias e (se decidido) busca na web.
         """
         
+        # Limpa a menção @GlorpinIA da query ANTES de fazer qualquer coisa.
         clean_query = re.sub(r'@glorpinia\b', '', query, flags=re.IGNORECASE).strip()
 
         # Preparar Memória de Longo Prazo (RAG)
@@ -92,7 +125,7 @@ class GeminiClient:
         if vectorstore:
             try:
                 retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-                docs = retriever.invoke(clean_query) # Usa query limpa
+                docs = retriever.invoke(clean_query) 
                 if docs:
                     long_term_context = "\n".join([doc.page_content for doc in docs])
                     long_term_context = f"**CONTEXTO APRENDIDO (MEMÓRIA GLORPINIA):**\n{long_term_context}"
@@ -111,8 +144,8 @@ class GeminiClient:
         
         # Preparar Contexto da Web (Se necessário)
         web_context = ""
-        if self._should_search(clean_query): # Usa query limpa
-            search_results = self.search_tool.perform_search(clean_query) # Usa query limpa
+        if self._should_search(clean_query):
+            search_results = self.search_tool.perform_search(clean_query)
             if search_results:
                 web_context = f"**CONTEXTO DA INTERNET (BUSCA EM TEMPO REAL):**\n{search_results}"
         
@@ -129,27 +162,27 @@ class GeminiClient:
 
         # Chamada à API do Gemini
         try:
+            # Usa o modelo principal 'self.model'
             response = self.model.generate_content(prompt)
 
             if not response.parts:
                 finish_reason = "DESCONHECIDO"
                 if response.candidates and response.candidates[0].finish_reason:
                      finish_reason = response.candidates[0].finish_reason.name
-
                 logging.error(f"[ERROR] A API Gemini não retornou 'parts'. Finish Reason: {finish_reason}")
                 
                 if finish_reason == "SAFETY":
-                    generated = "Minha resposta foi bloqueada pelos filtros de segurança. Tente reformular. Sadge."
+                    generated = "Meu sinal foi bloqueado pela Nave-Mãe, tente reformular. glorp "
                 else:
-                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge."
+                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadg."
             else:
                 generated = response.text.strip()
 
         except Exception as e:
-            logging.error(f"[ERROR] Falha na comunicação com a API Gemini: {e}")
+            logging.error(f"Falha na comunicação com a API Gemini: {e}")
             generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
-        # Limpeza Final e Salvamento de Memória
+        # 6. Limpeza Final e Salvamento de Memória
         generated = self._clean_response(generated)
         fallback = "Meow. O portal está com lag. Tente novamente! 😸"
         is_system_message = (author.lower() == "system")
