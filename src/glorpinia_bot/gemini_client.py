@@ -116,7 +116,7 @@ class GeminiClient:
         """
         
         # Limpa a menção @GlorpinIA da query ANTES de fazer qualquer coisa.
-        clean_query = re.sub(r'@glorpinia\b', '', query, flags=re.IGNORECASE).strip()
+        clean_query = re.sub(r'@glorpinia\b[,\s]*', '', query, flags=re.IGNORECASE).strip()
 
         # Preparar Memória de Longo Prazo (RAG)
         memory_mgr.load_user_memory(channel, author)
