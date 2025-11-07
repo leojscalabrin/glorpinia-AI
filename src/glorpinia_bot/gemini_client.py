@@ -174,7 +174,7 @@ class GeminiClient:
                 if finish_reason == "SAFETY":
                     generated = "Meu sinal foi bloqueado pela Nave-Mãe, tente reformular. glorp "
                 else:
-                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadg."
+                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge"
             else:
                 generated = response.text.strip()
 
