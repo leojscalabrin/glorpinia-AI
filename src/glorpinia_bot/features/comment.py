@@ -12,22 +12,17 @@ class Comment:
         print("[Feature] Comment Initialized.")
         self.bot = bot
         self.enabled = False
-        
-        self.current_chance = 0.01 
 
     def set_enabled(self, state: bool):
         """Ativa ou desativa esta feature."""
         self.enabled = state
         if not state:
-            # Reseta a chance se for desligado
-            self.current_chance = 0.01
-            logging.info("[Comment] Desativado. Chance resetada para 1%.")
+            logging.info("[Comment] Desativado.")
 
     def get_status(self):
         """Retorna o status formatado para o comando !glorp check."""
         status = "ATIVADO" if self.enabled else "DESATIVADO"
-        # Mostra a chance atual no status
-        return f"{status} (Chance atual: {self.current_chance*100:.0f}%)"
+        return f"{status}"
 
     def stop_thread(self):
         """Função mantida (chamada pelo main) mas não faz mais nada."""
@@ -42,12 +37,11 @@ class Comment:
         if not self.enabled:
             return
 
-        # Rola o dado
-        if random.random() < self.current_chance:
-            logging.info(f"[Comment] Gatilho atingido! (Chance era {self.current_chance*100:.0f}%)")
+        # Rola o dado com uma chance fixa de 1%
+        if random.random() < 0.01:
+            logging.info(f"[Comment] Gatilho atingido! (Chance fixa de 1%)")
             
-            # Reseta a chance de volta para 1%
-            self.current_chance = 0.01
+            # Removemos o reset da chance, pois não é mais necessário
             
             # Pega os últimos 2 minutos de mensagens (lógica antiga)
             now = time.time()
@@ -70,14 +64,6 @@ class Comment:
             t.daemon = True
             t.start()
             
-        else:
-            # Aumenta a chance para a próxima mensagem
-            self.current_chance += 0.01
-            # Limita a chance máxima
-            if self.current_chance > 0.50:
-                self.current_chance = 0.50
-            
-            logging.debug(f"[Comment] Gatilho falhou. Nova chance: {self.current_chance*100:.0f}%")
     
     def _generate_comment_thread(self, query, channel, memory_mgr):
         """
