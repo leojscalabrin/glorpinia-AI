@@ -37,9 +37,9 @@ class Comment:
         if not self.enabled:
             return
 
-        # Rola o dado com uma chance fixa de 1%
-        if random.random() < 0.01:
-            logging.info(f"[Comment] Gatilho atingido! (Chance fixa de 1%)")
+        # Rola o dado com uma chance fixa de 2%
+        if random.random() < 0.02:
+            logging.info(f"[Comment] Gatilho atingido! (Chance fixa de 2%)")
             
             # Removemos o reset da chance, pois não é mais necessário
             
