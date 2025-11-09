@@ -24,7 +24,7 @@ class SearchTool:
                 logging.error(f"[SearchTool] Falha ao inicializar o serviço de busca: {e}")
                 self.service = None
 
-    def perform_search(self, query: str, num_results=3) -> str | None:
+    def perform_search(self, query: str, num_results=1) -> str | None:
         """
         Executa uma busca na web e retorna os snippets formatados.
         Retorna None se a busca falhar ou for desnecessária.

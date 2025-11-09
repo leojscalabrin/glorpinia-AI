@@ -11,6 +11,10 @@ from .features.search import SearchTool
 
 load_dotenv()
 
+# Correção das importações de Schema/Type
+from google.generativeai.types import Tool, FunctionDeclaration
+from google.ai.generativelanguage import Schema, Type
+
 try:
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 except Exception as e:
@@ -44,8 +48,8 @@ class GeminiClient:
             safety_settings=self.safety_settings,
             system_instruction=self.personality_profile 
         )
-
-        # Usamos 'temperature: 0.0' para que ele seja 100% literal (SIM/NÃO)
+        
+        # Modelo leve (apenas para decidir se busca ou não)
         self.analysis_model = genai.GenerativeModel(
             model_name="gemini-flash-latest",
             generation_config={"temperature": 0.0},
@@ -58,6 +62,7 @@ class GeminiClient:
         except Exception as e:
             logging.error(f"[GeminiClient] Falha ao inicializar SearchTool: {e}")
             self.search_tool = None
+        
 
     def _build_search_analysis_prompt(self, query: str) -> str:
         """
@@ -71,7 +76,7 @@ class GeminiClient:
 
         Responda 'SIM' se a pergunta for sobre:
         - Eventos recentes (notícias de hoje, "o que aconteceu ontem")
-        - Pessoas, lugares ou fatos históricos/reais (ex: "quem é o presidente da frança?", "quem venceu a Primeira Guerra Mundial'?")
+        - Pessoas, lugares ou fatos históricos/reais (ex: "quem é o presidente da frança?", "o que é o 'Alabama Hot Pocket'?")
         - Informações em tempo real (ex: "vai chover hoje?", "qual o resultado do jogo X?")
 
         Responda 'NÃO' se a pergunta for:
@@ -115,7 +120,7 @@ class GeminiClient:
         Gera uma resposta (Passagem 2), com memórias e (se decidido) busca na web.
         """
         
-        # Limpa a menção @GlorpinIA da query ANTES de fazer qualquer coisa.
+        # Limpa a menção @GlorpinIA E qualquer vírgula/espaço logo após ela.
         clean_query = re.sub(r'@glorpinia\b[,\s]*', '', query, flags=re.IGNORECASE).strip()
 
         # Preparar Memória de Longo Prazo (RAG)
@@ -124,7 +129,7 @@ class GeminiClient:
         long_term_context = ""
         if vectorstore:
             try:
-                retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
                 docs = retriever.invoke(clean_query) 
                 if docs:
                     long_term_context = "\n".join([doc.page_content for doc in docs])
@@ -135,14 +140,14 @@ class GeminiClient:
         # Preparar Memória de Curto Prazo (Histórico Recente)
         short_term_context = ""
         if recent_chat_history:
-            recent_messages = list(recent_chat_history)[-10:] 
+            recent_messages = list(recent_chat_history)[-3:] 
             if recent_messages:
                 formatted_history = "\n".join([
                     f"{msg['author']}: {msg['content']}" for msg in recent_messages
                 ])
                 short_term_context = f"**HISTÓRICO RECENTE (MEMÓRIA IMEDIATA):**\n{formatted_history}"
         
-        # Preparar Contexto da Web (Se necessário)
+        # Preparar Contexto da Web
         web_context = ""
         if self._should_search(clean_query):
             search_results = self.search_tool.perform_search(clean_query)
@@ -172,9 +177,9 @@ class GeminiClient:
                 logging.error(f"[ERROR] A API Gemini não retornou 'parts'. Finish Reason: {finish_reason}")
                 
                 if finish_reason == "SAFETY":
-                    generated = "Meu sinal foi bloqueado pela Nave-Mãe, tente reformular. glorp "
+                    generated = "Minha resposta foi bloqueada pelos filtros de segurança. Tente reformular. Sadge."
                 else:
-                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge"
+                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge."
             else:
                 generated = response.text.strip()
 
@@ -182,7 +187,7 @@ class GeminiClient:
             logging.error(f"Falha na comunicação com a API Gemini: {e}")
             generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
-        # 6. Limpeza Final e Salvamento de Memória
+        # Limpeza Final e Salvamento de Memória
         generated = self._clean_response(generated)
         fallback = "Meow. O portal está com lag. Tente novamente! 😸"
         is_system_message = (author.lower() == "system")
