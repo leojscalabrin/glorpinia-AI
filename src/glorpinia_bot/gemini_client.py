@@ -31,7 +31,7 @@ class GeminiClient:
         
         self.generation_config = {
             "temperature": 0.7,
-            "max_output_tokens": 1024, 
+            "max_output_tokens": 2048, 
         }
         
         self.safety_settings = [
@@ -129,7 +129,7 @@ class GeminiClient:
         long_term_context = ""
         if vectorstore:
             try:
-                retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
                 docs = retriever.invoke(clean_query) 
                 if docs:
                     long_term_context = "\n".join([doc.page_content for doc in docs])
@@ -140,7 +140,7 @@ class GeminiClient:
         # Preparar Memória de Curto Prazo (Histórico Recente)
         short_term_context = ""
         if recent_chat_history:
-            recent_messages = list(recent_chat_history)[-3:] 
+            recent_messages = list(recent_chat_history)[-10:] 
             if recent_messages:
                 formatted_history = "\n".join([
                     f"{msg['author']}: {msg['content']}" for msg in recent_messages
@@ -167,19 +167,25 @@ class GeminiClient:
 
         # Chamada à API do Gemini
         try:
-            # Usa o modelo principal 'self.model'
             response = self.model.generate_content(prompt)
 
-            if not response.parts:
+            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                reason = response.prompt_feedback.block_reason.name
+                logging.warning(f"[SAFETY] Prompt bloqueado. Razão: {reason}")
+                generated = f"Minhas anteninhas detectaram interferência perigosa ({reason}). Tente reformular. Sadge"
+            
+            elif not response.parts:
                 finish_reason = "DESCONHECIDO"
                 if response.candidates and response.candidates[0].finish_reason:
                      finish_reason = response.candidates[0].finish_reason.name
                 logging.error(f"[ERROR] A API Gemini não retornou 'parts'. Finish Reason: {finish_reason}")
                 
-                if finish_reason == "SAFETY":
-                    generated = "Minha resposta foi bloqueada pelos filtros de segurança. Tente reformular. Sadge."
+                if finish_reason == "MAX_TOKENS":
+                    generated = f"Minhas anteninhas superaqueceram e minha resposta foi cortada! (Razão: {finish_reason}). Tente de novo. Sadge"
+                elif finish_reason == "SAFETY":
+                    generated = "Minha resposta foi bloqueada pela Nave-Mãe. Tente reformular. Sadge"
                 else:
-                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge."
+                    generated = f"Minhas anteninhas não captaram nenhum sinal (Razão: {finish_reason}). Sadge"
             else:
                 generated = response.text.strip()
 
