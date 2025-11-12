@@ -11,7 +11,7 @@ class Comment:
         """
         print("[Feature] Comment Initialized.")
         self.bot = bot
-        self.enabled = False
+        self.enabled = True
 
     def set_enabled(self, state: bool):
         """Ativa ou desativa esta feature."""
