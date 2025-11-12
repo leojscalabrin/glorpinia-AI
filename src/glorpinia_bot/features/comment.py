@@ -41,9 +41,6 @@ class Comment:
         if random.random() < 0.02:
             logging.info(f"[Comment] Gatilho atingido! (Chance fixa de 2%)")
             
-            # Removemos o reset da chance, pois não é mais necessário
-            
-            # Pega os últimos 2 minutos de mensagens (lógica antiga)
             now = time.time()
             recent_msgs = self.bot.recent_messages.get(channel, None)
             if not recent_msgs:
@@ -56,9 +53,8 @@ class Comment:
                 return
             
             context_str = "\n".join([f"{msg['author']}: {msg['content']}" for msg in recent_context])
-            comment_query = f"Comente de forma natural e divertida sobre essa conversa recente no chat da live: {context_str[:500]}..."
+            comment_query = f"Comente de forma natural e divertida sobre essa conversa recente no chat da live, procure focar em apenas um assunto que pareça principal, não mencione o author: {context_str[:500]}..."
             
-            # Roda a geração da IA em um thread para não travar
             t = threading.Thread(target=self._generate_comment_thread, 
                                  args=(comment_query, channel, self.bot.memory_mgr))
             t.daemon = True
