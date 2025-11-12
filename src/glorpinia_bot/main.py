@@ -194,7 +194,7 @@ class TwitchIRC:
             anon_author = f"User{hash(author_part) % 1000}"
             msg_data = {
                 'timestamp': time.time(),
-                'author': anon_author,
+                'author': author_part,
                 'content': content
             }
             if channel in self.recent_messages:
