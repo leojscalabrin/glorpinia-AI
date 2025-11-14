@@ -32,12 +32,12 @@ class EightBall:
         
         Sua missão é responder a esta pergunta como uma 'Magic 8-Ball' mística.
         Você DEVE dar uma resposta curta e vaga em uma das três categorias:
-        1. Afirmativa (ex: Sim, Com certeza, glorp SIM)
-        2. Não-Comprometida (ex: Pergunte mais tarde, Talvez, Não sei bicho)
-        3. Negativa (ex: Não, Nem pensar, Minhas anteninhas dizem não)
+        1. Afirmativa (ex: Sim, Com certeza ou glorp DEFINITIVAMENTE)
+        2. Não-Comprometida (ex: Pergunte mais tarde, Talvez ou Não sei bicho)
+        3. Negativa (ex: Não, Nem pensar ou Minhas anteninhas dizem não)
 
         Mantenha sua personalidade de Glorpinia, mas seja misteriosa. 
-        Comece sua resposta com 'glorp'.
+        Comece sua resposta com 'glorp', e não responda como você responderia normalmente.
         """
 
     def _generate_response_thread(self, question_text: str, channel: str, author: str):

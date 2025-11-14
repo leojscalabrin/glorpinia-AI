@@ -49,8 +49,8 @@ class FortuneCookie:
         O usuário @{author} acabou de pedir um biscoito da sorte.
 
         Sua missão é dar a ele uma "sorte" (fortune).
-        A sorte deve ser curta (1-2 frases), misteriosa, e ter a 
-        personalidade da Glorpinia.
+        A sorte deve ser curta (1-2 frases), misteriosa, como um haiku.
+        Pode ser uma mensagem de sorte ou aviso enigmático de azar.
         
         Pode ser um bom conselho, um aviso vago, ou uma piada alienígena 
         sarcástica (como se viesse de Meowdromeda).
