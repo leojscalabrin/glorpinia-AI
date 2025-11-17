@@ -26,6 +26,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name
 
 class TwitchIRC:
     def __init__(self):
+        # Core Auth (sempre necessário)
         self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
         
         # Configurações de Estado
@@ -46,6 +47,7 @@ class TwitchIRC:
 
         if self.capture_only:
             print('[INFO] Running in capture-only mode.')
+            # No modo de captura, inicializa APENAS o logger
             self.training_logger = TrainingLogger(self)
         else:
             print("[INFO] Running in full-feature mode.")
@@ -189,7 +191,6 @@ class TwitchIRC:
             content_lower = content.lower()
             print(f"[DEBUG] content_lower='{content_lower}'")
 
-            anon_author = f"User{hash(author_part) % 1000}"
             msg_data = {
                 'timestamp': time.time(),
                 'author': author_part,
@@ -213,8 +214,8 @@ class TwitchIRC:
             if author_part.lower() == self.auth.bot_nick.lower():
                 print(f"[DEBUG] Ignorando mensagem do proprio bot: {content}")
                 return
-
-            # PROCESSA COMANDOS
+            
+            # PROCESSA COMANDOS (PÚBLICOS E ADMIN)
             if content.startswith("!glorp"):
                 
                 # Comandos Públicos
@@ -223,11 +224,13 @@ class TwitchIRC:
                     if not question:
                         self.send_message(channel, f"@{author_part}, você precisa me perguntar algo! glorp")
                         return
-                    self.eight_ball_feature.get_8ball_response(question, channel, author_part)
+                    if self.eight_ball_feature:
+                        self.eight_ball_feature.get_8ball_response(question, channel, author_part)
                     return
                 
                 if content_lower == "!glorp cookie":
-                    self.fortune_cookie_feature.get_fortune(channel, author_part)
+                    if self.fortune_cookie_feature:
+                        self.fortune_cookie_feature.get_fortune(channel, author_part)
                     return
 
                 # Comandos de Admin
@@ -235,6 +238,7 @@ class TwitchIRC:
                     self.handle_admin_command(content, channel)
                     return
                 else:
+                    # É uma tentativa de comando de admin por um não-admin
                     self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
                     return
             
@@ -243,22 +247,24 @@ class TwitchIRC:
                 print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
                 try:
                     # Loga a interação antes de gerar a resposta
-                    self.training_logger.log_interaction(channel, author_part, content, None) # Loga a query
+                    if self.training_logger:
+                        self.training_logger.log_interaction(channel, author_part, content, None) # Loga a query
                     
                     # Pega o histórico recente deste canal
                     recent_history = self.recent_messages.get(channel)
                     
                     # Passa o histórico (memória de curto prazo) para o get_response
-                    response = self.gemini_client.get_response(
-                        content, 
-                        channel, 
-                        author_part, 
-                        self.memory_mgr,
-                        recent_history
-                    )
-                    
-                    if response:
-                        self.send_long_message(channel, response)
+                    if self.gemini_client and self.memory_mgr:
+                        response = self.gemini_client.get_response(
+                            content, 
+                            channel, 
+                            author_part, 
+                            self.memory_mgr,
+                            recent_history
+                        )
+                        
+                        if response:
+                            self.send_long_message(channel, response)
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar resposta: {e}")
                 
@@ -292,7 +298,7 @@ class TwitchIRC:
             self.processed_message_ids.append(message_hash)
             print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
             
-            # Chamado a cada mensagem, se estiver ATIVADO
+            # PROCESSA O GATILHO DO COMMENT
             if self.comment_feature:
                 self.comment_feature.roll_for_comment(channel)
             
@@ -369,6 +375,9 @@ class TwitchIRC:
         self.running = True
         while self.running:
             try:
+                print("[INFO] Validando token antes de conectar...")
+                self.auth.validate_and_refresh_token()
+                
                 self.ws = websocket.WebSocketApp(
                     "wss://irc-ws.chat.twitch.tv:443",
                     on_message=self.on_message,
