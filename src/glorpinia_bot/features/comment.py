@@ -53,27 +53,41 @@ class Comment:
                 return
             
             context_str = "\n".join([f"{msg['author']}: {msg['content']}" for msg in recent_context])
-            comment_query = f"Comente de forma natural e divertida sobre essa conversa recente no chat da live, procure focar em apenas um assunto que pareça principal, não mencione o author: {context_str[:500]}..."
             
             t = threading.Thread(target=self._generate_comment_thread, 
-                                 args=(comment_query, channel, self.bot.memory_mgr))
+                                 args=(context_str, channel, self.bot.memory_mgr))
+            
             t.daemon = True
             t.start()
             
     
-    def _generate_comment_thread(self, query, channel, memory_mgr):
+    def _generate_comment_thread(self, context_str: str, channel: str, memory_mgr):
         """
         Thread que chama a IA, para não travar a 'on_message'.
+        Agora usa uma lógica de 2 passagens: Sumarizar e depois Comentar.
         """
         try:
+            # Sumarizar o log do chat
+            logging.debug(f"[Comment] Passagem 1: Sumarizando o chat...")
+            topic = self.bot.gemini_client.summarize_chat_topic(context_str)
+
+            if not topic or topic == "assuntos aleatórios":
+                logging.debug(f"[Comment] Tópico não é interessante o suficiente ('{topic}'). Cancelando.")
+                return
+
+            # Criar um prompt limpo e comentar sobre o tópico
+            logging.debug(f"[Comment] Passagem 2: Gerando comentário sobre '{topic}'...")
+            comment_query = f"O chat está falando sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto."
+
             comment = self.bot.gemini_client.get_response(
-                query=query,
+                query=comment_query,
                 channel=channel,
                 author="system",
                 memory_mgr=memory_mgr
             )
+            
             if 0 < len(comment) <= 200:
                 self.bot.send_message(channel, comment)
                 logging.debug(f"[Comment] Comentario enviado em {channel}: {comment[:50]}...")
         except Exception as e:
-            logging.error(f"[Comment] Falha ao gerar comentario: {e}")
+            logging.error(f"[Comment] Falha ao gerar comentario de 2 passagens: {e}")

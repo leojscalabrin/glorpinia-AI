@@ -11,7 +11,6 @@ from .features.search import SearchTool
 
 load_dotenv()
 
-# Correção das importações de Schema/Type
 from google.generativeai.types import Tool, FunctionDeclaration
 from google.ai.generativelanguage import Schema, Type
 
@@ -220,3 +219,42 @@ class GeminiClient:
         generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         
         return generated
+
+    def summarize_chat_topic(self, chat_log: str) -> str:
+        """
+        Usa o 'analysis_model' para extrair o tópico principal de um log de chat.
+        """
+        if not chat_log:
+            return "nada em particular"
+
+        # Prompt de sumarização
+        prompt = f"""
+        Você é um analisador de chat da Twitch. O log de chat abaixo é caótico.
+        Sua única tarefa é identificar o tópico principal ou o assunto mais interessante sendo discutido.
+        Responda APENAS com o tópico, em uma frase curta e direta.
+
+        Se o chat estiver falando sobre várias coisas aleatórias, apenas responda "assuntos aleatórios".
+
+        Log do Chat:
+        ---
+        {chat_log}
+        ---
+        Tópico Principal:
+        """
+
+        try:
+            # Chama o 'analysis_model' (temp 0.0) para uma resposta literal
+            response = self.analysis_model.generate_content(prompt)
+            
+            if response.parts:
+                topic = response.text.strip()
+                # Limpa qualquer "Tópico Principal:" que a IA possa adicionar
+                topic = topic.replace("Tópico Principal:", "").strip()
+                logging.info(f"[Comment] Tópico do chat sumarizado: {topic}")
+                return topic
+            else:
+                logging.warning("[Comment] Sumarização falhou (resposta vazia).")
+                return "assuntos aleatórios"
+        except Exception as e:
+            logging.error(f"[Comment] Falha ao sumarizar o chat: {e}")
+            return "assuntos aleatórios"

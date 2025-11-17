@@ -26,7 +26,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name
 
 class TwitchIRC:
     def __init__(self):
-        # Core Auth (sempre necessário)
         self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
         
         # Configurações de Estado
@@ -47,7 +46,6 @@ class TwitchIRC:
 
         if self.capture_only:
             print('[INFO] Running in capture-only mode.')
-            # No modo de captura, inicializa APENAS o logger
             self.training_logger = TrainingLogger(self)
         else:
             print("[INFO] Running in full-feature mode.")
@@ -216,10 +214,10 @@ class TwitchIRC:
                 print(f"[DEBUG] Ignorando mensagem do proprio bot: {content}")
                 return
 
-            # PROCESSA COMANDOS (PÚBLICOS E ADMIN)
+            # PROCESSA COMANDOS
             if content.startswith("!glorp"):
                 
-                # Comandos Públicos (Abertos a todos)
+                # Comandos Públicos
                 if content_lower.startswith("!glorp 8ball"):
                     question = content[len("!glorp 8ball"):].strip()
                     if not question:
@@ -237,7 +235,6 @@ class TwitchIRC:
                     self.handle_admin_command(content, channel)
                     return
                 else:
-                    # É uma tentativa de comando de admin por um não-admin
                     self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
                     return
             
@@ -269,12 +266,10 @@ class TwitchIRC:
 
             # PROCESSA TRIGGERS PASSIVOS
             
-            # Responde "glorp" se a palavra estiver na mensagem
             if 'glorp' in content_lower:
                 self.send_message(channel, 'glorp')
                 return
 
-            # Trigger "oziell" (público, com cooldown)
             if "oziell" in content_lower:
                 now = time.time()
                 cooldown_seconds = 1800
