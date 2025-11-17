@@ -442,11 +442,16 @@ class TwitchIRC:
     def on_open(self, ws):
         """Handler para quando a conexao WebSocket é aberta."""
         token_for_send = self.auth.access_token
+        
+        ws.send("CAP REQ :twitch.tv/membership twitch.tv/tags\r\n")
+        
         ws.send(f"PASS oauth:{token_for_send}\r\n")
         ws.send(f"NICK {self.auth.bot_nick}\r\n")
         print(f"[AUTH] Autenticando como {self.auth.bot_nick} com token...")
+        
         for channel in self.auth.channels:
-            ws.send(f"JOIN #{channel}\\r\n")
+            ws.send(f"JOIN #{channel}" + "\r\n")
+            
             print(f"[JOIN] Tentando juntar ao canal: #{channel}")
             time.sleep(2) # Adiciona um delay de 2s entre joins
             self.send_message(channel, "Wokege")
