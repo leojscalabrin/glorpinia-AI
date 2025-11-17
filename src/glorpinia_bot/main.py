@@ -21,12 +21,12 @@ from .features.listen import Listen
 from .features.training_logger import TrainingLogger
 from .features.eight_ball import EightBall
 from .features.fortune_cookie import FortuneCookie
+from .features.cookie_system import CookieSystem
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
 class TwitchIRC:
     def __init__(self):
-        # Core Auth (sempre necessário)
         self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
         
         # Configurações de Estado
@@ -44,6 +44,7 @@ class TwitchIRC:
         self.training_logger = None # Logger de dados
         self.eight_ball_feature = None
         self.fortune_cookie_feature = None
+        self.cookie_system = None
 
         if self.capture_only:
             print('[INFO] Running in capture-only mode.')
@@ -67,6 +68,7 @@ class TwitchIRC:
             self.comment_feature = Comment(self)
             self.listen_feature = Listen(self, self.speech_client)
             self.training_logger = TrainingLogger(self)
+            self.cookie_system = CookieSystem(self)
             self.eight_ball_feature = EightBall(self)
             self.fortune_cookie_feature = FortuneCookie(self)
 
@@ -98,6 +100,7 @@ class TwitchIRC:
         if not self.capture_only:
             if self.comment_feature: self.comment_feature.stop_thread()
             if self.listen_feature: self.listen_feature.stop_thread()
+            if self.cookie_system: self.cookie_system.stop_thread()
 
         goodbye_msg = "Bedge"
         for channel in self.auth.channels:
@@ -215,6 +218,9 @@ class TwitchIRC:
                 print(f"[DEBUG] Ignorando mensagem do proprio bot: {content}")
                 return
             
+            if self.cookie_system:
+                self.cookie_system.handle_interaction(author_part.lower())
+
             # PROCESSA COMANDOS (PÚBLICOS E ADMIN)
             if content.startswith("!glorp"):
                 
@@ -231,6 +237,20 @@ class TwitchIRC:
                 if content_lower == "!glorp cookie":
                     if self.fortune_cookie_feature:
                         self.fortune_cookie_feature.get_fortune(channel, author_part)
+                    return
+
+                if content_lower.startswith("!glorp balance"):
+                    if self.cookie_system:
+                        parts = content.split()
+                        target_nick = author_part.lower() # Padrão: checa a si mesmo
+                        if len(parts) > 2:
+                            target_nick = parts[2].lower().replace("@", "") # Checa outro nick
+                        
+                        count = self.cookie_system.get_cookies(target_nick)
+                        if target_nick == author_part.lower():
+                            self.send_message(channel, f"@{author_part}, glorp você tem {count} 🍪")
+                        else:
+                            self.send_message(channel, f"@{author_part}, glorp {target_nick} tem {count} 🍪")
                     return
 
                 # Comandos de Admin
@@ -331,7 +351,7 @@ class TwitchIRC:
                 return
             
             elif command_name == "commands":
-                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie")
+                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie, balance [nick], addcookie [nick] [qt], removecookie [nick] [qt]")
                 return
             
             elif command_name == "scan":
@@ -339,33 +359,61 @@ class TwitchIRC:
                 self.listen_feature.trigger_manual_scan(channel)
                 return
         
+        if len(parts) == 4 and self.cookie_system:
+            command_name = parts[1].lower()
+            target_nick = parts[2].lower().replace("@", "")
+            
+            try:
+                amount = int(parts[3])
+                if amount <= 0:
+                    self.send_message(channel, "glorp A quantia deve ser maior que zero!")
+                    return
+
+                if command_name == "addcookie":
+                    self.cookie_system.add_cookies(target_nick, amount)
+                    self.send_message(channel, f"glorp {amount} 🍪  adicionado para {target_nick}.")
+                    return
+                
+                elif command_name == "removecookie":
+                    self.cookie_system.remove_cookies(target_nick, amount)
+                    self.send_message(channel, f"glorp {amount} 🍪  removido de {target_nick}.")
+                    return
+                    
+            except ValueError:
+                self.send_message(channel, "glorp A quantia de cookies deve ser um número!")
+                return
+            except Exception as e:
+                logging.error(f"[AdminCookie] Falha no comando: {e}")
+                self.send_message(channel, "glorp Ocorreu um erro ao modificar os cookies")
+                return
+        
         # Comandos On/Off (3 partes)
-        if len(parts) < 3:
-            self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on/off>, !glorp check ou !glorp commands para mais informações glorp")
-            return
+        if len(parts) == 3:
+            feature = parts[1].lower()
+            state = (parts[2].lower() == "on") # Converte para True ou False
 
-        feature = parts[1].lower()
-        state = (parts[2].lower() == "on") # Converte para True ou False
-
-        if feature == "chat":
-            self.chat_enabled = state
-            status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
-            self.send_message(channel, f"peepoChat O modo CHAT foi {status}.")
+            if feature == "chat":
+                self.chat_enabled = state
+                status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
+                self.send_message(channel, f"peepoChat O modo CHAT foi {status}.")
+                return
+            
+            elif feature == "listen":
+                # Delega para a feature de Listen
+                self.listen_feature.set_enabled(state)
+                status = self.listen_feature.get_status()
+                self.send_message(channel, f"glorp 📡 O modo LISTEN (automático) foi {status}.")
+                return
+            
+            elif feature == "comment":
+                # Delega para a feature de Comment
+                self.comment_feature.set_enabled(state)
+                status = self.comment_feature.get_status() 
+                self.send_message(channel, f"peepoTalk O modo COMMENT foi {status}.")
+                return
         
-        elif feature == "listen":
-            # Delega para a feature de Listen
-            self.listen_feature.set_enabled(state)
-            status = self.listen_feature.get_status()
-            self.send_message(channel, f"glorp 📡 O modo LISTEN (automático) foi {status}.")
-        
-        elif feature == "comment":
-            # Delega para a feature de Comment
-            self.comment_feature.set_enabled(state)
-            status = self.comment_feature.get_status() 
-            self.send_message(channel, f"peepoTalk O modo COMMENT foi {status}.")
-        
-        else:
-            self.send_message(channel, f"glorp Funcionalidade desconhecida: {feature}")
+        # Se nenhum comando de 2, 3 ou 4 partes foi pego
+        self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on/off>, !glorp check ou !glorp commands para mais informações glorp")
 
 
     def run(self):
@@ -398,7 +446,7 @@ class TwitchIRC:
         ws.send(f"NICK {self.auth.bot_nick}\r\n")
         print(f"[AUTH] Autenticando como {self.auth.bot_nick} com token...")
         for channel in self.auth.channels:
-            ws.send(f"JOIN #{channel}\r\n")
+            ws.send(f"JOIN #{channel}\\r\n")
             print(f"[JOIN] Tentando juntar ao canal: #{channel}")
             time.sleep(2) # Adiciona um delay de 2s entre joins
             self.send_message(channel, "Wokege")

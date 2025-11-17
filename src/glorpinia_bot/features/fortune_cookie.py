@@ -1,6 +1,7 @@
 import threading
 import logging
 from datetime import date
+import random
 
 class FortuneCookie:
     def __init__(self, bot):
@@ -10,32 +11,28 @@ class FortuneCookie:
         """
         print("[Feature] FortuneCookie Initialized.")
         self.bot = bot
-        # Dicionário para rastrear o último dia que um usuário pegou um cookie
-        # Formato: {"username": date(2025, 11, 5)}
         self.cooldowns = {}
 
     def get_fortune(self, channel: str, author: str):
         """
-        Verifica o cooldown e, se liberado, gera uma 'sorte' em um thread.
-        Isso é chamado pelo on_message.
+        Verifica o cooldown e, se liberado, gera uma 'sorte' e cookies.
         """
         
         today = date.today()
         last_cookie_date = self.cooldowns.get(author.lower())
 
         if last_cookie_date == today:
-            # Usuário já pegou um hoje. Envia mensagem de cooldown.
             logging.info(f"[FortuneCookie] Cooldown ativo para {author}.")
-            self.bot.send_message(channel, f"@{author}, você já pegou seu biscoito da sorte hoje! Madge Guloso")
+            self.bot.send_message(channel, f"@{author}, você já pegou seu biscoito da sorte hoje! Tente amanhã. glorp")
             return
         
-        # Se chegou aqui, o usuário pode pegar um cookie
-        # Atualiza o cooldown antes de iniciar o thread
         self.cooldowns[author.lower()] = today
+        
+        # Gera o bônus de cookie (1-10) e o passa para o thread.
+        cookie_gain = random.randint(1, 10)
 
-        # Roda a lógica da API em um thread
         t = threading.Thread(target=self._generate_fortune_thread, 
-                             args=(channel, author))
+                             args=(channel, author, cookie_gain)) # <- Passa o bônus
         t.daemon = True
         t.start()
 
@@ -49,20 +46,24 @@ class FortuneCookie:
         O usuário @{author} acabou de pedir um biscoito da sorte.
 
         Sua missão é dar a ele uma "sorte" (fortune).
-        A sorte deve ser curta (1-2 frases), misteriosa, como um haiku.
-        Pode ser uma mensagem de sorte ou aviso enigmático de azar.
+        A sorte deve ser curta (1-2 frases), misteriosa, e ter a 
+        personalidade da Glorpinia.
         
         Pode ser um bom conselho, um aviso vago, ou uma piada alienígena 
         sarcástica (como se viesse de Meowdromeda).
         
-        Comece sua resposta com 'glorp 🥠'.
+        Comece sua resposta com 'glorp'.
         """
 
-    def _generate_fortune_thread(self, channel: str, author: str):
+    def _generate_fortune_thread(self, channel: str, author: str, cookie_gain: int): # <- Recebe o bônus
         """
         Lógica real que chama a API (roda no thread).
         """
         try:
+            # Adiciona o bônus de cookie ao usuário
+            if self.bot.cookie_system:
+                self.bot.cookie_system.add_cookies(author, cookie_gain)
+
             # Loga a pergunta do usuário
             self.bot.training_logger.log_interaction(channel, author, "!glorp cookie", None)
 
@@ -79,7 +80,6 @@ class FortuneCookie:
 
             # Envia a resposta
             if response:
-                # O gemini_client já formata com o @autor
                 self.bot.send_long_message(channel, response)
             else:
                 self.bot.send_message(channel, f"@{author}, o biscoito da sorte veio... vazio. Sadge")
