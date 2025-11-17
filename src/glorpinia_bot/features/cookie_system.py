@@ -41,7 +41,7 @@ class CookieSystem:
         self.timer_running = False
 
     def _daily_bonus_thread(self):
-        """Thread que concede 5 cookies a todos no DB a cada 24h."""
+        """Thread que concede 10 cookies a todos no DB a cada 24h."""
         self.last_bonus_time = time.time()
         
         while self.timer_running:
@@ -49,11 +49,11 @@ class CookieSystem:
             
             now = time.time()
             if (now - self.last_bonus_time) > 86400:
-                logging.info("[CookieSystem] Aplicando bônus diário de 5 cookies para todos os usuários...")
+                logging.info("[CookieSystem] Aplicando bônus diário de 10 cookies para todos os usuários...")
                 try:
                     with sqlite3.connect(self.db_path) as conn:
                         c = conn.cursor()
-                        c.execute("UPDATE user_cookies SET cookie_count = cookie_count + 5")
+                        c.execute("UPDATE user_cookies SET cookie_count = cookie_count + 10")
                         conn.commit()
                     self.last_bonus_time = now
                     logging.info("[CookieSystem] Bônus diário aplicado com sucesso.")
