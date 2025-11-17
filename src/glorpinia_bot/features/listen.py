@@ -74,22 +74,10 @@ class Listen:
                     logging.debug(f"[Listen] Transcricao periódica vazia em {channel}. Pulando.")
                     continue
                 
-                comment_query = f"Comente de forma natural e divertida sobre o que foi dito na live: {transcription[:500]}..."
-                
-                try:
-                    comment = self.bot.gemini_client.get_response(
-                        query=comment_query,
-                        channel=channel,
-                        author="system",
-                        memory_mgr=self.bot.memory_mgr
-                    )
-                    
-                    if 0 < len(comment) <= 200:
-                        formatted_comment = f"@{channel}, {comment}"
-                        self.bot.send_long_message(channel, formatted_comment)
-                        logging.debug(f"[Listen] Comentario de audio periódico enviado em {channel}.")
-                except Exception as e:
-                    logging.error(f"[Listen] Falha ao gerar comentario de audio periódico: {e}")
+                t = threading.Thread(target=self._generate_comment_thread, 
+                                     args=(transcription, channel, self.bot.memory_mgr))
+                t.daemon = True
+                t.start()
 
     def _transcribe_stream(self, channel, duration=15):
         """
@@ -181,20 +169,42 @@ class Listen:
                 self.bot.send_message(channel, f"@{channel}, não consegui ouvir nada. Sadge")
                 return
 
-            comment_query = f"Comente de forma natural e divertida sobre o que foi dito na live: {transcription[:500]}..."
-            
-            comment = self.bot.gemini_client.get_response(
-                query=comment_query,
-                channel=channel,
-                author="system",
-                memory_mgr=self.bot.memory_mgr
-            )
-            
-            if comment:
-                self.bot.send_long_message(channel, f"@{channel}, {comment}")
-            else:
-                self.bot.send_message(channel, f"@{channel}, minhas anteninhas não captaram nenhum sinal. Sadge")
+            t = threading.Thread(target=self._generate_comment_thread, 
+                                 args=(transcription, channel, self.bot.memory_mgr))
+            t.daemon = True
+            t.start()
 
         except Exception as e:
             logging.error(f"[Listen] Falha ao gerar comentario de audio manual: {e}")
             self.bot.send_message(channel, f"@{channel}, o portal está instável. Eu não consigo me comunicar. Sadge")
+
+    def _generate_comment_thread(self, transcription: str, channel: str, memory_mgr):
+        """
+        Thread que chama a IA (2 passagens), para não travar a 'on_message'.
+        """
+        try:
+            # Sumarizar a transcrição
+            logging.debug(f"[Listen] Passagem 1: Sumarizando a transcrição...")
+            topic = self.bot.gemini_client.summarize_chat_topic(transcription) 
+
+            if not topic or topic == "assuntos aleatórios":
+                logging.debug(f"[Listen] Tópico do áudio não é interessante ('{topic}'). Cancelando.")
+                return
+
+            # Criar um prompt limpo e comentar sobre o tópico
+            logging.debug(f"[Listen] Passagem 2: Gerando comentário sobre '{topic}'...")
+            comment_query = f"O streamer estava falando sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto."
+
+            comment = self.bot.gemini_client.get_response(
+                query=comment_query,
+                channel=channel,
+                author="system",
+                memory_mgr=memory_mgr
+            )
+            
+            if 0 < len(comment) <= 200:
+                formatted_comment = f"@{channel}, {comment}"
+                self.bot.send_long_message(channel, formatted_comment)
+                logging.debug(f"[Listen] Comentario de audio enviado em {channel}: {comment[:50]}...")
+        except Exception as e:
+            logging.error(f"[Listen] Falha ao gerar comentario de 2 passagens: {e}")
