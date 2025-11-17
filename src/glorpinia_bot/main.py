@@ -178,13 +178,26 @@ class TwitchIRC:
 
         if "PRIVMSG" in message:
 
-            parts = message.split(":", 2)
-            if len(parts) < 3:
-                print(f"[DEBUG] Mensagem PRIVMSG invalida: {message}")
+            try:
+                # Pega as tags (se existirem)
+                if message.startswith("@"):
+                    tags_part, message_part = message.split(" :", 1)
+                else:
+                    message_part = message
+
+                # Pega o autor
+                author_part = message_part.split("!")[0].strip()
+                
+                # Pega o canal
+                channel_part = message_part.split("#")[1]
+                channel = channel_part.split(" :")[0].strip()
+                
+                # Pega o conteúdo
+                content = channel_part.split(" :", 1)[1].strip()
+
+            except Exception as e:
+                print(f"[DEBUG] Falha na análise da mensagem (provavelmente não é PRIVMSG): {e}")
                 return
-            author_part = parts[1].split("!")[0]
-            content = parts[2].strip()
-            channel = message.split("#")[1].split(" :")[0] if "#" in message else self.auth.channels[0]
 
             print(f"[CHAT] Parsed - author={author_part}, channel={channel}, content={content}")
             try:
