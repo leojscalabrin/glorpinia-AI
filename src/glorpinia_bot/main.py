@@ -371,7 +371,7 @@ class TwitchIRC:
                 # Delega para a feature de Listen
                 self.listen_feature.set_enabled(state)
                 status = self.listen_feature.get_status()
-                self.send_message(channel, f"glorp 📡 O modo LISTEN (automático) foi {status}.")
+                self.send_message(channel, f"glorp 📡 O modo LISTEN foi {status}.")
                 return
             
             elif feature == "comment":
