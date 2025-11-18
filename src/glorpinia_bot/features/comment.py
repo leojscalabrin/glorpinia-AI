@@ -28,18 +28,21 @@ class Comment:
         """Função mantida (chamada pelo main) mas não faz mais nada."""
         pass
 
-    def roll_for_comment(self, channel: str):
+    def roll_for_comment(self, channel: str, author: str):
         """
         Chamado a CADA MENSAGEM. Rola um dado para ver se o bot comenta.
-        A lógica de "comentar sobre os últimos 2 minutos" é mantida.
+        Se acionado, o autor da mensagem ganha 10 cookies.
         """
-        # Se a feature estiver desligada, não faz nada.
         if not self.enabled:
             return
 
-        # Rola o dado com uma chance fixa de 2%
+        # Chance fixa de 2% (0.02)
         if random.random() < 0.02:
-            logging.info(f"[Comment] Gatilho atingido! (Chance fixa de 2%)")
+            logging.info(f"[Comment] Gatilho atingido por {author}!")
+            
+            if self.bot.cookie_system:
+                self.bot.cookie_system.add_cookies(author, 10)
+                logging.info(f"[Comment] {author} ganhou 10 cookies pelo trigger!")
             
             now = time.time()
             recent_msgs = self.bot.recent_messages.get(channel, None)
@@ -48,7 +51,7 @@ class Comment:
 
             recent_context = [msg for msg in recent_msgs if now - msg['timestamp'] <= 120]
             
-            if len(recent_context) < 3: # Não comenta se houver menos de 3 msgs
+            if len(recent_context) < 3: 
                 logging.debug(f"[Comment] Gatilho atingido, mas poucas mensagens. Pulando.")
                 return
             
@@ -56,27 +59,22 @@ class Comment:
             
             t = threading.Thread(target=self._generate_comment_thread, 
                                  args=(context_str, channel, self.bot.memory_mgr))
-            
             t.daemon = True
             t.start()
             
     
     def _generate_comment_thread(self, context_str: str, channel: str, memory_mgr):
         """
-        Thread que chama a IA, para não travar a 'on_message'.
-        Agora usa uma lógica de 2 passagens: Sumarizar e depois Comentar.
+        Thread que chama a IA (2 passagens), para não travar a 'on_message'.
         """
         try:
-            # Sumarizar o log do chat
-            logging.debug(f"[Comment] Passagem 1: Sumarizando o chat...")
+            # 1. PASSAGEM 1: Sumarizar o log do chat
             topic = self.bot.gemini_client.summarize_chat_topic(context_str)
 
             if not topic or topic == "assuntos aleatórios":
-                logging.debug(f"[Comment] Tópico não é interessante o suficiente ('{topic}'). Cancelando.")
                 return
 
-            # Criar um prompt limpo e comentar sobre o tópico
-            logging.debug(f"[Comment] Passagem 2: Gerando comentário sobre '{topic}'...")
+            # 2. PASSAGEM 2: Comentar sobre o tópico
             comment_query = f"O chat está falando sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto."
 
             comment = self.bot.gemini_client.get_response(
@@ -90,4 +88,4 @@ class Comment:
                 self.bot.send_message(channel, comment)
                 logging.debug(f"[Comment] Comentario enviado em {channel}: {comment[:50]}...")
         except Exception as e:
-            logging.error(f"[Comment] Falha ao gerar comentario de 2 passagens: {e}")
+            logging.error(f"[Comment] Falha ao gerar comentario: {e}")

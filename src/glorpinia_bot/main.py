@@ -22,55 +22,41 @@ from .features.training_logger import TrainingLogger
 from .features.eight_ball import EightBall
 from .features.fortune_cookie import FortuneCookie
 from .features.cookie_system import CookieSystem
+from .features.slots import Slots
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
 class TwitchIRC:
     def __init__(self):
-        self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
+        # Core Auth (sempre necessário)
+        self.auth = TwitchAuth()
         
         # Configurações de Estado
         self.chat_enabled = True  # Para respostas a menções
-        self.capture_only = os.environ.get('GLORPINIA_CAPTURE_ONLY') == '1'
         
-        # Inicializa componentes (None por padrão)
+        print("[INFO] Starting Glorpinia Bot in FULL MODE.")
+
+        # Inicializa Componentes Pesados
         self.speech_client = None
-        self.gemini_client = None
-        self.memory_mgr = None
+        try:
+            self.speech_client = speech.SpeechClient()
+        except Exception as e:
+            print(f"[ERROR] Falha ao inicializar Google Speech Client: {e}")
+
+        self.gemini_client = GeminiClient(
+            personality_profile=self.auth.personality_profile
+        )
+        self.memory_mgr = MemoryManager()
         
-        # Inicializa features (None por padrão)
-        self.comment_feature = None
-        self.listen_feature = None
-        self.training_logger = None # Logger de dados
-        self.eight_ball_feature = None
-        self.fortune_cookie_feature = None
-        self.cookie_system = None
-
-        if self.capture_only:
-            print('[INFO] Running in capture-only mode.')
-            # No modo de captura, inicializa APENAS o logger
-            self.training_logger = TrainingLogger(self)
-        else:
-            print("[INFO] Running in full-feature mode.")
-            # Inicializa Componentes Pesados
-            try:
-                self.speech_client = speech.SpeechClient()
-            except Exception as e:
-                print(f"[ERROR] Falha ao inicializar Google Speech Client: {e}")
-
-            self.gemini_client = GeminiClient(
-                personality_profile=self.auth.personality_profile
-            )
-            self.memory_mgr = MemoryManager()
-            
-            # Inicializa Features
-            print("[INFO] Loading features...")
-            self.comment_feature = Comment(self)
-            self.listen_feature = Listen(self, self.speech_client)
-            self.training_logger = TrainingLogger(self)
-            self.cookie_system = CookieSystem(self)
-            self.eight_ball_feature = EightBall(self)
-            self.fortune_cookie_feature = FortuneCookie(self)
+        # Inicializa Features
+        print("[INFO] Loading features...")
+        self.comment_feature = Comment(self)
+        self.listen_feature = Listen(self, self.speech_client)
+        self.training_logger = TrainingLogger(self)
+        self.cookie_system = CookieSystem(self)
+        self.eight_ball_feature = EightBall(self)
+        self.fortune_cookie_feature = FortuneCookie(self)
+        self.slots_feature = Slots(self)
 
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
@@ -96,11 +82,10 @@ class TwitchIRC:
         """Handler para shutdown gracioso com mensagem de despedida."""
         print("[INFO] Sinal de shutdown recebido. Enviando mensagem de despedida...")
         
-        # Sinaliza para os threads das features pararem
-        if not self.capture_only:
-            if self.comment_feature: self.comment_feature.stop_thread()
-            if self.listen_feature: self.listen_feature.stop_thread()
-            if self.cookie_system: self.cookie_system.stop_thread()
+        # Para os threads das features
+        if self.comment_feature: self.comment_feature.stop_thread()
+        if self.listen_feature: self.listen_feature.stop_thread()
+        if self.cookie_system: self.cookie_system.stop_thread()
 
         goodbye_msg = "Bedge"
         for channel in self.auth.channels:
@@ -177,22 +162,18 @@ class TwitchIRC:
             return
 
         if "PRIVMSG" in message:
-
+            
             try:
-                # Pega as tags (se existirem)
                 if message.startswith("@"):
                     tags_part, message_part = message.split(" :", 1)
                 else:
                     message_part = message
 
-                # Pega o autor
                 author_part = message_part.split("!")[0].strip()
                 
-                # Pega o canal
                 channel_part = message_part.split("#")[1]
                 channel = channel_part.split(" :")[0].strip()
                 
-                # Pega o conteúdo
                 content = channel_part.split(" :", 1)[1].strip()
 
             except Exception as e:
@@ -207,6 +188,7 @@ class TwitchIRC:
             content_lower = content.lower()
             print(f"[DEBUG] content_lower='{content_lower}'")
 
+            # Histórico recente (com nick real)
             msg_data = {
                 'timestamp': time.time(),
                 'author': author_part,
@@ -220,108 +202,95 @@ class TwitchIRC:
                 self.on_message(ws, message)
                 return
             
-            if self.capture_only:
-                try:
-                    self.training_logger.log_interaction(channel, author_part, content, None)
-                except Exception as e:
-                    print(f"[ERROR] Falha ao salvar registro de captura: {e}")
-                return
-
             if author_part.lower() == self.auth.bot_nick.lower():
                 print(f"[DEBUG] Ignorando mensagem do proprio bot: {content}")
                 return
             
-            if self.cookie_system:
-                self.cookie_system.handle_interaction(author_part.lower())
+            # 1. PROCESSA COMANDOS E TRIGGERS PRIMEIRO
 
-            # PROCESSA COMANDOS (PÚBLICOS E ADMIN)
+            if content_lower == 'glorp':
+                self.send_message(channel, 'glorp')
+                return
+
+            if content_lower.startswith("!glorp 8ball"):
+                question = content[len("!glorp 8ball"):].strip()
+                if not question:
+                    self.send_message(channel, f"@{author_part}, você precisa me perguntar algo! glorp")
+                    return
+                self.eight_ball_feature.get_8ball_response(question, channel, author_part)
+                return
+            
+            if content_lower == "!glorp cookie":
+                if self.fortune_cookie_feature:
+                    self.fortune_cookie_feature.get_fortune(channel, author_part)
+                return
+
+            if content_lower.startswith("!glorp slots"):
+                if self.slots_feature:
+                    parts = content.split()
+                    bet = 10 # Default
+                    if len(parts) > 2:
+                        try:
+                            bet = int(parts[2])
+                        except ValueError:
+                            pass
+                    
+                    result_msg = self.slots_feature.play(channel, author_part, bet)
+                    self.send_message(channel, result_msg)
+                return
+
+            if content_lower.startswith("!glorp balance"):
+                if self.cookie_system:
+                    parts = content.split()
+                    target_nick = author_part.lower()
+                    if len(parts) > 2:
+                        target_nick = parts[2].lower().replace("@", "")
+                    
+                    count = self.cookie_system.get_cookies(target_nick)
+                    if target_nick == author_part.lower():
+                        self.send_message(channel, f"@{author_part}, você tem {count} cookies! glorp")
+                    else:
+                        self.send_message(channel, f"@{author_part}, o usuário {target_nick} tem {count} cookies! glorp")
+                return
+
+            if content_lower.startswith("!glorp help"):
+                parts = content.split()
+                if len(parts) < 3:
+                    self.send_message(channel, "glorp Use !glorp help [comando] para saber mais. Ex: !glorp help slots")
+                    return
+                
+                cmd_help = parts[2].lower()
+                
+                help_messages = {
+                    "check": "glorp checa o status das features de chat (chat/comment/listen)",
+                    "slots": "glorp use !glorp slots [valor] para apostar nos slots, aposta minima 10 🍪 caso não passe o valor",
+                    "8ball": "glorp pergunte ao oráculo! Ex: !glorp 8ball Vai chover?",
+                    "cookie": "glorp pegue seu biscoito da sorte diário (e ganhe cookies bônus)",
+                    "balance": "glorp verifique seu saldo de cookies ou de outro usuário. Ex: !glorp balance @nick",
+                    "chat": "glorp (Admin) Ativa/Desativa a resposta a menções. Ex: !glorp chat on",
+                    "listen": "glorp (Admin) Ativa/Desativa a escuta automática. Ex: !glorp listen on",
+                    "comment": "glorp (Admin) Ativa/Desativa comentários automáticos. Ex: !glorp comment on",
+                    "scan": "glorp (Admin) Força uma escuta manual de 15s. Ex: !glorp scan",
+                    "addcookie": "glorp (Admin) Adiciona cookies. Ex: !glorp addcookie nick 100",
+                    "removecookie": "glorp (Admin) Remove cookies. Ex: !glorp removecookie nick 100",
+                    "commands": "glorp Lista todos os comandos disponíveis",
+                    "help": "Você deve estar precisando mesmo nise"
+                }
+                
+                msg = help_messages.get(cmd_help, f"glorp Comando '{cmd_help}' não encontrado. Tente !glorp commands.")
+                self.send_message(channel, msg)
+                return
+
+            # Comandos de Admin
             if content.startswith("!glorp"):
-                
-                # Comandos Públicos
-                if content_lower.startswith("!glorp 8ball"):
-                    question = content[len("!glorp 8ball"):].strip()
-                    if not question:
-                        self.send_message(channel, f"@{author_part}, você precisa me perguntar algo! glorp")
-                        return
-                    if self.eight_ball_feature:
-                        self.eight_ball_feature.get_8ball_response(question, channel, author_part)
-                    return
-                
-                if content_lower == "!glorp cookie":
-                    if self.fortune_cookie_feature:
-                        self.fortune_cookie_feature.get_fortune(channel, author_part)
-                    return
-
-                if content_lower.startswith("!glorp balance"):
-                    if self.cookie_system:
-                        parts = content.split()
-                        target_nick = author_part.lower() # Padrão: checa a si mesmo
-                        if len(parts) > 2:
-                            target_nick = parts[2].lower().replace("@", "") # Checa outro nick
-                        
-                        count = self.cookie_system.get_cookies(target_nick)
-                        if target_nick == author_part.lower():
-                            self.send_message(channel, f"@{author_part}, glorp você tem {count} 🍪")
-                        else:
-                            self.send_message(channel, f"@{author_part}, glorp {target_nick} tem {count} 🍪")
-                    return
-
-                # Comandos de Admin
                 if author_part.lower() in self.admin_nicks:
                     self.handle_admin_command(content, channel)
                     return
                 else:
-                    # É uma tentativa de comando de admin por um não-admin
                     self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
                     return
             
-            # PROCESSA MENÇÕES DIRETAS À IA
-            if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
-                print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
-                try:
-                    # Loga a interação antes de gerar a resposta
-                    if self.training_logger:
-                        self.training_logger.log_interaction(channel, author_part, content, None) # Loga a query
-                    
-                    # Pega o histórico recente deste canal
-                    recent_history = self.recent_messages.get(channel)
-                    
-                    # Passa o histórico (memória de curto prazo) para o get_response
-                    if self.gemini_client and self.memory_mgr:
-                        response = self.gemini_client.get_response(
-                            content, 
-                            channel, 
-                            author_part, 
-                            self.memory_mgr,
-                            recent_history
-                        )
-                        
-                        if response:
-                            self.send_long_message(channel, response)
-                except Exception as e:
-                    print(f"[ERROR] Falha ao gerar resposta: {e}")
-                
-                return
-
-            # PROCESSA TRIGGERS PASSIVOS
-            
-            if 'glorp' in content_lower:
-                self.send_message(channel, 'glorp')
-                return
-
-            if "oziell" in content_lower:
-                now = time.time()
-                cooldown_seconds = 1800
-
-                if (now - self.last_oziell_time) > cooldown_seconds:
-                    self.last_oziell_time = now
-                    self.send_message(channel, "Olá @oziell ! Tudo bem @oziell ? Tchau @oziell !")
-                else:
-                    print(f"[DEBUG] Trigger 'oziell' em cooldown. Ignorando.")
-                
-                return
-
-            # SE NÃO FOR COMANDO, MENÇÃO OU TRIGGER, CHECA DUPLICATAS DE CHAT
+            # 2. SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
             unique_message_identifier = f"{author_part}-{channel}-{content}"
             message_hash = hash(unique_message_identifier)
 
@@ -330,18 +299,43 @@ class TwitchIRC:
                 return
             self.processed_message_ids.append(message_hash)
             print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
+
+            # 3. SE NÃO FOR COMANDO NEM DUPLICATA, PROCESSA MENÇÕES À IA
+            if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
+                print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
+                
+                # Concede +1 cookie por Interação Direta (Menção)
+                if self.cookie_system:
+                    self.cookie_system.handle_interaction(author_part.lower())
+
+                try:
+                    if self.training_logger:
+                        self.training_logger.log_interaction(channel, author_part, content, None) # Loga a query
+                    
+                    recent_history = self.recent_messages.get(channel)
+                    
+                    if self.gemini_client and self.memory_mgr:
+                        response = self.gemini_client.get_response(
+                            content, 
+                            channel, 
+                            author_part, 
+                            self.memory_mgr,
+                            recent_history 
+                        )
+                        
+                        if response:
+                            self.send_long_message(channel, response)
+                except Exception as e:
+                    print(f"[ERROR] Falha ao gerar resposta: {e}")
             
-            # PROCESSA O GATILHO DO COMMENT
+            # 4. PROCESSA O GATILHO DO COMMENT
             if self.comment_feature:
-                self.comment_feature.roll_for_comment(channel)
+                self.comment_feature.roll_for_comment(channel, author_part)
             
     def handle_admin_command(self, command, channel):
         """
         Processa comandos de admin e DELEGA para as classes de feature apropriadas.
         """
-        if self.capture_only:
-            return # Não faz nada no modo de captura
-
         parts = command.split()
         
         # Comandos de 2 partes
@@ -349,7 +343,6 @@ class TwitchIRC:
             command_name = parts[1].lower()
 
             if command_name == "check":
-                # Obtém status de todas as features
                 chat_status = "ATIVADO" if self.chat_enabled else "DESATIVADO"
                 listen_status = self.listen_feature.get_status()
                 comment_status = self.comment_feature.get_status() 
@@ -364,11 +357,10 @@ class TwitchIRC:
                 return
             
             elif command_name == "commands":
-                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie, balance [nick], addcookie [nick] [qt], removecookie [nick] [qt]")
+                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie, balance, slots [aposta], help [comando]")
                 return
             
             elif command_name == "scan":
-                # Delega para a feature de Listen
                 self.listen_feature.trigger_manual_scan(channel)
                 return
         
@@ -384,12 +376,12 @@ class TwitchIRC:
 
                 if command_name == "addcookie":
                     self.cookie_system.add_cookies(target_nick, amount)
-                    self.send_message(channel, f"glorp {amount} 🍪  adicionado para {target_nick}.")
+                    self.send_message(channel, f"glorp {amount} cookies adicionados para {target_nick}.")
                     return
                 
                 elif command_name == "removecookie":
                     self.cookie_system.remove_cookies(target_nick, amount)
-                    self.send_message(channel, f"glorp {amount} 🍪  removido de {target_nick}.")
+                    self.send_message(channel, f"glorp {amount} cookies removidos de {target_nick}.")
                     return
                     
             except ValueError:
@@ -397,9 +389,9 @@ class TwitchIRC:
                 return
             except Exception as e:
                 logging.error(f"[AdminCookie] Falha no comando: {e}")
-                self.send_message(channel, "glorp Ocorreu um erro ao modificar os cookies")
+                self.send_message(channel, "glorp Ocorreu um erro ao modificar os cookies.")
                 return
-        
+
         # Comandos On/Off (3 partes)
         if len(parts) == 3:
             feature = parts[1].lower()
@@ -415,7 +407,7 @@ class TwitchIRC:
                 # Delega para a feature de Listen
                 self.listen_feature.set_enabled(state)
                 status = self.listen_feature.get_status()
-                self.send_message(channel, f"glorp 📡 O modo LISTEN (automático) foi {status}.")
+                self.send_message(channel, f"glorp 📡 O modo LISTEN foi {status}.")
                 return
             
             elif feature == "comment":
@@ -425,7 +417,7 @@ class TwitchIRC:
                 self.send_message(channel, f"peepoTalk O modo COMMENT foi {status}.")
                 return
         
-        # Se nenhum comando de 2, 3 ou 4 partes foi pego
+        # Se nenhum comando de 2 ou 3 partes foi pego
         self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on/off>, !glorp check ou !glorp commands para mais informações glorp")
 
 
