@@ -246,6 +246,10 @@ class TwitchIRC:
                     if len(parts) > 2:
                         target_nick = parts[2].lower().replace("@", "")
                     
+                    if target_nick == self.auth.bot_nick.lower():
+                        print(f"[DEBUG] Ignorando comando de balance para o próprio bot.")
+                        return
+                    
                     count = self.cookie_system.get_cookies(target_nick)
                     if target_nick == author_part.lower():
                         self.send_message(channel, f"@{author_part}, você tem {count} cookies! glorp")

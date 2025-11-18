@@ -87,18 +87,20 @@ class CookieSystem:
 
     def get_leaderboard(self, limit=5):
         """
-        Retorna os top N usuários com mais cookies.
-        Retorna lista de tuplas: [('nick', 100), ('nick2', 50)...]
+        Retorna os top N usuários com mais cookies, EXCLUINDO o próprio bot.
         """
         try:
+            bot_nick = self.bot.auth.bot_nick.lower()
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
-                c.execute("SELECT user_nick, cookie_count FROM user_cookies ORDER BY cookie_count DESC LIMIT ?", (limit,))
+                c.execute(
+                    "SELECT user_nick, cookie_count FROM user_cookies WHERE user_nick != ? ORDER BY cookie_count DESC LIMIT ?", 
+                    (bot_nick, limit)
+                )
                 return c.fetchall()
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao buscar leaderboard: {e}")
             return []
-    # -------------------------------
 
     def add_cookies(self, nick: str, amount_to_add: int):
         """Adiciona cookies a um usuário."""
