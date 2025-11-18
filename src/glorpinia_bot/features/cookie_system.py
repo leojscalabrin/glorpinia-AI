@@ -41,19 +41,19 @@ class CookieSystem:
         self.timer_running = False
 
     def _daily_bonus_thread(self):
-        """Thread que concede 10 cookies a todos no DB a cada 24h."""
+        """Thread que concede 5 cookies a todos no DB a cada 24h."""
         self.last_bonus_time = time.time()
         
         while self.timer_running:
-            time.sleep(3600)
+            time.sleep(3600) # Checa a cada hora
             
             now = time.time()
-            if (now - self.last_bonus_time) > 86400:
-                logging.info("[CookieSystem] Aplicando bônus diário de 10 cookies para todos os usuários...")
+            if (now - self.last_bonus_time) > 86400: # 24h
+                logging.info("[CookieSystem] Aplicando bônus diário de 5 cookies...")
                 try:
                     with sqlite3.connect(self.db_path) as conn:
                         c = conn.cursor()
-                        c.execute("UPDATE user_cookies SET cookie_count = cookie_count + 10")
+                        c.execute("UPDATE user_cookies SET cookie_count = cookie_count + 5")
                         conn.commit()
                     self.last_bonus_time = now
                     logging.info("[CookieSystem] Bônus diário aplicado com sucesso.")
@@ -66,7 +66,6 @@ class CookieSystem:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
-                # Insere o usuário com 0 cookies; ignora se ele já existir.
                 c.execute("INSERT OR IGNORE INTO user_cookies (user_nick, cookie_count) VALUES (?, 0)", (nick,))
                 conn.commit()
         except Exception as e:
@@ -75,7 +74,7 @@ class CookieSystem:
     def get_cookies(self, nick: str) -> int:
         """Busca a contagem de cookies de um usuário."""
         nick = nick.lower()
-        self._check_or_create_user(nick) # Garante que o usuário exista
+        self._check_or_create_user(nick)
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
@@ -86,8 +85,23 @@ class CookieSystem:
             logging.error(f"[CookieSystem] Falha ao buscar cookies para {nick}: {e}")
             return 0
 
+    def get_leaderboard(self, limit=5):
+        """
+        Retorna os top N usuários com mais cookies.
+        Retorna lista de tuplas: [('nick', 100), ('nick2', 50)...]
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                c.execute("SELECT user_nick, cookie_count FROM user_cookies ORDER BY cookie_count DESC LIMIT ?", (limit,))
+                return c.fetchall()
+        except Exception as e:
+            logging.error(f"[CookieSystem] Falha ao buscar leaderboard: {e}")
+            return []
+    # -------------------------------
+
     def add_cookies(self, nick: str, amount_to_add: int):
-        """Adiciona cookies a um usuário. (Para !glorp cookie e admin)."""
+        """Adiciona cookies a um usuário."""
         nick = nick.lower()
         self._check_or_create_user(nick)
         try:
@@ -100,13 +114,12 @@ class CookieSystem:
             logging.error(f"[CookieSystem] Falha ao adicionar cookies para {nick}: {e}")
 
     def remove_cookies(self, nick: str, amount_to_remove: int):
-        """Remove cookies de um usuário. (Para admin e futuro !slots)."""
+        """Remove cookies de um usuário."""
         nick = nick.lower()
         self._check_or_create_user(nick)
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
-                # MAX(0, ...) impede que o total fique negativo
                 c.execute("UPDATE user_cookies SET cookie_count = MAX(0, cookie_count - ?) WHERE user_nick = ?", (amount_to_remove, nick))
                 conn.commit()
             logging.info(f"[CookieSystem] -{amount_to_remove} cookies para {nick}.")
@@ -114,20 +127,15 @@ class CookieSystem:
             logging.error(f"[CookieSystem] Falha ao remover cookies de {nick}: {e}")
 
     def handle_interaction(self, nick: str):
-        """
-        Concede +1 cookie por interação.
-        Este é o único comando que cria um usuário na primeira interação.
-        """
+        """Concede +1 cookie por interação."""
         nick = nick.lower()
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
-                # Tenta inserir o usuário. Se ele já existir, o ON CONFLICT entra em ação.
                 c.execute("""
                     INSERT INTO user_cookies (user_nick, cookie_count) VALUES (?, 1)
                     ON CONFLICT(user_nick) DO UPDATE SET cookie_count = cookie_count + 1
                 """, (nick,))
                 conn.commit()
-            logging.info(f"[CookieSystem] +1 cookie de interação para {nick}.")
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao dar cookie de interação para {nick}: {e}")

@@ -253,6 +253,21 @@ class TwitchIRC:
                         self.send_message(channel, f"@{author_part}, o usuário {target_nick} tem {count} cookies! glorp")
                 return
 
+            if content_lower == "!glorp leaderboard":
+                if self.cookie_system:
+                    top_users = self.cookie_system.get_leaderboard(5)
+                    if not top_users:
+                        self.send_message(channel, "glorp Ainda não há barões dos cookies! Sadge")
+                    else:
+                        msg_parts = []
+                        for i, (nick, count) in enumerate(top_users):
+                            msg_parts.append(f"#{i+1} {nick} [{count} 🍪]")
+                        
+                        final_msg = "Barões dos Cookies: " + " , ".join(msg_parts)
+                        self.send_message(channel, f"glorp {final_msg}")
+                return
+
+            # Feature: !glorp help
             if content_lower.startswith("!glorp help"):
                 parts = content.split()
                 if len(parts) < 3:
@@ -264,73 +279,22 @@ class TwitchIRC:
                 help_messages = {
                     "check": "glorp checa o status das features de chat (chat/comment/listen)",
                     "slots": "glorp use !glorp slots [valor] para apostar nos slots, aposta minima 10 🍪 caso não passe o valor",
-                    "8ball": "glorp pergunte ao oráculo! Ex: !glorp 8ball Vai chover?",
-                    "cookie": "glorp pegue seu biscoito da sorte diário (e ganhe cookies bônus)",
-                    "balance": "glorp verifique seu saldo de cookies ou de outro usuário. Ex: !glorp balance @nick",
+                    "8ball": "glorp Pergunte ao oráculo! Ex: !glorp 8ball Vai chover?",
+                    "cookie": "glorp Pegue seu biscoito da sorte diário (e ganhe cookies bônus).",
+                    "balance": "glorp Verifique seu saldo de cookies ou de outro usuário. Ex: !glorp balance @nick",
+                    "leaderboard": "glorp Mostra o top 5 usuários com mais cookies.",
                     "chat": "glorp (Admin) Ativa/Desativa a resposta a menções. Ex: !glorp chat on",
                     "listen": "glorp (Admin) Ativa/Desativa a escuta automática. Ex: !glorp listen on",
                     "comment": "glorp (Admin) Ativa/Desativa comentários automáticos. Ex: !glorp comment on",
                     "scan": "glorp (Admin) Força uma escuta manual de 15s. Ex: !glorp scan",
                     "addcookie": "glorp (Admin) Adiciona cookies. Ex: !glorp addcookie nick 100",
                     "removecookie": "glorp (Admin) Remove cookies. Ex: !glorp removecookie nick 100",
-                    "commands": "glorp Lista todos os comandos disponíveis",
+                    "commands": "glorp Lista todos os comandos disponíveis.",
                     "help": "Você deve estar precisando mesmo nise"
                 }
                 
                 msg = help_messages.get(cmd_help, f"glorp Comando '{cmd_help}' não encontrado. Tente !glorp commands.")
                 self.send_message(channel, msg)
-                return
-
-            # Comandos de Admin
-            if content.startswith("!glorp"):
-                if author_part.lower() in self.admin_nicks:
-                    self.handle_admin_command(content, channel)
-                    return
-                else:
-                    self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
-                    return
-            
-            # 2. SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
-            unique_message_identifier = f"{author_part}-{channel}-{content}"
-            message_hash = hash(unique_message_identifier)
-
-            if message_hash in self.processed_message_ids:
-                print(f"[INFO] Mensagem duplicada detectada e ignorada: {content}")
-                return
-            self.processed_message_ids.append(message_hash)
-            print(f"[DEBUG] Mensagem processada e ID adicionado ao cache: {message_hash}")
-
-            # 3. SE NÃO FOR COMANDO NEM DUPLICATA, PROCESSA MENÇÕES À IA
-            if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
-                print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
-                
-                # Concede +1 cookie por Interação Direta (Menção)
-                if self.cookie_system:
-                    self.cookie_system.handle_interaction(author_part.lower())
-
-                try:
-                    if self.training_logger:
-                        self.training_logger.log_interaction(channel, author_part, content, None) # Loga a query
-                    
-                    recent_history = self.recent_messages.get(channel)
-                    
-                    if self.gemini_client and self.memory_mgr:
-                        response = self.gemini_client.get_response(
-                            content, 
-                            channel, 
-                            author_part, 
-                            self.memory_mgr,
-                            recent_history 
-                        )
-                        
-                        if response:
-                            self.send_long_message(channel, response)
-                except Exception as e:
-                    print(f"[ERROR] Falha ao gerar resposta: {e}")
-            
-            # 4. PROCESSA O GATILHO DO COMMENT
-            if self.comment_feature:
-                self.comment_feature.roll_for_comment(channel, author_part)
             
     def handle_admin_command(self, command, channel):
         """
@@ -357,7 +321,7 @@ class TwitchIRC:
                 return
             
             elif command_name == "commands":
-                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie, balance, slots [aposta], help [comando]")
+                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie, balance, leaderboard, slots [aposta], help [comando]")
                 return
             
             elif command_name == "scan":
@@ -388,7 +352,7 @@ class TwitchIRC:
                 self.send_message(channel, "glorp A quantia de cookies deve ser um número!")
                 return
             except Exception as e:
-                logging.error(f"[AdminCookie] Falha no comando: {e}")
+                print(f"[AdminCookie] Falha no comando: {e}")
                 self.send_message(channel, "glorp Ocorreu um erro ao modificar os cookies.")
                 return
 
@@ -407,7 +371,7 @@ class TwitchIRC:
                 # Delega para a feature de Listen
                 self.listen_feature.set_enabled(state)
                 status = self.listen_feature.get_status()
-                self.send_message(channel, f"glorp 📡 O modo LISTEN foi {status}.")
+                self.send_message(channel, f"glorp 📡 O modo LISTEN (automático) foi {status}.")
                 return
             
             elif feature == "comment":
@@ -417,9 +381,8 @@ class TwitchIRC:
                 self.send_message(channel, f"peepoTalk O modo COMMENT foi {status}.")
                 return
         
-        # Se nenhum comando de 2 ou 3 partes foi pego
+        # Se nenhum comando foi pego
         self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on/off>, !glorp check ou !glorp commands para mais informações glorp")
-
 
     def run(self):
         """Inicia a conexao WebSocket e o loop de mensagens."""
