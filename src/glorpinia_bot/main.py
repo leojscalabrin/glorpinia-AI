@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name
 class TwitchIRC:
     def __init__(self):
         # Core Auth (sempre necessário)
-        self.auth = TwitchAuth()
+        self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
         
         # Configurações de Estado
         self.chat_enabled = True  # Para respostas a menções
@@ -82,7 +82,7 @@ class TwitchIRC:
         """Handler para shutdown gracioso com mensagem de despedida."""
         print("[INFO] Sinal de shutdown recebido. Enviando mensagem de despedida...")
         
-        # Para os threads das features
+        # Sinaliza para os threads das features pararem
         if self.comment_feature: self.comment_feature.stop_thread()
         if self.listen_feature: self.listen_feature.stop_thread()
         if self.cookie_system: self.cookie_system.stop_thread()
@@ -101,7 +101,7 @@ class TwitchIRC:
         if self.ws and self.ws.sock and self.ws.sock.connected:
             full_msg = f"PRIVMSG #{channel} :{message}\r\n"
             self.ws.send(full_msg)
-            print(f"[SEND] {channel}: {message}")
+            print(f"[BOT] {channel}: {message}")
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
     
@@ -155,10 +155,8 @@ class TwitchIRC:
 
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
-        print(f"[IRC] RAW: {message.strip()}")
         if message.startswith("PING"):
             ws.send("PONG :tmi.twitch.tv\r\n")
-            print("[PONG] Enviado para manter conexao viva.")
             return
 
         if "PRIVMSG" in message:
@@ -177,18 +175,14 @@ class TwitchIRC:
                 content = channel_part.split(" :", 1)[1].strip()
 
             except Exception as e:
-                print(f"[DEBUG] Falha na análise da mensagem (provavelmente não é PRIVMSG): {e}")
                 return
 
-            print(f"[CHAT] Parsed - author={author_part}, channel={channel}, content={content}")
-            try:
-                print(f"[DEBUG] recent_messages_count={len(self.recent_messages.get(channel, []))}")
-            except Exception:
-                pass
+            # Log apenas do chat formatado
+            print(f"[CHAT] {author_part}: {content}")
+            
             content_lower = content.lower()
-            print(f"[DEBUG] content_lower='{content_lower}'")
 
-            # Histórico recente (com nick real)
+            # Histórico recente
             msg_data = {
                 'timestamp': time.time(),
                 'author': author_part,
@@ -202,8 +196,12 @@ class TwitchIRC:
                 self.on_message(ws, message)
                 return
             
+            try:
+                self.training_logger.log_interaction(channel, author_part, content, None)
+            except Exception as e:
+                print(f"[ERROR] Falha ao salvar registro de captura: {e}")
+
             if author_part.lower() == self.auth.bot_nick.lower():
-                print(f"[DEBUG] Ignorando mensagem do proprio bot: {content}")
                 return
             
             # 1. PROCESSA COMANDOS E TRIGGERS PRIMEIRO
@@ -246,10 +244,10 @@ class TwitchIRC:
                     if len(parts) > 2:
                         target_nick = parts[2].lower().replace("@", "")
                     
+                    # Ignora se o alvo for o próprio bot
                     if target_nick == self.auth.bot_nick.lower():
-                        print(f"[DEBUG] Ignorando comando de balance para o próprio bot.")
                         return
-                    
+
                     count = self.cookie_system.get_cookies(target_nick)
                     if target_nick == author_part.lower():
                         self.send_message(channel, f"@{author_part}, você tem {count} cookies! glorp")
@@ -271,7 +269,6 @@ class TwitchIRC:
                         self.send_message(channel, f"glorp {final_msg}")
                 return
 
-            # Feature: !glorp help
             if content_lower.startswith("!glorp help"):
                 parts = content.split()
                 if len(parts) < 3:
@@ -299,6 +296,57 @@ class TwitchIRC:
                 
                 msg = help_messages.get(cmd_help, f"glorp Comando '{cmd_help}' não encontrado. Tente !glorp commands.")
                 self.send_message(channel, msg)
+                return
+
+            # Comandos de Admin
+            if content.startswith("!glorp"):
+                if author_part.lower() in self.admin_nicks:
+                    self.handle_admin_command(content, channel)
+                    return
+                else:
+                    self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
+                    return
+            
+            # 2. SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
+            unique_message_identifier = f"{author_part}-{channel}-{content}"
+            message_hash = hash(unique_message_identifier)
+
+            if message_hash in self.processed_message_ids:
+                # Log de duplicata removido para limpeza
+                return
+            self.processed_message_ids.append(message_hash)
+
+            # 3. SE NÃO FOR COMANDO NEM DUPLICATA, PROCESSA MENÇÕES À IA
+            if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
+                print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
+                
+                # Concede +1 cookie por Interação Direta (Menção)
+                if self.cookie_system:
+                    self.cookie_system.handle_interaction(author_part.lower())
+
+                try:
+                    # Log da query já feito pelo training_logger acima
+                    
+                    recent_history = self.recent_messages.get(channel)
+                    
+                    if self.gemini_client and self.memory_mgr:
+                        response = self.gemini_client.get_response(
+                            content, 
+                            channel, 
+                            author_part, 
+                            self.memory_mgr,
+                            recent_history 
+                        )
+                        
+                        if response:
+                            self.send_long_message(channel, response)
+                except Exception as e:
+                    print(f"[ERROR] Falha ao gerar resposta: {e}")
+            
+            # 4. PROCESSA O GATILHO DO COMMENT
+            if self.comment_feature:
+                # Passa o author_part para receber o prêmio de 10 cookies se o trigger ativar
+                self.comment_feature.roll_for_comment(channel, author_part)
             
     def handle_admin_command(self, command, channel):
         """
@@ -356,7 +404,7 @@ class TwitchIRC:
                 self.send_message(channel, "glorp A quantia de cookies deve ser um número!")
                 return
             except Exception as e:
-                print(f"[AdminCookie] Falha no comando: {e}")
+                logging.error(f"[AdminCookie] Falha no comando: {e}")
                 self.send_message(channel, "glorp Ocorreu um erro ao modificar os cookies.")
                 return
 
@@ -372,21 +420,20 @@ class TwitchIRC:
                 return
             
             elif feature == "listen":
-                # Delega para a feature de Listen
                 self.listen_feature.set_enabled(state)
                 status = self.listen_feature.get_status()
                 self.send_message(channel, f"glorp 📡 O modo LISTEN foi {status}.")
                 return
             
             elif feature == "comment":
-                # Delega para a feature de Comment
                 self.comment_feature.set_enabled(state)
                 status = self.comment_feature.get_status() 
                 self.send_message(channel, f"peepoTalk O modo COMMENT foi {status}.")
                 return
         
-        # Se nenhum comando foi pego
+        # Se nenhum comando de 2 ou 3 partes foi pego
         self.send_message(channel, "Comando invalido. Use: !glorp <feature> <on/off>, !glorp check ou !glorp commands para mais informações glorp")
+
 
     def run(self):
         """Inicia a conexao WebSocket e o loop de mensagens."""
