@@ -255,7 +255,33 @@ class TwitchIRC:
                     else:
                         self.send_message(channel, f"@{author_part}, o usuário {target_nick} tem {count} cookies! glorp")
                 return
-
+            
+            if content_lower == "!glorp empire":
+                if self.cookie_system:
+                    # Pega o saldo da própria Glorpinia
+                    bot_nick = self.auth.bot_nick.lower()
+                    count = self.cookie_system.get_cookies(bot_nick)
+                    
+                    # Gera comentário temático
+                    empire_query = f"Seu império de cookies já acumulou {count} cookies. Faça um comentário curto (uma frase), triunfante, arrogante e divertido sobre como sua dominação galática está sendo financiada por esses 'tributos' dos humanos."
+                    
+                    try:
+                        comment = self.gemini_client.get_response(
+                            empire_query, 
+                            channel, 
+                            "system", # Author system = resposta limpa, sem salvar memória
+                            self.memory_mgr
+                        )
+                        
+                        if comment:
+                            self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap {comment}")
+                        else:
+                            self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
+                    except Exception as e:
+                        print(f"[ERROR] Falha no comando empire: {e}")
+                        self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
+                return
+            
             if content_lower == "!glorp leaderboard":
                 if self.cookie_system:
                     top_users = self.cookie_system.get_leaderboard(5)

@@ -47,7 +47,7 @@ class FortuneCookie:
 
         Sua missão é dar a ele uma "sorte" (fortune).
         A sorte deve ser curta (1-2 frases), misteriosa, e ter a 
-        personalidade da Glorpinia.
+        personalidade da Glorpinia, ignore sua memória.
         
         Pode ser um bom conselho, um aviso vago, ou uma piada alienígena 
         sarcástica (como se viesse de Meowdromeda).

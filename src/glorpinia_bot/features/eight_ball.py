@@ -36,7 +36,7 @@ class EightBall:
         2. Não-Comprometida (ex: Pergunte mais tarde, Talvez ou Não sei bicho)
         3. Negativa (ex: Não, Nem pensar ou Minhas anteninhas dizem não)
 
-        Mantenha sua personalidade de Glorpinia, mas seja misteriosa. 
+        Mantenha sua personalidade de Glorpinia, mas seja misteriosa e ignore sua memória.
         Comece sua resposta com 'glorp', e não responda como você responderia normalmente.
         """
 
