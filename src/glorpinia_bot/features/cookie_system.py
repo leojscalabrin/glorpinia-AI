@@ -15,7 +15,6 @@ class CookieSystem:
         self.db_path = "glorpinia_cookies.db"
         self._initialize_db()
         
-        # --- Lógica do Bônus Diário ---
         self.timer_running = True
         self.last_bonus_time = 0
         self.thread = threading.Thread(target=self._daily_bonus_thread, daemon=True)
@@ -103,7 +102,7 @@ class CookieSystem:
             return []
 
     def add_cookies(self, nick: str, amount_to_add: int):
-        """Adiciona cookies a um usuário."""
+        """Adiciona cookies a um usuário (Inflacionário - cria do nada)."""
         nick = nick.lower()
         self._check_or_create_user(nick)
         try:
@@ -116,17 +115,46 @@ class CookieSystem:
             logging.error(f"[CookieSystem] Falha ao adicionar cookies para {nick}: {e}")
 
     def remove_cookies(self, nick: str, amount_to_remove: int):
-        """Remove cookies de um usuário."""
+        """
+        Remove cookies de um usuário e TRANSFERE para a conta do bot.
+        Garante que não remove mais do que o usuário tem.
+        """
         nick = nick.lower()
+        bot_nick = self.bot.auth.bot_nick.lower()
+        
+        # Se tentar tirar do próprio bot, ignora para evitar loop
+        if nick == bot_nick:
+            return
+
         self._check_or_create_user(nick)
+        self._check_or_create_user(bot_nick) # Garante que o bot tenha conta
+        
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
-                c.execute("UPDATE user_cookies SET cookie_count = MAX(0, cookie_count - ?) WHERE user_nick = ?", (amount_to_remove, nick))
-                conn.commit()
-            logging.info(f"[CookieSystem] -{amount_to_remove} cookies para {nick}.")
+                
+                # 1. Verifica saldo atual para calcular remoção real
+                c.execute("SELECT cookie_count FROM user_cookies WHERE user_nick = ?", (nick,))
+                result = c.fetchone()
+                current_balance = result[0] if result else 0
+                
+                # Remove o que for possível (até zerar)
+                actual_removed = min(current_balance, amount_to_remove)
+                
+                if actual_removed > 0:
+                    # 2. Tira do usuário
+                    c.execute("UPDATE user_cookies SET cookie_count = cookie_count - ? WHERE user_nick = ?", (actual_removed, nick))
+                    
+                    # 3. Dá para o bot
+                    c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (actual_removed, bot_nick))
+                    
+                    conn.commit()
+                    logging.info(f"[CookieSystem] Transferidos {actual_removed} cookies de {nick} para {bot_nick}.")
+                else:
+                    logging.info(f"[CookieSystem] {nick} não tinha cookies suficientes para remover.")
+                    
         except Exception as e:
-            logging.error(f"[CookieSystem] Falha ao remover cookies de {nick}: {e}")
+            logging.error(f"[CookieSystem] Falha ao remover/transferir cookies de {nick}: {e}")
 
     def handle_interaction(self, nick: str):
         """Concede +1 cookie por interação."""

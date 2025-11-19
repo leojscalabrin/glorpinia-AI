@@ -7,7 +7,6 @@ class Slots:
         self.bot = bot
         
         # Configuração dos Símbolos
-        # Formato: "EMOTE": {"weight": PESO_PROBABILIDADE, "multiplier": MULTIPLICADOR}
         self.symbols = {
             # Especiais
             "glorp":        {"weight": 5,   "multiplier": 1000}, # Jackpot (Muito Raro)
@@ -27,14 +26,12 @@ class Slots:
             "peepoSad":        {"weight": 300, "multiplier": 5},   # Cereja
         }
         
-        # Prepara a lista ponderada para o sorteio
         self.symbol_keys = list(self.symbols.keys())
         self.symbol_weights = [s["weight"] for s in self.symbols.values()]
 
     def play(self, channel, user, bet_amount):
         """
         Executa uma rodada de slots.
-        Retorna a string de resultado para ser enviada ao chat.
         """
         if not self.bot.cookie_system:
             return "O sistema de cookies está offline. Sadge"
@@ -52,35 +49,30 @@ class Slots:
         if user_balance < bet_amount:
             return f"@{user}, você não tem cookies suficientes! Saldo: {user_balance} 🍪. Sadge"
 
-        # 3. Deduz a Aposta do Usuário
+        # 3. Deduz a Aposta do Usuário 
         self.bot.cookie_system.remove_cookies(user, bet_amount)
 
-        # 4. Gira os Slots (Sorteia 3 símbolos)
+        # 4. Gira os Slots
         result = random.choices(self.symbol_keys, weights=self.symbol_weights, k=3)
         s1, s2, s3 = result
         
-        display_result = f"[ {s1} | {s2} | {s3} ]"
+        display_result = f"[{s1} {s2} {s3}]"
         
         # 5. Calcula o Prêmio
         multiplier = 0
         
-        # Lógica do WILD (WhySoSerious)
-        # Caso 1: 3 Coringas
+        # Lógica do WILD
         if s1 == "WhySoSerious" and s2 == "WhySoSerious" and s3 == "WhySoSerious":
             multiplier = self.symbols["WhySoSerious"]["multiplier"]
             
-        # Caso 2: 3 Iguais (Normais ou Jackpot)
         elif s1 == s2 == s3:
             multiplier = self.symbols[s1]["multiplier"]
             
-        # Caso 3: Wilds misturados
         else:
             wilds = result.count("WhySoSerious")
             if wilds > 0:
-                # Remove os wilds para ver o que sobrou
                 others = [s for s in result if s != "WhySoSerious"]
-                # Se todos os símbolos restantes forem iguais, é vitória
-                if len(others) == 0: # (Impossível cair aqui pois 3 wilds é Caso 1)
+                if len(others) == 0: 
                     pass
                 elif len(set(others)) == 1: 
                     symbol_type = others[0]
@@ -91,7 +83,6 @@ class Slots:
             prize = int(bet_amount * multiplier)
             self.bot.cookie_system.add_cookies(user, prize)
             
-            # Mensagens diferentes para ganhos grandes
             if multiplier >= 100:
                 return f"{display_result} JACKPOT!! @{user} GANHOU {prize} 🍪 ({multiplier}x)!!! NOWAYING"
             elif multiplier >= 50:
@@ -99,5 +90,4 @@ class Slots:
             else:
                 return f"{display_result} @{user} ganhou {prize} 🍪! EZ"
         else:
-            self.bot.cookie_system.add_cookies("glorpinia", bet_amount)
-            return f"{display_result} @{user} perdeu {bet_amount} cookies. Mais fundos para o império EZ Clap"
+            return f"{display_result} @{user} perdeu {bet_amount} cookies. Sadge"
