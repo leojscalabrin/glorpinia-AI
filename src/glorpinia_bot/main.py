@@ -57,6 +57,7 @@ class TwitchIRC:
         self.eight_ball_feature = EightBall(self)
         self.fortune_cookie_feature = FortuneCookie(self)
         self.slots_feature = Slots(self)
+        self.gemini_client.set_cookie_system(self.cookie_system)
 
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
