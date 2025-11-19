@@ -56,7 +56,7 @@ class Slots:
         result = random.choices(self.symbol_keys, weights=self.symbol_weights, k=3)
         s1, s2, s3 = result
         
-        display_result = f"[{s1} {s2} {s3}]"
+        display_result = f"[ {s1} | {s2} | {s3} ]"
         
         # 5. Calcula o Prêmio
         multiplier = 0
@@ -86,8 +86,8 @@ class Slots:
             if multiplier >= 100:
                 return f"{display_result} JACKPOT!! @{user} GANHOU {prize} 🍪 ({multiplier}x)!!! NOWAYING"
             elif multiplier >= 50:
-                return f"{display_result} UAU! @{user} ganhou {prize} 🍪 ({multiplier}x)! Pog"
+                return f"{display_result} DING! @{user} ganhou {prize} 🍪 ({multiplier}x)! Pog"
             else:
                 return f"{display_result} @{user} ganhou {prize} 🍪! EZ"
         else:
-            return f"{display_result} @{user} perdeu {bet_amount} cookies. Sadge"
+            return f"{display_result} @{user} perdeu {bet_amount} cookies. Mais fundos para o império EZ Clap"

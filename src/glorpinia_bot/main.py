@@ -310,6 +310,7 @@ class TwitchIRC:
                     "8ball": "glorp Pergunte ao oráculo! Ex: !glorp 8ball Vai chover?",
                     "cookie": "glorp Pegue seu biscoito da sorte diário (e ganhe cookies bônus).",
                     "balance": "glorp Verifique seu saldo de cookies ou de outro usuário. Ex: !glorp balance @nick",
+                    "empire": "glorp Veja o tamanho do cofre da Imperatriz Glorpinia.",
                     "leaderboard": "glorp Mostra o top 5 usuários com mais cookies.",
                     "chat": "glorp (Admin) Ativa/Desativa a resposta a menções. Ex: !glorp chat on",
                     "listen": "glorp (Admin) Ativa/Desativa a escuta automática. Ex: !glorp listen on",
@@ -400,7 +401,7 @@ class TwitchIRC:
                 return
             
             elif command_name == "commands":
-                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie, balance, leaderboard, slots [aposta], help [comando]")
+                self.send_message(channel, "glorp 👉 check, chat/listen/comment [on/off], scan, 8ball [pergunta], cookie, balance, empire, leaderboard, slots [aposta], help [comando]")
                 return
             
             elif command_name == "scan":
