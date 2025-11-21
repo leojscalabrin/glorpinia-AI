@@ -326,14 +326,24 @@ class TwitchIRC:
                 self.send_message(channel, msg)
                 return
 
-            # Comandos de Admin
             if content.startswith("!glorp"):
-                if author_part.lower() in self.admin_nicks:
-                    self.handle_admin_command(content, channel)
+                parts = content.split()
+                cmd_attempt = parts[1].lower() if len(parts) > 1 else ""
+
+                # Lista de comandos que exigem ADMIN
+                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie"]
+
+                if cmd_attempt in admin_cmds:
+                    # É um comando de admin. Verifica permissão.
+                    if author_part.lower() in self.admin_nicks:
+                        self.handle_admin_command(content, channel)
+                    else:
+                        self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
                     return
-                else:
-                    self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
-                    return
+                
+                # Se chegou aqui, é um "!glorp algo" que não existe ou não é restrito
+                self.send_message(channel, "glorp Comando desconhecido. Use !glorp commands para ver a lista.")
+                return
             
             # 2. SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
             unique_message_identifier = f"{author_part}-{channel}-{content}"
