@@ -115,9 +115,9 @@ class GeminiClient:
             logging.error(f"[SearchTool] Erro na ANÁLISE de busca: {e}")
             return False 
 
-    def _process_cookie_commands(self, text: str) -> str:
+    def _process_cookie_commands(self, text: str, interaction_author: str) -> str:
         """
-        Procura por tags, executa a ação E substitui a tag pelo feedback visual.
+        Procura por tags, executa a ação E substitui a tag pelo feedback visual formatado.
         """
         if not self.cookie_system or "[[COOKIE:" not in text:
             return text
@@ -126,29 +126,40 @@ class GeminiClient:
 
         def replace_match(match):
             action = match.group(1)
-            user = match.group(2).lower()
+            target_user = match.group(2).lower()
             try:
                 amount = int(match.group(3))
                 
+                # Executa a transação real
                 if action == "GIVE":
-                    self.cookie_system.add_cookies(user, amount)
-                    logging.info(f"[IA-ECONOMY] IA deu {amount} cookies para {user}.")
-                    return f" (+{amount} 🍪)"
+                    self.cookie_system.add_cookies(target_user, amount)
+                    logging.info(f"[IA-ECONOMY] IA deu {amount} cookies para {target_user}.")
+                    
+                    # Formatação condicional
+                    if target_user == interaction_author.lower():
+                        return f"(+{amount} 🍪)" # Se for para quem falou
+                    else:
+                        return f"(+{amount} 🍪 para {target_user})" # Se for para outro
                 
                 elif action == "TAKE":
-                    self.cookie_system.remove_cookies(user, amount)
-                    logging.info(f"[IA-ECONOMY] IA removeu {amount} cookies de {user}.")
-                    return f" (-{amount} 🍪)"
+                    self.cookie_system.remove_cookies(target_user, amount)
+                    logging.info(f"[IA-ECONOMY] IA removeu {amount} cookies de {target_user}.")
+                    
+                    # Formatação condicional
+                    if target_user == interaction_author.lower():
+                        return f"(-{amount} 🍪)" # Se for de quem falou
+                    else:
+                        return f"(-{amount} 🍪 de {target_user})" # Se for de outro
                     
             except Exception as e:
                 logging.error(f"[IA-ECONOMY] Erro ao processar tag: {e}")
-                return ""
+                return "" # Remove a tag se der erro
             
-            return ""
+            return "" # Fallback
 
-        # Executa a substituição
         new_text = re.sub(pattern, replace_match, text)
-        return new_text
+        
+        return re.sub(r'\s+', ' ', new_text).strip()
 
 
     def get_response(self, query, channel, author, memory_mgr: 'MemoryManager', recent_chat_history=None):
@@ -226,7 +237,7 @@ class GeminiClient:
             logging.error(f"Falha na comunicação com a API Gemini: {e}")
             generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
-        generated = self._process_cookie_commands(generated)
+        generated = self._process_cookie_commands(generated, author)
 
         # 6. Limpeza Final e Salvamento de Memória
         generated = self._clean_response(generated)
