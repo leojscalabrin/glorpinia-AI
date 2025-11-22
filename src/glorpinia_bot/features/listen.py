@@ -4,6 +4,7 @@ import subprocess
 import os
 import io
 import logging
+import sys
 from google.cloud import speech
 
 class Listen:
@@ -87,20 +88,22 @@ class Listen:
         temp_audio_file = f"/tmp/glorpinia_audio_{channel}.wav"
         stream_url = ""
         
-        # Pega o token limpo (sem 'oauth:')
         token = self.bot.auth.access_token
+
+        venv_bin = os.path.dirname(sys.executable)
+        streamlink_exec = os.path.join(venv_bin, "streamlink")
 
         try:
             # Obter a URL do áudio da stream
             logging.info(f"[Listen] Buscando URL da stream para twitch.tv/{channel}...")
             
             streamlink_cmd = [
-                "streamlink", 
+                streamlink_exec,
                 f"twitch.tv/{channel}", 
                 "audio_only", 
                 "--stream-url",
                 "--twitch-disable-ads",
-                "--twitch-api-header", f"Authorization=Bearer {token}"
+                "--twitch-api-token", token
             ]
             
             result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
@@ -108,16 +111,16 @@ class Listen:
             if result.returncode != 0:
                 error_msg = result.stderr + result.stdout
                 if "No playable streams found" in error_msg:
-                    logging.info(f"[Listen] O canal {channel} parece estar offline ou hospedando outro canal.")
+                    logging.info(f"[Listen] O canal {channel} parece estar offline.")
                     return ""
                 
                 logging.error(f"[Listen] Erro no streamlink. Código: {result.returncode}. Log: {error_msg.strip()[:200]}...")
                 
-                # Fallback: Tenta sem token se falhar autorização
                 if "401" in error_msg or "Unauthorized" in error_msg:
                     logging.warning("[Listen] Token rejeitado. Tentando fallback sem autenticação...")
                     streamlink_cmd = [
-                        "streamlink", f"twitch.tv/{channel}", "audio_only", "--stream-url"
+                        streamlink_exec,
+                        f"twitch.tv/{channel}", "audio_only", "--stream-url"
                     ]
                     result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
                     if result.returncode != 0:
