@@ -56,7 +56,7 @@ class Listen:
                 continue
 
             now = time.time()
-            if now - self.last_audio_comment_time < 1800:  # 30 min
+            if now - self.last_audio_comment_time < 1800:
                 continue
             
             self.last_audio_comment_time = now
@@ -100,7 +100,7 @@ class Listen:
                 "audio_only", 
                 "--stream-url",
                 "--twitch-disable-ads",
-                "--twitch-api-header", f"Authorization=OAuth {token}"
+                "--twitch-api-token", token
             ]
             
             # Captura stdout E stderr
@@ -112,9 +112,19 @@ class Listen:
                     logging.info(f"[Listen] O canal {channel} parece estar offline.")
                 else:
                     logging.error(f"[Listen] Erro no streamlink. Código: {result.returncode}. Log: {error_msg.strip()}")
-                return ""
+                    if "Unauthorized" in error_msg:
+                        logging.warning("[Listen] Tentando fallback sem token (pode conter ads)...")
+                        streamlink_cmd.pop() # Remove token
+                        streamlink_cmd.pop() # Remove flag
+                        result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
+                        if result.returncode != 0:
+                            return ""
+                        stream_url = result.stdout.strip()
+                    else:
+                        return ""
 
-            stream_url = result.stdout.strip()
+            if not stream_url:
+                stream_url = result.stdout.strip()
 
             if not stream_url:
                 logging.warning(f"[Listen] URL vazia retornada pelo streamlink.")
@@ -133,7 +143,7 @@ class Listen:
                 "-ac", "1", 
                 temp_audio_file, 
                 "-y",
-                "-hide_banner",
+                "-hide_banner", 
                 "-loglevel", "error"
             ]
             
@@ -205,14 +215,14 @@ class Listen:
 
         except Exception as e:
             logging.error(f"[Listen] Falha ao gerar comentario de audio manual: {e}")
-            self.bot.send_message(channel, f"@{channel}, o portal está instável. Sadge")
+            self.bot.send_message(channel, f"@{channel}, o portal está instável. Eu não consigo me comunicar. Sadge")
 
     def _generate_comment_thread(self, transcription: str, channel: str, memory_mgr):
         """
         Thread que chama a IA (2 passagens).
         """
         try:
-            # 1. Sumarizar
+            # Sumarizar
             logging.info(f"[Listen] Passagem 1: Sumarizando...")
             topic = self.bot.gemini_client.summarize_chat_topic(transcription) 
 
@@ -220,7 +230,7 @@ class Listen:
                 logging.info(f"[Listen] Tópico desinteressante ('{topic}'). Cancelando.")
                 return
 
-            # 2. Comentar
+            # Comentar
             logging.info(f"[Listen] Passagem 2: Gerando comentário sobre '{topic}'...")
             comment_query = f"O streamer estava falando sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto."
 
