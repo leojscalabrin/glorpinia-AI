@@ -1,6 +1,7 @@
 websocket-client
 python-dotenv
 requests
+streamlink
 
 google-generativeai
 google-cloud-speech

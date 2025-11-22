@@ -56,7 +56,7 @@ class Listen:
                 continue
 
             now = time.time()
-            if now - self.last_audio_comment_time < 1800:
+            if now - self.last_audio_comment_time < 1800:  # 30 min
                 continue
             
             self.last_audio_comment_time = now
@@ -87,7 +87,7 @@ class Listen:
         temp_audio_file = f"/tmp/glorpinia_audio_{channel}.wav"
         stream_url = ""
         
-        # Pega o token para autenticar o streamlink
+        # Pega o token limpo (sem 'oauth:')
         token = self.bot.auth.access_token
 
         try:
@@ -100,34 +100,34 @@ class Listen:
                 "audio_only", 
                 "--stream-url",
                 "--twitch-disable-ads",
-                "--twitch-api-token", token
+                "--twitch-api-header", f"Authorization=Bearer {token}"
             ]
             
-            # Captura stdout E stderr
             result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
             
             if result.returncode != 0:
                 error_msg = result.stderr + result.stdout
                 if "No playable streams found" in error_msg:
-                    logging.info(f"[Listen] O canal {channel} parece estar offline.")
-                else:
-                    logging.error(f"[Listen] Erro no streamlink. Código: {result.returncode}. Log: {error_msg.strip()}")
-                    if "Unauthorized" in error_msg:
-                        logging.warning("[Listen] Tentando fallback sem token (pode conter ads)...")
-                        streamlink_cmd.pop() # Remove token
-                        streamlink_cmd.pop() # Remove flag
-                        result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
-                        if result.returncode != 0:
-                            return ""
-                        stream_url = result.stdout.strip()
-                    else:
+                    logging.info(f"[Listen] O canal {channel} parece estar offline ou hospedando outro canal.")
+                    return ""
+                
+                logging.error(f"[Listen] Erro no streamlink. Código: {result.returncode}. Log: {error_msg.strip()[:200]}...")
+                
+                # Fallback: Tenta sem token se falhar autorização
+                if "401" in error_msg or "Unauthorized" in error_msg:
+                    logging.warning("[Listen] Token rejeitado. Tentando fallback sem autenticação...")
+                    streamlink_cmd = [
+                        "streamlink", f"twitch.tv/{channel}", "audio_only", "--stream-url"
+                    ]
+                    result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
+                    if result.returncode != 0:
                         return ""
+                else:
+                    return ""
+
+            stream_url = result.stdout.strip()
 
             if not stream_url:
-                stream_url = result.stdout.strip()
-
-            if not stream_url:
-                logging.warning(f"[Listen] URL vazia retornada pelo streamlink.")
                 return ""
             
             logging.info(f"[Listen] URL obtida. Gravando {duration}s...")
@@ -181,13 +181,10 @@ class Listen:
             return transcription
 
         except subprocess.TimeoutExpired:
-            logging.error(f"[Listen] Timeout: Streamlink ou FFMPEG demorou demais.")
-            return ""
-        except subprocess.CalledProcessError as e:
-            logging.error(f"[Listen] Erro no FFMPEG: {e.stderr.decode('utf-8') if e.stderr else str(e)}")
+            logging.error(f"[Listen] Timeout: Processo demorou demais.")
             return ""
         except Exception as e:
-            logging.error(f"[Listen] Erro inesperado na transcrição: {e}")
+            logging.error(f"[Listen] Erro inesperado: {e}")
             return ""
         
         finally:
@@ -215,7 +212,7 @@ class Listen:
 
         except Exception as e:
             logging.error(f"[Listen] Falha ao gerar comentario de audio manual: {e}")
-            self.bot.send_message(channel, f"@{channel}, o portal está instável. Eu não consigo me comunicar. Sadge")
+            self.bot.send_message(channel, f"@{channel}, o portal está instável. Sadge")
 
     def _generate_comment_thread(self, transcription: str, channel: str, memory_mgr):
         """
