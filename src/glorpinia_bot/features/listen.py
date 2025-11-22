@@ -213,13 +213,9 @@ class Listen:
             logging.info(f"[Listen] Passagem 1: Sumarizando...")
             topic = self.bot.gemini_client.summarize_chat_topic(transcription) 
 
-            if not topic or topic == "assuntos aleatórios":
-                logging.info(f"[Listen] Tópico desinteressante ('{topic}'). Cancelando.")
-                return
-
             # Comentar
             logging.info(f"[Listen] Passagem 2: Gerando comentário sobre '{topic}'...")
-            comment_query = f"O streamer estava falando sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto."
+            comment_query = f"O streamer disse algo sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre isso."
 
             comment, cookie_feedback = self.bot.gemini_client.get_response(
                 query=comment_query,

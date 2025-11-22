@@ -269,39 +269,34 @@ class GeminiClient:
         
         return generated
 
-    def summarize_chat_topic(self, chat_log: str) -> str:
+    def summarize_chat_topic(self, text_input: str) -> str:
         """
-        Usa o 'analysis_model' para extrair o tópico principal de um log de chat.
+        Usa o 'analysis_model' para extrair o tópico principal de um texto (audio ou chat).
         """
-        if not chat_log:
+        if not text_input or len(text_input) < 5:
             return "nada em particular"
 
-        # Prompt de sumarização
         prompt = f"""
-        Você é um analisador de chat da Twitch. O log de chat abaixo é caótico.
-        Sua única tarefa é identificar o tópico principal ou o assunto mais interessante sendo discutido.
-        Responda APENAS com o tópico, em uma frase curta e direta.
+        Você é um analisador de conteúdo. Abaixo está a transcrição de um áudio ou chat.
+        Sua tarefa é identificar o tópico MAIS INTERESSANTE, ENGRAÇADO ou CURIOSO mencionado.
+        
+        Se houver vários assuntos misturados, ESCOLHA APENAS UM (o que renderia o melhor comentário sarcástico).
+        NÃO responda "assuntos aleatórios" ou "nada". Invente um título para o assunto se necessário.
 
-        Se o chat estiver falando sobre várias coisas aleatórias, apenas responda "assuntos aleatórios".
-
-        Log do Chat:
+        Texto:
         ---
-        {chat_log}
+        {text_input}
         ---
-        Tópico Principal:
+        Tópico Principal (apenas o assunto):
         """
 
         try:
             response = self.analysis_model.generate_content(prompt)
-            
             if response.parts:
-                topic = response.text.strip()
-                topic = topic.replace("Tópico Principal:", "").strip()
-                logging.info(f"[Comment] Tópico do chat sumarizado: {topic}")
+                topic = response.text.strip().replace("Tópico Principal:", "").strip()
+                logging.info(f"[Summarizer] Tópico extraído: {topic}")
                 return topic
-            else:
-                logging.warning("[Comment] Sumarização falhou (resposta vazia).")
-                return "assuntos aleatórios"
+            return "a vida no universo"
         except Exception as e:
-            logging.error(f"[Comment] Falha ao sumarizar o chat: {e}")
-            return "assuntos aleatórios"
+            logging.error(f"[Summarizer] Falha: {e}")
+            return "o silêncio do espaço"
