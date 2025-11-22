@@ -88,8 +88,7 @@ class Listen:
         temp_audio_file = f"/tmp/glorpinia_audio_{channel}.wav"
         stream_url = ""
         
-        token = self.bot.auth.access_token
-
+        # Caminho Absoluto do Streamlink
         venv_bin = os.path.dirname(sys.executable)
         streamlink_exec = os.path.join(venv_bin, "streamlink")
 
@@ -98,12 +97,11 @@ class Listen:
             logging.info(f"[Listen] Buscando URL da stream para twitch.tv/{channel}...")
             
             streamlink_cmd = [
-                streamlink_exec,
+                streamlink_exec, 
                 f"twitch.tv/{channel}", 
                 "audio_only", 
                 "--stream-url",
-                "--twitch-disable-ads",
-                "--twitch-api-token", token
+                "--twitch-disable-ads"
             ]
             
             result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
@@ -115,18 +113,7 @@ class Listen:
                     return ""
                 
                 logging.error(f"[Listen] Erro no streamlink. Código: {result.returncode}. Log: {error_msg.strip()[:200]}...")
-                
-                if "401" in error_msg or "Unauthorized" in error_msg:
-                    logging.warning("[Listen] Token rejeitado. Tentando fallback sem autenticação...")
-                    streamlink_cmd = [
-                        streamlink_exec,
-                        f"twitch.tv/{channel}", "audio_only", "--stream-url"
-                    ]
-                    result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
-                    if result.returncode != 0:
-                        return ""
-                else:
-                    return ""
+                return ""
 
             stream_url = result.stdout.strip()
 
@@ -205,7 +192,7 @@ class Listen:
             
             if not transcription or len(transcription) < 10:
                 logging.info(f"[Listen] Transcricao manual vazia.")
-                self.bot.send_message(channel, f"@{channel}, não consegui ouvir nada. Sadge")
+                self.bot.send_message(channel, f"@{channel}, não consegui ouvir nada. angrybird")
                 return
 
             t = threading.Thread(target=self._generate_comment_thread, 
