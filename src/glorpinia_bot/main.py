@@ -211,6 +211,13 @@ class TwitchIRC:
                 self.send_message(channel, 'glorp')
                 return
 
+            if "oziell" in content_lower:
+                now = time.time()
+                if (now - self.last_oziell_time) > 1800:
+                    self.last_oziell_time = now
+                    self.send_message(channel, "Olá @oziell ! Tudo bem @oziell ? Tchau @oziell !")
+                return
+            
             if content_lower.startswith("!glorp 8ball"):
                 question = content[len("!glorp 8ball"):].strip()
                 if not question:
@@ -380,7 +387,7 @@ class TwitchIRC:
                             self.send_long_message(channel, response)
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar resposta: {e}")
-            
+
             # 4. PROCESSA O GATILHO DO COMMENT
             if self.comment_feature:
                 # Passa o author_part para receber o prêmio de 10 cookies se o trigger ativar
