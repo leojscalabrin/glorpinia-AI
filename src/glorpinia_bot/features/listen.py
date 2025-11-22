@@ -10,8 +10,6 @@ class Listen:
     def __init__(self, bot, speech_client):
         """
         Inicializa a feature de escuta (periódica e manual).
-        'bot' é a instância principal do TwitchIRC.
-        'speech_client' é o cliente inicializado do Google Speech.
         """
         print("[Feature] Listen Initialized.")
         self.bot = bot
@@ -39,7 +37,6 @@ class Listen:
     def trigger_manual_scan(self, channel):
         """
         Inicia a escuta manual (comando !glorp scan).
-        Roda em um novo thread para não bloquear o bot.
         """
         print(f"[Listen] Gatilho manual ativado para {channel}.")
         scan_thread = threading.Thread(target=self._manual_listen_trigger, args=(channel,))
@@ -48,8 +45,7 @@ class Listen:
 
     def _periodic_thread(self):
         """
-        Thread em background: A cada 30 min, transcreve audio e comenta 
-        se relevante (se self.enabled for True).
+        Thread em background: A cada 30 min, transcreve audio e comenta.
         """
         self.last_audio_comment_time = time.time()
         
@@ -81,7 +77,7 @@ class Listen:
 
     def _transcribe_stream(self, channel, duration=15):
         """
-        Captura audio da stream (via streamlink/ffmpeg) e transcreve (via Google Speech-to-Text).
+        Captura audio da stream e transcreve.
         """
         if not self.speech_client:
             logging.error("[Listen] Google Speech Client não foi inicializado.")
@@ -91,11 +87,11 @@ class Listen:
         temp_audio_file = f"/tmp/glorpinia_audio_{channel}.wav"
         stream_url = ""
         
-        # Pega o token para autenticar o streamlink (evita ads)
+        # Pega o token para autenticar o streamlink
         token = self.bot.auth.access_token
 
         try:
-            # 1. Obter a URL do áudio da stream
+            # Obter a URL do áudio da stream
             logging.info(f"[Listen] Buscando URL da stream para twitch.tv/{channel}...")
             
             streamlink_cmd = [
@@ -104,24 +100,29 @@ class Listen:
                 "audio_only", 
                 "--stream-url",
                 "--twitch-disable-ads",
-                "--http-header", f"Authorization=OAuth {token}"
+                "--twitch-api-header", f"Authorization=OAuth {token}"
             ]
             
+            # Captura stdout E stderr
             result = subprocess.run(streamlink_cmd, capture_output=True, text=True, timeout=15)
             
             if result.returncode != 0:
-                logging.error(f"[Listen] Erro no streamlink: {result.stderr}")
+                error_msg = result.stderr + result.stdout
+                if "No playable streams found" in error_msg:
+                    logging.info(f"[Listen] O canal {channel} parece estar offline.")
+                else:
+                    logging.error(f"[Listen] Erro no streamlink. Código: {result.returncode}. Log: {error_msg.strip()}")
                 return ""
 
             stream_url = result.stdout.strip()
 
             if not stream_url:
-                logging.warning(f"[Listen] Stream offline ou URL vazia.")
+                logging.warning(f"[Listen] URL vazia retornada pelo streamlink.")
                 return ""
             
-            logging.info(f"[Listen] URL da stream obtida. Gravando {duration}s com FFMPEG...")
+            logging.info(f"[Listen] URL obtida. Gravando {duration}s...")
 
-            # 2. Capturar o áudio com ffmpeg
+            # Capturar o áudio com ffmpeg
             ffmpeg_cmd = [
                 "ffmpeg", 
                 "-i", stream_url, 
@@ -131,17 +132,18 @@ class Listen:
                 "-ar", "16000", 
                 "-ac", "1", 
                 temp_audio_file, 
-                "-y"
+                "-y",
+                "-hide_banner",
+                "-loglevel", "error"
             ]
             
-            # Aumentei o timeout do ffmpeg para dar margem (duration + 15s)
-            subprocess.run(ffmpeg_cmd, timeout=duration + 15, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(ffmpeg_cmd, timeout=duration + 15, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             
-            logging.info(f"[Listen] Captura concluída. Arquivo: {temp_audio_file}")
+            logging.info(f"[Listen] Captura concluída.")
 
-            # 3. Enviar para Google Speech-to-Text
+            # Enviar para Google Speech-to-Text
             if not os.path.exists(temp_audio_file):
-                logging.error("[Listen] Arquivo de áudio não foi criado pelo FFMPEG.")
+                logging.error("[Listen] Arquivo de áudio não encontrado após ffmpeg.")
                 return ""
 
             with open(temp_audio_file, "rb") as audio_file:
@@ -158,32 +160,33 @@ class Listen:
             logging.info(f"[Listen] Enviando áudio para a API Google Speech...")
             response = self.speech_client.recognize(config=config, audio=audio)
 
-            # 4. Extrair transcrição
+            # Extrair transcrição
             transcription = "".join([result.alternatives[0].transcript for result in response.results])
             
             if transcription:
                 logging.info(f"[Listen] Transcrição recebida: {transcription[:50]}...")
             else:
-                logging.info(f"[Listen] API não retornou nenhuma transcrição (silêncio?).")
+                logging.info(f"[Listen] API retornou silêncio/vazio.")
                 
             return transcription
 
         except subprocess.TimeoutExpired:
-            logging.error(f"[Listen] Timeout ao capturar áudio (Streamlink ou FFMPEG demorou demais).")
+            logging.error(f"[Listen] Timeout: Streamlink ou FFMPEG demorou demais.")
+            return ""
+        except subprocess.CalledProcessError as e:
+            logging.error(f"[Listen] Erro no FFMPEG: {e.stderr.decode('utf-8') if e.stderr else str(e)}")
             return ""
         except Exception as e:
             logging.error(f"[Listen] Erro inesperado na transcrição: {e}")
             return ""
         
         finally:
-            # 5. Limpeza
             if os.path.exists(temp_audio_file):
                 os.remove(temp_audio_file)
-                logging.debug(f"[Listen] Arquivo temporário removido.")
 
     def _manual_listen_trigger(self, channel):
         """
-        Gatilho manual para a função Listen (!glorp scan).
+        Gatilho manual (!glorp scan).
         """
         try:
             self.bot.send_message(channel, f"glorp 📡 Fala que eu te escuto, @{channel}...")
@@ -191,7 +194,7 @@ class Listen:
             transcription = self._transcribe_stream(channel, duration=15)
             
             if not transcription or len(transcription) < 10:
-                logging.info(f"[Listen] Transcricao manual vazia em {channel}.")
+                logging.info(f"[Listen] Transcricao manual vazia.")
                 self.bot.send_message(channel, f"@{channel}, não consegui ouvir nada. Sadge")
                 return
 
@@ -206,18 +209,18 @@ class Listen:
 
     def _generate_comment_thread(self, transcription: str, channel: str, memory_mgr):
         """
-        Thread que chama a IA (2 passagens), para não travar a 'on_message'.
+        Thread que chama a IA (2 passagens).
         """
         try:
-            # 1. Sumarizar a transcrição
-            logging.info(f"[Listen] Passagem 1: Sumarizando a transcrição...")
+            # 1. Sumarizar
+            logging.info(f"[Listen] Passagem 1: Sumarizando...")
             topic = self.bot.gemini_client.summarize_chat_topic(transcription) 
 
             if not topic or topic == "assuntos aleatórios":
-                logging.info(f"[Listen] Tópico do áudio não é interessante ('{topic}'). Cancelando.")
+                logging.info(f"[Listen] Tópico desinteressante ('{topic}'). Cancelando.")
                 return
 
-            # 2. Criar um prompt limpo e comentar sobre o tópico
+            # 2. Comentar
             logging.info(f"[Listen] Passagem 2: Gerando comentário sobre '{topic}'...")
             comment_query = f"O streamer estava falando sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto."
 
@@ -234,6 +237,6 @@ class Listen:
                 if cookie_feedback:
                     self.bot.send_message(channel, f"glorp {cookie_feedback}")
                 
-                logging.info(f"[Listen] Comentario de audio enviado em {channel}: {comment[:50]}...")
+                logging.info(f"[Listen] Comentario enviado em {channel}.")
         except Exception as e:
-            logging.error(f"[Listen] Falha ao gerar comentario de 2 passagens: {e}")
+            logging.error(f"[Listen] Falha ao gerar comentario: {e}")
