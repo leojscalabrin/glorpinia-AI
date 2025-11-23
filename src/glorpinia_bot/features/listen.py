@@ -227,8 +227,7 @@ class Listen:
             if 0 < len(comment) <= 200:
                 formatted_comment = f"@{channel}, {comment}"
                 self.bot.send_long_message(channel, formatted_comment)
-                if cookie_feedback:
-                    self.bot.send_message(channel, f"glorp {cookie_feedback}")
+                logging.info(f"[Listen] Comentario enviado em {channel}.")
                 
                 logging.info(f"[Listen] Comentario enviado em {channel}.")
         except Exception as e:
