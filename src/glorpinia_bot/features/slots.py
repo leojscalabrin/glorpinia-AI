@@ -107,7 +107,7 @@ class Slots:
         # Gira
         result = random.choices(self.symbol_keys, weights=self.symbol_weights, k=3)
         s1, s2, s3 = result
-        display_result = f"[{s1} {s2} {s3}]"
+        display_result = f"[ {s1} | {s2} | {s3} ]"
         
         # Calcula
         multiplier = 0
