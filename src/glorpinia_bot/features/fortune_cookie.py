@@ -71,7 +71,7 @@ class FortuneCookie:
             prompt = self._build_prompt(author)
 
             # Chama o Gemini
-            response = self.bot.gemini_client.get_response(
+            response, _ = self.bot.gemini_client.get_response(
                 query=prompt,
                 channel=channel,
                 author=author,

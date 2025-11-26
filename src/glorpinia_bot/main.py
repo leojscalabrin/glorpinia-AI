@@ -346,17 +346,18 @@ class TwitchIRC:
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
                 print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
                 
-                # Concede +1 cookie por Interação Direta (Menção)
+                # Concede +1 cookie por Interação Direta
                 if self.cookie_system:
                     self.cookie_system.handle_interaction(author_part.lower())
 
                 try:
-                    # Log da query já feito pelo training_logger acima
+                    if self.training_logger:
+                        self.training_logger.log_interaction(channel, author_part, content, None)
                     
                     recent_history = self.recent_messages.get(channel)
                     
                     if self.gemini_client and self.memory_mgr:
-                        response = self.gemini_client.get_response(
+                        response, _ = self.gemini_client.get_response(
                             content, 
                             channel, 
                             author_part, 

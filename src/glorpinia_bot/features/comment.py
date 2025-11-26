@@ -77,7 +77,7 @@ class Comment:
             # 2. PASSAGEM 2: Comentar sobre o tópico
             comment_query = f"O chat está falando sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto."
 
-            comment = self.bot.gemini_client.get_response(
+            comment, _ = self.bot.gemini_client.get_response(
                 query=comment_query,
                 channel=channel,
                 author="system",
