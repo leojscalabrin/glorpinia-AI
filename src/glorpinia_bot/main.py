@@ -178,6 +178,10 @@ class TwitchIRC:
             except Exception as e:
                 return
 
+            if self.cookie_system and author_part.lower() in self.cookie_system.FORBIDDEN_NICKS:
+                # print(f"[IGNORE] Bot detectado: {author_part}")
+                return
+            
             # Log apenas do chat formatado
             print(f"[CHAT] {author_part}: {content}")
             

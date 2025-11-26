@@ -15,11 +15,13 @@ class CookieSystem:
         self.db_path = "glorpinia_cookies.db"
         
         self.FORBIDDEN_NICKS = {
-            "system", "usuario", "user", "usuário", "você", "eu", "everyone", "here", "chat"
+            "system", "usuario", "user", "usuário", "você", "eu", "everyone", "here", "chat",
+            "pokemoncommunitygame", "streamelements", "nightbot", 
+            "wizebot", "creatisbot", "own3d"
         }
 
         self._initialize_db()
-        
+        self._cleanup_forbidden_users()
         self.timer_running = True
         self.last_bonus_time = 0
         self.thread = threading.Thread(target=self._daily_bonus_thread, daemon=True)
@@ -40,6 +42,23 @@ class CookieSystem:
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao inicializar o banco de dados: {e}")
 
+    def _cleanup_forbidden_users(self):
+        """Remove usuários proibidos que já estejam no banco de dados."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                # Cria uma string de placeholders (?, ?, ?)
+                placeholders = ', '.join('?' for _ in self.FORBIDDEN_NICKS)
+                query = f"DELETE FROM user_cookies WHERE user_nick IN ({placeholders})"
+                c.execute(query, list(self.FORBIDDEN_NICKS))
+                deleted_count = c.rowcount
+                conn.commit()
+            
+            if deleted_count > 0:
+                logging.info(f"[CookieSystem] Limpeza: Removidos {deleted_count} bots/usuários proibidos do banco de dados.")
+        except Exception as e:
+            logging.error(f"[CookieSystem] Falha na limpeza de usuários proibidos: {e}")
+
     def stop_thread(self):
         """Sinaliza para o thread parar (usado no shutdown)."""
         self.timer_running = False
@@ -49,7 +68,7 @@ class CookieSystem:
         if not nick: return False
         clean = nick.lower().strip().replace("@", "")
         if clean in self.FORBIDDEN_NICKS:
-            logging.warning(f"[CookieSystem] Transação bloqueada para nick proibido: '{clean}'")
+            # logging.warning(f"[CookieSystem] Transação ignorada para: '{clean}'")
             return False
         return True
 
@@ -58,10 +77,10 @@ class CookieSystem:
         self.last_bonus_time = time.time()
         
         while self.timer_running:
-            time.sleep(3600)
+            time.sleep(3600) 
             
             now = time.time()
-            if (now - self.last_bonus_time) > 86400:
+            if (now - self.last_bonus_time) > 86400: 
                 logging.info("[CookieSystem] Aplicando bônus diário de 5 cookies...")
                 try:
                     with sqlite3.connect(self.db_path) as conn:
@@ -128,7 +147,7 @@ class CookieSystem:
 
     def add_cookies(self, nick: str, amount_to_add: int):
         """Adiciona cookies a um usuário."""
-        if not self._is_nick_valid(nick): return
+        if not self._is_nick_valid(nick): return 
         
         nick = nick.lower()
         self._check_or_create_user(nick)
@@ -145,7 +164,7 @@ class CookieSystem:
         """
         Remove cookies de um usuário e TRANSFERE para a conta do bot.
         """
-        if not self._is_nick_valid(nick): return
+        if not self._is_nick_valid(nick): return 
         
         nick = nick.lower()
         bot_nick = self.bot.auth.bot_nick.lower()
@@ -178,7 +197,7 @@ class CookieSystem:
 
     def handle_interaction(self, nick: str):
         """Concede +1 cookie por interação."""
-        if not self._is_nick_valid(nick): return
+        if not self._is_nick_valid(nick): return 
         
         nick = nick.lower()
         try:
