@@ -11,7 +11,6 @@ from datetime import datetime
 from collections import deque
 import subprocess
 from google.cloud import speech
-import asyncio
 
 from .twitch_auth import TwitchAuth
 from .gemini_client import GeminiClient
@@ -219,149 +218,125 @@ class TwitchIRC:
                     self.send_message(channel, "Olá @oziell ! Tudo bem @oziell ? Tchau @oziell !")
                 return
             
-            if content_lower.startswith("!glorp 8ball"):
-                question = content[len("!glorp 8ball"):].strip()
-                if not question:
-                    self.send_message(channel, f"@{author_part}, você precisa me perguntar algo! glorp")
-                    return
-                self.eight_ball_feature.get_8ball_response(question, channel, author_part)
-                return
-            
-            if content_lower == "!glorp cookie":
-                if self.fortune_cookie_feature:
-                    self.fortune_cookie_feature.get_fortune(channel, author_part)
-                return
-
-            if content_lower.startswith("!glorp slots"):
-                if self.slots_feature:
-                    parts = content.split()
-                    bet = 10
-                    if len(parts) > 2:
-                        try:
-                            bet = int(parts[2])
-                        except ValueError:
-                            pass
-                    
-                    try:
-                        result_msg = asyncio.run(self.slots_feature.play(channel, author_part, bet))
-                        self.send_message(channel, result_msg)
-                    except Exception as e:
-                        print(f"[ERROR] Falha ao rodar slots: {e}")
-                        self.send_message(channel, f"@{author_part}, o cassino quebrou! Sadge")
-                return
-
-            if content_lower.startswith("!glorp balance"):
-                if self.cookie_system:
-                    parts = content.split()
-                    target_nick = author_part.lower()
-                    if len(parts) > 2:
-                        target_nick = parts[2].lower().replace("@", "")
-                    
-                    # Ignora se o alvo for o próprio bot
-                    if target_nick == self.auth.bot_nick.lower():
-                        return
-
-                    count = self.cookie_system.get_cookies(target_nick)
-                    if target_nick == author_part.lower():
-                        self.send_message(channel, f"@{author_part}, você tem {count} cookies! glorp")
-                    else:
-                        self.send_message(channel, f"@{author_part}, o usuário {target_nick} tem {count} cookies! glorp")
-                return
-            
-            if content_lower == "!glorp empire":
-                if self.cookie_system:
-                    # Pega o saldo da própria Glorpinia
-                    bot_nick = self.auth.bot_nick.lower()
-                    count = self.cookie_system.get_cookies(bot_nick)
-                    
-                    empire_query = f"Seu império de cookies já acumulou {count} cookies. Faça um comentário curto (uma frase), triunfante, arrogante e divertido sobre como sua dominação galática está sendo financiada por esses 'tributos' dos humanos."
-                    
-                    try:
-                        comment = self.gemini_client.get_response(
-                            empire_query, 
-                            channel, 
-                            "system", # Author system = resposta limpa, sem salvar memória
-                            self.memory_mgr
-                        )
-                        
-                        if comment:
-                            self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap {comment}")
-                        else:
-                            self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
-                    except Exception as e:
-                        print(f"[ERROR] Falha no comando empire: {e}")
-                        self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
-                return
-            
-            if content_lower == "!glorp leaderboard":
-                if self.cookie_system:
-                    top_users = self.cookie_system.get_leaderboard(5)
-                    if not top_users:
-                        self.send_message(channel, "glorp Ainda não há barões dos cookies! Sadge")
-                    else:
-                        msg_parts = []
-                        for i, (nick, count) in enumerate(top_users):
-                            msg_parts.append(f"#{i+1} {nick} [{count} 🍪]")
-                        
-                        final_msg = "Barões dos Cookies: " + " , ".join(msg_parts)
-                        self.send_message(channel, f"glorp {final_msg}")
-                return
-
-            if content_lower.startswith("!glorp help"):
-                parts = content.split()
-                if len(parts) < 3:
-                    self.send_message(channel, "glorp Use !glorp help [comando] para saber mais. Ex: !glorp help slots")
-                    return
-                
-                cmd_help = parts[2].lower()
-                
-                help_messages = {
-                    "check": "glorp checa o status das features de chat (chat/comment/listen)",
-                    "slots": "glorp use !glorp slots [valor] para apostar nos slots, aposta minima 10 🍪 caso não passe o valor",
-                    "8ball": "glorp Pergunte ao oráculo! Ex: !glorp 8ball Vai chover?",
-                    "cookie": "glorp Pegue seu biscoito da sorte diário (e ganhe cookies bônus).",
-                    "balance": "glorp Verifique seu saldo de cookies ou de outro usuário. Ex: !glorp balance @nick",
-                    "empire": "glorp Veja o tamanho do cofre da Imperatriz Glorpinia.",
-                    "leaderboard": "glorp Mostra o top 5 usuários com mais cookies.",
-                    "chat": "glorp (Admin) Ativa/Desativa a resposta a menções. Ex: !glorp chat on",
-                    "listen": "glorp (Admin) Ativa/Desativa a escuta automática. Ex: !glorp listen on",
-                    "comment": "glorp (Admin) Ativa/Desativa comentários automáticos. Ex: !glorp comment on",
-                    "scan": "glorp (Admin) Força uma escuta manual de 15s. Ex: !glorp scan",
-                    "addcookie": "glorp (Admin) Adiciona cookies. Ex: !glorp addcookie nick 100",
-                    "removecookie": "glorp (Admin) Remove cookies. Ex: !glorp removecookie nick 100",
-                    "commands": "glorp Lista todos os comandos disponíveis.",
-                    "help": "Você deve estar precisando mesmo nise"
-                }
-                
-                msg = help_messages.get(cmd_help, f"glorp Comando '{cmd_help}' não encontrado. Tente !glorp commands.")
-                self.send_message(channel, msg)
-                return
-
+            # Verifica se começa com !glorp e divide para analisar os argumentos
             if content.startswith("!glorp"):
                 parts = content.split()
-                cmd_attempt = parts[1].lower() if len(parts) > 1 else ""
+                
+                # Se tiver pelo menos um argumento
+                if len(parts) > 1:
+                    command = parts[1].lower()
 
-                # Lista de comandos que exigem ADMIN
-                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie"]
+                    if command == "8ball":
+                        # Reconstrói a pergunta com o resto da string
+                        question = " ".join(parts[2:])
+                        if not question:
+                            self.send_message(channel, f"@{author_part}, faça uma pergunta! glorp")
+                            return
+                        self.eight_ball_feature.get_8ball_response(question, channel, author_part)
+                        return
+                    
+                    if command == "cookie":
+                        if self.fortune_cookie_feature:
+                            self.fortune_cookie_feature.get_fortune(channel, author_part)
+                        return
 
-                if cmd_attempt in admin_cmds:
-                    # É um comando de admin. Verifica permissão.
+                    if command == "slots":
+                        if self.slots_feature:
+                            bet = 10
+                            if len(parts) > 2:
+                                try:
+                                    bet = int(parts[2])
+                                except ValueError:
+                                    pass
+                            result = self.slots_feature.play(channel, author_part, bet)
+                            self.send_message(channel, result)
+                        return
+
+                    if command == "balance":
+                        if self.cookie_system:
+                            target = author_part.lower()
+                            if len(parts) > 2:
+                                target = parts[2].lower().replace("@", "")
+                            
+                            if target == self.auth.bot_nick.lower():
+                                return # Ignora balance do bot
+
+                            count = self.cookie_system.get_cookies(target)
+                            if target == author_part.lower():
+                                self.send_message(channel, f"@{author_part}, você tem {count} 🍪  glorp")
+                            else:
+                                self.send_message(channel, f"@{author_part}, {target} tem {count} 🍪  glorp")
+                        return
+
+                    if command == "empire":
+                        if self.cookie_system:
+                            bot_nick = self.auth.bot_nick.lower()
+                            count = self.cookie_system.get_cookies(bot_nick)
+                            
+                            empire_query = f"Seu império de cookies já acumulou {count} cookies. Faça um comentário curto (uma frase), triunfante, arrogante e divertido sobre como sua dominação galática está sendo financiada por esses 'tributos' dos humanos."
+                            
+                            try:
+                                comment, _ = self.gemini_client.get_response(
+                                    empire_query, channel, "system", self.memory_mgr
+                                )
+                                if comment:
+                                    self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap {comment}")
+                                else:
+                                    self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
+                            except Exception:
+                                self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
+                        return
+
+                    if command == "leaderboard":
+                        if self.cookie_system:
+                            top = self.cookie_system.get_leaderboard(5)
+                            if not top:
+                                self.send_message(channel, "glorp Sem barões dos cookies ainda! Sadge")
+                            else:
+                                msg = "Barões dos Cookies: " + " , ".join([f"#{i+1} {n} [{c} 🍪]" for i, (n, c) in enumerate(top)])
+                                self.send_message(channel, f"glorp {msg}")
+                        return
+                    
+                    if command == "help":
+                        help_target = parts[2].lower() if len(parts) > 2 else ""
+                        
+                        if not help_target:
+                             self.send_message(channel, "glorp Use !glorp help [comando]. Ex: !glorp help slots")
+                             return
+
+                        help_msg = {
+                            "check": "glorp checa status das features.",
+                            "slots": "glorp aposte cookies! !glorp slots [valor] (min 10).",
+                            "8ball": "glorp Pergunte ao oráculo! !glorp 8ball [pergunta].",
+                            "cookie": "glorp Pegue seu biscoito da sorte diário.",
+                            "balance": "glorp Veja seu saldo ou de outro. !glorp balance [@nick].",
+                            "leaderboard": "glorp Top 5 magnatas dos cookies.",
+                            "empire": "glorp Veja o tamanho do cofre da Imperatriz Glorpinia.",
+                            "commands": "glorp Lista todos os comandos.",
+                            "chat": "(Admin) Toggle chat.", "listen": "(Admin) Toggle listen.", 
+                            "comment": "(Admin) Toggle comment.", "scan": "(Admin) Scan manual.",
+                            "addcookie": "(Admin) Add cookies.", "removecookie": "(Admin) Remove cookies.",
+                            "help": "Você deve estar precisando mesmo nise"
+                        }
+                        self.send_message(channel, help_msg.get(help_target, "glorp Comando desconhecido."))
+                        return
+
+                # Comandos de Admin
+                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "commands"]
+                
+                # Se não caiu em nenhum comando acima, verifica se é admin
+                if len(parts) > 1 and parts[1].lower() in admin_cmds:
                     if author_part.lower() in self.admin_nicks:
                         self.handle_admin_command(content, channel)
                     else:
                         self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
                     return
                 
-                self.send_message(channel, "glorp Comando desconhecido. Use !glorp commands para ver a lista.")
+                # Se chegou aqui, é um comando desconhecido (e não é só !glorp vazio)
+                if len(parts) > 1:
+                    self.send_message(channel, "glorp Comando desconhecido. Use !glorp help.")
+                
                 return
-            
-            # SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
-            unique_message_identifier = f"{author_part}-{channel}-{content}"
-            message_hash = hash(unique_message_identifier)
-
-            if message_hash in self.processed_message_ids:
-                return
-            self.processed_message_ids.append(message_hash)
 
             # SE NÃO FOR COMANDO NEM DUPLICATA, PROCESSA MENÇÕES À IA
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():

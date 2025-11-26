@@ -1,15 +1,14 @@
 import random
-import time
-import asyncio
 import logging
+import time
+import requests
 
 class Slots:
     def __init__(self, bot):
         print("[Feature] Slots Initialized.")
         self.bot = bot
-        self.cooldowns = {}
+        self.cooldowns = {} 
         
-        # Configuração dos Símbolos
         self.symbols = {
             # Especiais
             "glorp":        {"weight": 8,   "multiplier": 1000}, # Jackpot (Muito Raro)
@@ -32,41 +31,54 @@ class Slots:
         self.symbol_keys = list(self.symbols.keys())
         self.symbol_weights = [s["weight"] for s in self.symbols.values()]
 
-    async def _is_stream_online(self, channel_name):
-        """Verifica na API da Twitch se o canal está ao vivo."""
+    def _is_stream_online(self, channel_name):
+        """
+        Verifica na API da Twitch se o canal está ao vivo (Requisição Síncrona).
+        """
+        channel_name = channel_name.replace("#", "")
+        
+        client_id = self.bot.auth.client_id
+        token = self.bot.auth.access_token
+
+        if not client_id or not token:
+            logging.error("[Slots] Falha: Client-ID ou Token ausentes para checar live.")
+            return False
+
         try:
-            # Busca o ID do usuário pelo nome do canal
-            users = await self.bot.fetch_users(names=[channel_name])
-            if not users:
+            url = f"https://api.twitch.tv/helix/streams?user_login={channel_name}"
+            headers = {
+                "Client-ID": client_id,
+                "Authorization": f"Bearer {token}"
+            }
+            
+            response = requests.get(url, headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return len(data.get("data", [])) > 0
+            else:
+                logging.error(f"[Slots] Erro API Twitch ({response.status_code}): {response.text}")
                 return False
             
-            channel_id = users[0].id
-            
-            # Busca streams ativas para esse ID
-            streams = await self.bot.fetch_streams(user_ids=[channel_id])
-            
-            # Se a lista 'streams' não estiver vazia, está online.
-            return len(streams) > 0
-            
         except Exception as e:
-            logging.error(f"[Slots] Erro ao checar status da stream: {e}")
+            logging.error(f"[Slots] Erro ao conectar na API Twitch: {e}")
             return False
-        
-    async def play(self, channel, user, bet_amount):
+
+    def play(self, channel, user, bet_amount):
         """
-        Executa uma rodada de slots
+        Executa uma rodada de slots.
         """
         if not self.bot.cookie_system:
             return "O sistema de cookies está offline. Sadge"
 
         # Verifica se a Stream está Online
-        is_online = await self._is_stream_online(channel)
-        if is_online:
-            return f"@{user}, o KASSINÃO só abre quando a live está OFFLINE! Volte mais tarde. glorp"
+        if self._is_stream_online(channel):
+             return f"@{user}, o KASSINÃO só abre quando a live está OFFLINE! Volte mais tarde. glorp"
 
+        # Verifica Cooldown
         now = time.time()
         last_used = self.cooldowns.get(user, 0)
-        cooldown_time = 600
+        cooldown_time = 600 
         
         if (now - last_used) < cooldown_time:
             remaining = int(cooldown_time - (now - last_used))
@@ -87,39 +99,32 @@ class Slots:
         if user_balance < bet_amount:
             return f"@{user}, você não tem cookies suficientes! Saldo: {user_balance} 🍪. poor"
 
-        
-        # Atualiza o cooldown
         self.cooldowns[user] = now
-
-        # Deduz a Aposta
+        
+        # Deduz a aposta
         self.bot.cookie_system.remove_cookies(user, bet_amount)
 
-        # Gira os Slots
+        # Gira
         result = random.choices(self.symbol_keys, weights=self.symbol_weights, k=3)
         s1, s2, s3 = result
+        display_result = f"[{s1} {s2} {s3}]"
         
-        display_result = f"[ {s1} | {s2} | {s3} ]"
-        
-        # Calcula o Prêmio
+        # Calcula
         multiplier = 0
-        
         if s1 == "WhySoSerious" and s2 == "WhySoSerious" and s3 == "WhySoSerious":
             multiplier = self.symbols["WhySoSerious"]["multiplier"]
-            
         elif s1 == s2 == s3:
             multiplier = self.symbols[s1]["multiplier"]
-            
         else:
             wilds = result.count("WhySoSerious")
             if wilds > 0:
                 others = [s for s in result if s != "WhySoSerious"]
-                if len(others) == 0: 
-                    pass
+                if len(others) == 0: pass
                 elif len(set(others)) == 1: 
                     symbol_type = others[0]
                     multiplier = self.symbols[symbol_type]["multiplier"]
 
-        # Processa o Resultado
+        # Resultado
         if multiplier > 0:
             prize = int(bet_amount * multiplier)
             self.bot.cookie_system.add_cookies(user, prize)
