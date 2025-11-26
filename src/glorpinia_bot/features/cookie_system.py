@@ -13,6 +13,11 @@ class CookieSystem:
         print("[Feature] CookieSystem Initialized.")
         self.bot = bot
         self.db_path = "glorpinia_cookies.db"
+        
+        self.FORBIDDEN_NICKS = {
+            "system", "usuario", "user", "usuário", "você", "eu", "everyone", "here", "chat"
+        }
+
         self._initialize_db()
         
         self.timer_running = True
@@ -38,16 +43,25 @@ class CookieSystem:
     def stop_thread(self):
         """Sinaliza para o thread parar (usado no shutdown)."""
         self.timer_running = False
+    
+    def _is_nick_valid(self, nick: str) -> bool:
+        """Retorna False se o nick estiver na lista negra ou for inválido."""
+        if not nick: return False
+        clean = nick.lower().strip().replace("@", "")
+        if clean in self.FORBIDDEN_NICKS:
+            logging.warning(f"[CookieSystem] Transação bloqueada para nick proibido: '{clean}'")
+            return False
+        return True
 
     def _daily_bonus_thread(self):
         """Thread que concede 5 cookies a todos no DB a cada 24h."""
         self.last_bonus_time = time.time()
         
         while self.timer_running:
-            time.sleep(3600) # Checa a cada hora
+            time.sleep(3600)
             
             now = time.time()
-            if (now - self.last_bonus_time) > 86400: # 24h
+            if (now - self.last_bonus_time) > 86400:
                 logging.info("[CookieSystem] Aplicando bônus diário de 5 cookies...")
                 try:
                     with sqlite3.connect(self.db_path) as conn:
@@ -61,6 +75,8 @@ class CookieSystem:
 
     def _check_or_create_user(self, nick: str):
         """Garante que um usuário exista no DB. (Interno)"""
+        if not self._is_nick_valid(nick): return
+        
         nick = nick.lower()
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -73,7 +89,7 @@ class CookieSystem:
     def get_cookies(self, nick: str) -> int:
         """Busca a contagem de cookies de um usuário."""
         nick = nick.lower()
-        self._check_or_create_user(nick)
+        
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
@@ -86,23 +102,34 @@ class CookieSystem:
 
     def get_leaderboard(self, limit=5):
         """
-        Retorna os top N usuários com mais cookies, EXCLUINDO o próprio bot.
+        Retorna os top N usuários com mais cookies, EXCLUINDO o próprio bot e proibidos.
         """
         try:
             bot_nick = self.bot.auth.bot_nick.lower()
+            forbidden_placeholders = ','.join(['?'] * len(self.FORBIDDEN_NICKS))
+            query_args = [bot_nick] + list(self.FORBIDDEN_NICKS) + [limit]
+            
+            query = f"""
+                SELECT user_nick, cookie_count 
+                FROM user_cookies 
+                WHERE user_nick != ? 
+                AND user_nick NOT IN ({forbidden_placeholders})
+                ORDER BY cookie_count DESC 
+                LIMIT ?
+            """
+            
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
-                c.execute(
-                    "SELECT user_nick, cookie_count FROM user_cookies WHERE user_nick != ? ORDER BY cookie_count DESC LIMIT ?", 
-                    (bot_nick, limit)
-                )
+                c.execute(query, query_args)
                 return c.fetchall()
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao buscar leaderboard: {e}")
             return []
 
     def add_cookies(self, nick: str, amount_to_add: int):
-        """Adiciona cookies a um usuário (Inflacionário - cria do nada)."""
+        """Adiciona cookies a um usuário."""
+        if not self._is_nick_valid(nick): return
+        
         nick = nick.lower()
         self._check_or_create_user(nick)
         try:
@@ -117,37 +144,30 @@ class CookieSystem:
     def remove_cookies(self, nick: str, amount_to_remove: int):
         """
         Remove cookies de um usuário e TRANSFERE para a conta do bot.
-        Garante que não remove mais do que o usuário tem.
         """
+        if not self._is_nick_valid(nick): return
+        
         nick = nick.lower()
         bot_nick = self.bot.auth.bot_nick.lower()
         
-        # Se tentar tirar do próprio bot, ignora para evitar loop
-        if nick == bot_nick:
-            return
+        if nick == bot_nick: return
 
         self._check_or_create_user(nick)
-        self._check_or_create_user(bot_nick) # Garante que o bot tenha conta
+        self._check_or_create_user(bot_nick) 
         
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
                 
-                # 1. Verifica saldo atual para calcular remoção real
                 c.execute("SELECT cookie_count FROM user_cookies WHERE user_nick = ?", (nick,))
                 result = c.fetchone()
                 current_balance = result[0] if result else 0
                 
-                # Remove o que for possível (até zerar)
                 actual_removed = min(current_balance, amount_to_remove)
                 
                 if actual_removed > 0:
-                    # 2. Tira do usuário
                     c.execute("UPDATE user_cookies SET cookie_count = cookie_count - ? WHERE user_nick = ?", (actual_removed, nick))
-                    
-                    # 3. Dá para o bot
                     c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (actual_removed, bot_nick))
-                    
                     conn.commit()
                     logging.info(f"[CookieSystem] Transferidos {actual_removed} cookies de {nick} para {bot_nick}.")
                 else:
@@ -158,6 +178,8 @@ class CookieSystem:
 
     def handle_interaction(self, nick: str):
         """Concede +1 cookie por interação."""
+        if not self._is_nick_valid(nick): return
+        
         nick = nick.lower()
         try:
             with sqlite3.connect(self.db_path) as conn:

@@ -154,7 +154,7 @@ class TwitchIRC:
             
             current_delay += split_delay_sec
 
-    def on_message(self, ws, message):
+    async def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
         if message.startswith("PING"):
             ws.send("PONG :tmi.twitch.tv\r\n")
@@ -205,7 +205,7 @@ class TwitchIRC:
             if author_part.lower() == self.auth.bot_nick.lower():
                 return
             
-            # 1. PROCESSA COMANDOS E TRIGGERS PRIMEIRO
+            # PROCESSA COMANDOS E TRIGGERS PRIMEIRO
 
             if content_lower == 'glorp':
                 self.send_message(channel, 'glorp')
@@ -234,14 +234,14 @@ class TwitchIRC:
             if content_lower.startswith("!glorp slots"):
                 if self.slots_feature:
                     parts = content.split()
-                    bet = 10 # Default
+                    bet = 10
                     if len(parts) > 2:
                         try:
                             bet = int(parts[2])
                         except ValueError:
                             pass
                     
-                    result_msg = self.slots_feature.play(channel, author_part, bet)
+                    result_msg = await self.slots_feature.play(channel, author_part, bet)
                     self.send_message(channel, result_msg)
                 return
 
@@ -269,7 +269,6 @@ class TwitchIRC:
                     bot_nick = self.auth.bot_nick.lower()
                     count = self.cookie_system.get_cookies(bot_nick)
                     
-                    # Gera comentário temático
                     empire_query = f"Seu império de cookies já acumulou {count} cookies. Faça um comentário curto (uma frase), triunfante, arrogante e divertido sobre como sua dominação galática está sendo financiada por esses 'tributos' dos humanos."
                     
                     try:
@@ -348,20 +347,18 @@ class TwitchIRC:
                         self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
                     return
                 
-                # Se chegou aqui, é um "!glorp algo" que não existe ou não é restrito
                 self.send_message(channel, "glorp Comando desconhecido. Use !glorp commands para ver a lista.")
                 return
             
-            # 2. SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
+            # SE NÃO FOR COMANDO, CHECA DUPLICATAS DE CHAT
             unique_message_identifier = f"{author_part}-{channel}-{content}"
             message_hash = hash(unique_message_identifier)
 
             if message_hash in self.processed_message_ids:
-                # Log de duplicata removido para limpeza
                 return
             self.processed_message_ids.append(message_hash)
 
-            # 3. SE NÃO FOR COMANDO NEM DUPLICATA, PROCESSA MENÇÕES À IA
+            # SE NÃO FOR COMANDO NEM DUPLICATA, PROCESSA MENÇÕES À IA
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
                 print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
                 
@@ -388,7 +385,7 @@ class TwitchIRC:
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar resposta: {e}")
 
-            # 4. PROCESSA O GATILHO DO COMMENT
+            # PROCESSA O GATILHO DO COMMENT
             if self.comment_feature:
                 # Passa o author_part para receber o prêmio de 10 cookies se o trigger ativar
                 self.comment_feature.roll_for_comment(channel, author_part)
