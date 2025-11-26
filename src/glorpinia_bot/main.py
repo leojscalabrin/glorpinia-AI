@@ -11,6 +11,7 @@ from datetime import datetime
 from collections import deque
 import subprocess
 from google.cloud import speech
+import asyncio
 
 from .twitch_auth import TwitchAuth
 from .gemini_client import GeminiClient
@@ -154,7 +155,7 @@ class TwitchIRC:
             
             current_delay += split_delay_sec
 
-    async def on_message(self, ws, message):
+    def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
         if message.startswith("PING"):
             ws.send("PONG :tmi.twitch.tv\r\n")
@@ -241,8 +242,12 @@ class TwitchIRC:
                         except ValueError:
                             pass
                     
-                    result_msg = await self.slots_feature.play(channel, author_part, bet)
-                    self.send_message(channel, result_msg)
+                    try:
+                        result_msg = asyncio.run(self.slots_feature.play(channel, author_part, bet))
+                        self.send_message(channel, result_msg)
+                    except Exception as e:
+                        print(f"[ERROR] Falha ao rodar slots: {e}")
+                        self.send_message(channel, f"@{author_part}, o cassino quebrou! Sadge")
                 return
 
             if content_lower.startswith("!glorp balance"):
