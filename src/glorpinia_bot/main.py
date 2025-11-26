@@ -280,11 +280,11 @@ class TwitchIRC:
                                     empire_query, channel, "system", self.memory_mgr
                                 )
                                 if comment:
-                                    self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap {comment}")
+                                    self.send_message(channel, f"O Império já arrecadou {count}🍪 EZ Clap {comment}")
                                 else:
-                                    self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
+                                    self.send_message(channel, f"O Império já arrecadou {count}🍪 EZ Clap")
                             except Exception:
-                                self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
+                                self.send_message(channel, f"O Império já arrecadou {count}🍪 EZ Clap")
                         return
 
                     if command == "leaderboard":

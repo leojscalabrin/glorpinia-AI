@@ -169,7 +169,7 @@ class GeminiClient:
         
         clean_query = re.sub(r'@glorpinia\b[,\s]*', '', query, flags=re.IGNORECASE).strip()
 
-        # 1. Preparar Memória de Longo Prazo (RAG)
+        # Preparar Memória de Longo Prazo (RAG)
         memory_mgr.load_user_memory(channel, author)
         vectorstore = memory_mgr.vectorstore
         long_term_context = ""
@@ -183,7 +183,7 @@ class GeminiClient:
             except Exception as e:
                 logging.error(f"[RAG ERROR] Falha ao buscar contexto: {e}")
         
-        # 2. Preparar Memória de Curto Prazo (Histórico Recente)
+        # Preparar Memória de Curto Prazo (Histórico Recente)
         short_term_context = ""
         if recent_chat_history:
             recent_messages = list(recent_chat_history)[-3:] 
@@ -193,7 +193,7 @@ class GeminiClient:
                 ])
                 short_term_context = f"**HISTÓRICO RECENTE (MEMÓRIA IMEDIATA):**\n{formatted_history}"
         
-        # 3. Preparar Contexto da Web
+        # Preparar Contexto da Web
         web_context = ""
         try:
             if self._should_search(clean_query):
@@ -203,7 +203,7 @@ class GeminiClient:
         except Exception as e:
              logging.error(f"[Search Analysis Error] Falha ao decidir/buscar: {e}")
 
-        # 4. Montagem do Prompt
+        # Montagem do Prompt
         prompt = f"""
         {short_term_context}
 
@@ -214,7 +214,7 @@ class GeminiClient:
         **Query do Usuário:** {clean_query} 
         """
 
-        # 5. Chamada à API do Gemini
+        # Chamada à API do Gemini
         try:
             response = self.model.generate_content(prompt)
 
@@ -239,20 +239,20 @@ class GeminiClient:
 
         generated = self._process_cookie_commands(generated, author)
 
-        # 6. Limpeza Final e Salvamento de Memória
+        # Limpeza Final e Salvamento de Memória
         generated = self._clean_response(generated)
         fallback = "Meow. O portal está com lag. Tente novamente! 😸"
         is_system_message = (author.lower() == "system")
 
         if generated:
             if is_system_message:
-                return generated
+                return generated, None
             else:
                 if "Sadge" not in generated: 
                     memory_mgr.save_user_memory(channel, author, query, generated)
                 
                 final_response = f"@{author}, {generated}"
-                return final_response
+                return final_response, None
         else:
             if is_system_message:
                 return fallback
