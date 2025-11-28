@@ -400,10 +400,10 @@ class TwitchIRC:
                 if val <= 0: raise ValueError
                 if command_name == "addcookie":
                     self.cookie_system.add_cookies(target, val)
-                    self.send_message(channel, f"glorp +{val} cookies para {target}.")
+                    self.send_message(channel, f"glorp +{val} 🍪  para {target}.")
                 elif command_name == "removecookie":
                     self.cookie_system.remove_cookies(target, val)
-                    self.send_message(channel, f"glorp -{val} cookies de {target}.")
+                    self.send_message(channel, f"glorp -{val} 🍪  de {target}.")
                 return
             except ValueError:
                 self.send_message(channel, "glorp Valor inválido.")
