@@ -383,7 +383,7 @@ class TwitchIRC:
                 c_st = "ON" if self.chat_enabled else "OFF"
                 l_st = self.listen_feature.get_status() if self.listen_feature else "?"
                 cm_st = self.comment_feature.get_status() if self.comment_feature else "?"
-                self.send_message(channel, f"Status: Chat {c_st} | Listen {l_st} | Comment {cm_st}")
+                self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
                 self.send_message(channel, "glorp Comandos: check, scan, 8ball, cookie, balance, empire, leaderboard, slots, help, chat/listen/comment [on/off], addcookie/removecookie [nick] [valor]")
