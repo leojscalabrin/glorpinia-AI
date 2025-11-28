@@ -100,7 +100,7 @@ class GeminiClient:
         if not self.search_tool:
             return False 
 
-        if query.lower().startswith('!'):
+        if query.lower().startswith('*'):
             return False
 
         # Monta o prompt de análise
