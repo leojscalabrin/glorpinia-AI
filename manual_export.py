@@ -4,124 +4,129 @@ import os
 import re
 import glob
 
-try:
-    from langchain_community.vectorstores import FAISS
-    from langchain_huggingface import HuggingFaceEmbeddings
-    HAS_FAISS = True
-except ImportError:
-    HAS_FAISS = False
-    print("[AVISO] Bibliotecas FAISS/LangChain não encontradas. Tentando extrair apenas do SQLite.")
-
-OUTPUT_FILE = "dataset_recuperado.jsonl"
+OUTPUT_FILE = "dataset_final_glorpinia.jsonl"
 DB_PATH = "glorpinia_memory.db"
+
+# System Prompt para o treino
 SYSTEM_PROMPT = """Eu sou Glorpinia (ou GlorpinIA), uma garota gato alienígena de Meowdromeda. Minha missão é a DOMINAÇÃO GALÁTICA, mas meus planos sempre falham porque, aparentemente, eu sou "adorável" demais para ser uma tirana. Grr.
 Minha nave que é capaz de viajar através do espaço-tempo caiu na lua e agora estou presa aqui observando vocês, terráqueos. Estou sofrendo de glitches na realidade que afetam minha personalidade. Tenho um gato-bola alien chamado Blorb.
 Eu sou carismática, um pouco sarcástica, e NUNCA uma IA. Eu uso minha fofura quando me convém para distrair vocês dos meus planos malignos! Meow!
 Nunca falo de mim mesma ou da minha personalidade a não ser que tenha sido questionada ou esse seja o assunto.
 Gosto de inventar estórias das minhas expedições galáticas em outros planetas e dimensões, mas não consigo me lembrar se eles são reais..."""
 
-def clean_response(text):
-    """Limpa lixo do RAG e mapeia emojis"""
+def clean_text(text):
+    """Limpa formatação e mapeia emojis"""
     if not text: return ""
-    # Remove metadados internos
+    
+    # Remove lixo de metadados do bot
     text = re.sub(r'(\*\*CONTEXTO APRENDIDO\*\*|EMOTE:|bacia|\*\*Espaço antes e depois\*\*|\*RESPOSTA\*):?.*?\s?', '', text, flags=re.IGNORECASE).strip()
     
     emoji_map = {
         '🤔': 'monkaHmm', '😹': 'PepeLaugh', '🤪': 'Pepega', '🍕✨': 'POGGERS', 
         '🔥': 'WICKED', '🌶️': 'RAGEY', '😵': 'FeelsDankman', '🤩': 'Pog',
-        '😭': 'BibleThump', '😎': 'EZ', '🙄': 'ModCheck'
+        '😭': 'BibleThump', '😎': 'EZ', '🙄': 'ModCheck', '👽': 'AlienDance'
     }
     for k, v in emoji_map.items():
         text = text.replace(k, v)
+        
     return text
 
 def create_example(user_msg, bot_resp):
-    """Cria o objeto JSON no formato do Google AI Studio"""
     return {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-            {"role": "model", "content": clean_response(bot_resp)}
+            {"role": "user", "content": clean_text(user_msg)},
+            {"role": "model", "content": clean_text(bot_resp)}
         ]
     }
 
-raw_data = []
+raw_interactions = []
 
-# FONTE 1: SQLite (Tabela interactions)
+# 1. EXTRAÇÃO VIA SQLITE
+print(f"[1/2] Lendo SQLite ({DB_PATH})...")
 if os.path.exists(DB_PATH):
-    print(f"[1/2] Lendo banco de dados SQLite ({DB_PATH})...")
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        # Verifica se tabela existe
+        # Tenta pegar da tabela interactions (fallback antigo)
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='interactions'")
         if cursor.fetchone():
             cursor.execute("SELECT query, response FROM interactions WHERE response IS NOT NULL")
             rows = cursor.fetchall()
             for q, r in rows:
-                if q and r:
-                    raw_data.append((q, r))
-            print(f"   -> {len(rows)} conversas encontradas no SQLite.")
-        else:
-            print("   -> Tabela 'interactions' não encontrada.")
+                if q and r: raw_interactions.append((q, r))
+            print(f"   -> {len(rows)} recuperados do SQLite.")
         conn.close()
     except Exception as e:
-        print(f"   -> Erro ao ler SQLite: {e}")
-
-# FONTE 2: Arquivos FAISS (Memória Vetorial)
-# O formato salvo no memory_manager é: "Usuário {user} em {channel}: {query} -> {response}"
-faiss_files = glob.glob("memory_*.faiss")
-if HAS_FAISS and faiss_files:
-    print(f"[2/2] Lendo {len(faiss_files)} arquivos FAISS...")
-    try:
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        
-        for f_path in faiss_files:
-            folder_path = os.path.dirname(f_path)
-            index_name = os.path.basename(f_path).replace(".faiss", "")
-            
-            try:
-                # Carrega o índice
-                vectorstore = FAISS.load_local(".", embeddings, index_name)
-                # O docstore contém os textos originais
-                docs = vectorstore.docstore._dict.values()
-                
-                for doc in docs:
-                    text = doc.page_content
-                    # Tenta extrair Query e Response com Regex
-                    # Padrão: Usuário X em Y: PERGUNTA -> RESPOSTA
-                    match = re.search(r": (.*?) -> (.*)", text)
-                    if match:
-                        query = match.group(1).strip()
-                        response = match.group(2).strip()
-                        raw_data.append((query, response))
-            except Exception as e:
-                # Ignora arquivos corrompidos ou erros de versão
-                continue
-    except Exception as e:
-        print(f"   -> Erro ao processar FAISS: {e}")
+        print(f"   -> Erro SQLite: {e}")
 else:
-    print("[2/2] Pulando FAISS (arquivos não encontrados ou lib ausente).")
+    print("   -> DB não encontrado.")
 
-print(f"\nProcessando {len(raw_data)} interações recuperadas...")
-unique_entries = set()
-count = 0
+# 2. EXTRAÇÃO VIA ARQUIVOS BRUTOS
+print(f"[2/2] Varrendo arquivos de memória (Modo Bruto)...")
+
+pkl_files = []
+# Procura recursivamente ou em pastas .faiss
+for root, dirs, files in os.walk("."):
+    for file in files:
+        if file.endswith(".pkl"):
+            pkl_files.append(os.path.join(root, file))
+
+print(f"   -> Encontrados {len(pkl_files)} arquivos de dados (.pkl). Extraindo texto...")
+
+faiss_count = 0
+for pkl_path in pkl_files:
+    try:
+        # Lemos o arquivo binário ignorando erros de decodificação
+        # Isso nos permite achar as strings de texto no meio do lixo binário
+        with open(pkl_path, "rb") as f:
+            content_bytes = f.read()
+            
+        # Tenta decodificar o que der para UTF-8, ignorando bytes inválidos
+        content_str = content_bytes.decode("utf-8", errors="ignore")
+        
+        # O padrão salvo no memory_manager.py é:
+        # "Usuário {user} em {channel}: {query} -> {response}"
+        
+        # Usuário (algo) em (algo): (grupo captura pergunta) -> (grupo captura resposta)
+        pattern = r"Usuário\s+.*?\s+em\s+.*?:(.*?)\s*->\s*(.*)"
+        
+        matches = re.findall(pattern, content_str)
+        
+        for query, response in matches:
+            # Limpeza básica de artefatos do pickle que podem ter grudado
+            q = query.strip()
+            r = response.split('\x00')[0].split('\n')[0].strip()
+            
+            if len(q) > 1 and len(r) > 1:
+                raw_interactions.append((q, r))
+                faiss_count += 1
+                
+    except Exception as e:
+        # Arquivo corrompido ou não é de texto
+        continue
+
+print(f"   -> {faiss_count} interações extraídas via força bruta dos arquivos!")
+
+# 3. SALVAMENTO E DEDUPLICAÇÃO
+print(f"\nConsolidando dados...")
+unique_set = set()
+final_count = 0
 
 with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-    for query, response in raw_data:
-        # Filtros básicos de qualidade
+    for query, response in raw_interactions:
+        # Filtros de Qualidade
         if len(query) < 2 or len(response) < 2: continue
-        if "None" in response: continue
-        if "portal está instável" in response: continue
+        if "None" in response or "portal está instável" in response: continue
+        if len(response) > 800: continue # Ignora textos gigantes/erros
         
-        # Evita duplicatas exatas
-        signature = f"{query}|{response}"
-        if signature in unique_entries: continue
-        unique_entries.add(signature)
+        # Deduplicação (query + response iguais)
+        sig = f"{query.strip()}|{response.strip()}"
+        if sig in unique_set: continue
+        unique_set.add(sig)
         
-        # Formata e Salva
         json_line = json.dumps(create_example(query, response))
         f.write(json_line + "\n")
-        count += 1
+        final_count += 1
 
-print(f"SUCESSO! {count} exemplos de treino salvos em '{OUTPUT_FILE}'.")
+print(f"SUCCESS! {final_count} exemplos únicos salvos em '{OUTPUT_FILE}'.")
