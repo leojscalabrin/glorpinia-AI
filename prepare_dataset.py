@@ -1,13 +1,10 @@
 import json
 import re
 
-# Sua função de limpeza (do export_training_data.py)
 def _clean_completion(text):
     if not text: return ""
-    # Remove lixo de pensamento/contexto
     text = re.sub(r'(\*\*CONTEXTO APRENDIDO\*\*|EMOTE:|bacia|\*\*Espaço antes e depois\*\*|\*RESPOSTA\*):?.*?\s?', '', text, flags=re.IGNORECASE).strip()
     
-    # Mapeamento de Emojis (Adicionei o seu dicionário aqui)
     emoji_map = {
         '🤔': 'monkaHmm', '😹': 'PepeLaugh', '🤪': 'Pepega', '🍕✨': 'POGGERS', 
         '🔥': 'WICKED', '🌶️': 'RAGEY', '😵': 'FeelsDankman', '🤩': 'Pog',
@@ -18,7 +15,7 @@ def _clean_completion(text):
     
     return text
 
-input_file = "training_data.jsonl" # O arquivo gerado pelo seu logger
+input_file = "training_data.jsonl"
 output_file = "dataset_glorpinia_finetune.jsonl"
 
 final_data = []
