@@ -191,11 +191,6 @@ class TwitchIRC:
                 print("[DEBUG] Simulando mensagem duplicada para teste...")
                 self.on_message(ws, message)
                 return
-            
-            try:
-                self.training_logger.log_interaction(channel, author_part, content, None)
-            except Exception as e:
-                print(f"[ERROR] Falha ao salvar registro de captura: {e}")
 
             if author_part.lower() == self.auth.bot_nick.lower():
                 return
@@ -323,14 +318,12 @@ class TwitchIRC:
             
             # Menções Diretas à IA
             if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
-                print(f"[IA] Respondendo menção de {author_part}...")
+                print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
                 
                 if self.cookie_system:
                     self.cookie_system.handle_interaction(author_part.lower())
 
                 try:
-                    if self.training_logger:
-                        self.training_logger.log_interaction(channel, author_part, content, None)
                     
                     recent_history = self.recent_messages.get(channel)
                     
@@ -345,12 +338,22 @@ class TwitchIRC:
                         
                         if response_text:
                             self.send_long_message(channel, response_text)
+                            
+                            if self.training_logger:
+                                self.training_logger.log_interaction(
+                                    channel, 
+                                    author_part, 
+                                    content,
+                                    response_text
+                                )
                         
                         if cookie_feedback:
                             time.sleep(0.5)
                             self.send_message(channel, f"glorp {cookie_feedback}")
+
                 except Exception as e:
-                    print(f"[ERROR] Erro na resposta IA: {e}")
+                    print(f"[ERROR] Falha ao gerar resposta: {e}")
+                
                 return
 
             # Triggers Passivos
