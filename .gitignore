@@ -214,7 +214,6 @@ __marimo__/
 training_data.jsonl
 *.faiss
 glorpinia_memory.db
-glorpinia_profile.txt
 
 # Modelos e caches
 glorpinia-lora/
