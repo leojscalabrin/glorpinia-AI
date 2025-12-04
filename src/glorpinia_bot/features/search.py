@@ -32,12 +32,16 @@ class SearchTool:
         if not self.service:
             return None # Ferramenta não inicializada
 
+        clean_query = re.sub(r'@[a-zA-Z0-9_]+', '', query) # Remove menções
+        clean_query = re.sub(r'^[,\s]+', '', clean_query)  # Remove pontuação inicial
+        clean_query = clean_query.strip()
+        
         try:
             logging.info(f"[SearchTool] Buscando na web por: {query}")
             
             # Executa a chamada da API
             result = self.service.cse().list(
-                q=query,
+                q=clean_query,
                 cx=self.pse_id,
                 num=num_results
             ).execute()

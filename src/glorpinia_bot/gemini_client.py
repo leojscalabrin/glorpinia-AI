@@ -197,9 +197,17 @@ class GeminiClient:
         web_context = ""
         try:
             if self._should_search(clean_query):
-                search_results = self.search_tool.perform_search(clean_query)
+                
+                # Gera a query otimizada
+                optimized_query = self._generate_search_query(clean_query)
+                logging.info(f"[SearchTool] Query Original: '{clean_query}' | Query Otimizada: '{optimized_query}'")
+
+                # Faz a busca usando a versão otimizada
+                search_results = self.search_tool.perform_search(optimized_query)
+
                 if search_results:
-                    web_context = f"**CONTEXTO DA INTERNET (BUSCA EM TEMPO REAL):**\n{search_results}"
+                    web_context = f"**CONTEXTO DA INTERNET (BUSCA EM TEMPO REAL SOBRE '{optimized_query}'):**\n{search_results}"
+        
         except Exception as e:
              logging.error(f"[Search Analysis Error] Falha ao decidir/buscar: {e}")
 
@@ -300,3 +308,42 @@ class GeminiClient:
         except Exception as e:
             logging.error(f"[Summarizer] Falha: {e}")
             return "o silêncio do espaço"
+        
+    def _generate_search_query(self, user_message):
+        """
+        Usa a IA para transformar uma mensagem de chat em uma query de busca otimizada.
+        Ex: "@GlorpinIA, quem é o fabo?" -> "quem é fabo streamer"
+        """
+        prompt = f"""
+        Você é um otimizador de buscas do Google.
+        Sua tarefa é converter a mensagem de chat do usuário em uma Query de Pesquisa simples e direta.
+        
+        Regras:
+        1. Remova menções (@GlorpinIA), saudações e emojis.
+        2. Identifique o núcleo da dúvida.
+        3. Se for sobre uma pessoa desconhecida, adicione palavras chave como "quem é", "streamer", "wiki".
+        4. Responda APENAS com a query, sem aspas.
+
+        Exemplos:
+        Msg: "@GlorpinIA o que é o jogo elden ring?" -> elden ring o que é jogo
+        Msg: "mano você conhece o fabo?" -> quem é fabo streamer
+        Msg: "qual a altura do cellbit" -> altura cellbit
+
+        Msg: {user_message}
+        Query:
+        """
+
+        try:
+            response = self.analysis_model.generate_content(
+                prompt, 
+                generation_config={"temperature": 0.1}
+            )
+            
+            clean_query = response.text.strip()
+            logging.info(f"[SearchTool] Query Otimizada: '{user_message}' -> '{clean_query}'")
+            return clean_query
+            
+        except Exception as e:
+            logging.error(f"[SearchTool] Falha ao otimizar query: {e}")
+            # Fallback: Apenas remove o @BotName via regex simples se a IA falhar
+            return re.sub(r'@[a-zA-Z0-9_]+\s*,?', '', user_message).strip()
