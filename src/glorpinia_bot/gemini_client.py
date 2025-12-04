@@ -44,7 +44,7 @@ class GeminiClient:
 
         # Modelo principal (para respostas)
         self.model = genai.GenerativeModel(
-            model_name="gemini-pro-latest",
+            model_name="gemini-flash-latest",
             generation_config=self.generation_config,
             safety_settings=self.safety_settings,
             system_instruction=self.personality_profile 
@@ -52,7 +52,7 @@ class GeminiClient:
         
         # Modelo leve (apenas para decidir se busca ou não)
         self.analysis_model = genai.GenerativeModel(
-            model_name="gemini-pro-latest",
+            model_name="gemini-flash-latest",
             generation_config={"temperature": 0.0},
             safety_settings=self.safety_settings 
         )
