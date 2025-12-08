@@ -165,7 +165,8 @@ class GeminiClient:
 
         # Processa comandos de Cookie ocultos na resposta da IA
         if self.cookie_system:
-            generated = self.cookie_system.process_ai_response(generated)
+            # Passamos o 'author' para saber se o cookie foi para ele ou para outro
+            generated = self.cookie_system.process_ai_response(generated, current_user=author)
 
         # Salva na memória e retorna
         if generated and "glorp-glorp" not in generated:

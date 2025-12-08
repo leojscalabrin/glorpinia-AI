@@ -217,7 +217,7 @@ class Listen:
             logging.info(f"[Listen] Passagem 2: Gerando comentário sobre '{topic}'...")
             comment_query = f"O streamer disse algo sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre isso."
 
-            comment, _ = self.bot.gemini_client.get_response(
+            comment = self.bot.gemini_client.get_response(
                 query=comment_query,
                 channel=channel,
                 author="system",

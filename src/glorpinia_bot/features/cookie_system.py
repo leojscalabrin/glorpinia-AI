@@ -214,35 +214,48 @@ class CookieSystem:
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao dar cookie de interação para {nick}: {e}")
     
-    def process_ai_response(self, text: str) -> str:
+    def process_ai_response(self, text: str, current_user: str = None) -> str:
         """
-        Analisa a resposta da IA procurando por tags de transação bancária.
-        Tags esperadas: [[COOKIE:GIVE:user:amount]] ou [[COOKIE:TAKE:user:amount]]
-        Executa a transação e remove a tag do texto final.
+        Analisa resposta, executa transações e adiciona feedback visual na mensagem.
+        Ex: Transforma [[COOKIE:GIVE:user:5]] em '... (+5 🍪)'
         """
         if not text: return ""
 
-        # Regex para encontrar as tags [[COOKIE:TYPE:USER:AMOUNT]]
         pattern = r"\[\[COOKIE:(GIVE|TAKE):(\w+):(\d+)\]\]"
-        
         matches = re.findall(pattern, text)
         
+        feedback_parts = []
+
         for action, user, amount_str in matches:
             try:
                 amount = int(amount_str)
+                sign = "+"
+                
                 if action == "GIVE":
                     self.add_cookies(user, amount)
                     logging.info(f"[AI-BANK] IA deu {amount} cookies para {user}")
+                    sign = "+"
                 elif action == "TAKE":
                     self.remove_cookies(user, amount)
                     logging.info(f"[AI-BANK] IA tirou {amount} cookies de {user}")
-            except Exception as e:
-                logging.error(f"[AI-BANK] Erro ao processar transação da IA: {e}")
+                    sign = "-"
+                
+                # Lógica de Feedback Visual
+                # Se o alvo for diferente de quem falou com o bot, mostra o nome
+                if current_user and user.lower() != current_user.lower():
+                    feedback_parts.append(f"({sign}{amount} 🍪 para {user})")
+                else:
+                    feedback_parts.append(f"({sign}{amount} 🍪)")
 
-        # Remove as tags do texto para não aparecerem no chat
+            except Exception as e:
+                logging.error(f"[AI-BANK] Erro ao processar transação: {e}")
+
+        # Remove as tags técnicas do texto
         clean_text = re.sub(pattern, "", text).strip()
-        
-        # Limpa espaços duplos que podem ter sobrado
         clean_text = re.sub(r'\s+', ' ', clean_text)
+        
+        # Anexa o feedback visual ao final da mensagem
+        if feedback_parts:
+            clean_text += " " + " ".join(feedback_parts)
         
         return clean_text
