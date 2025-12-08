@@ -95,11 +95,11 @@ class TwitchIRC:
         if self.listen_feature: self.listen_feature.stop_thread()
         if self.cookie_system: self.cookie_system.stop_thread()
 
-        goodbye_msg = "Bedge"
-        for channel in self.auth.channels:
-            self.send_message(channel, goodbye_msg)
-            time.sleep(1)
-        print("[INFO] Mensagem enviada. Encerrando...")
+        # goodbye_msg = "Bedge"
+        # for channel in self.auth.channels:
+        #     self.send_message(channel, goodbye_msg)
+        #     time.sleep(1)
+        print("[INFO] Encerrando...")
         if self.ws:
             self.ws.close()
         sys.exit(0)
@@ -483,7 +483,7 @@ class TwitchIRC:
             
             print(f"[JOIN] Tentando juntar ao canal: #{channel}")
             time.sleep(2) # Adiciona um delay de 2s entre joins
-            self.send_message(channel, "Wokege")
+            # self.send_message(channel, "Wokege")
 
     def on_error(self, ws, error):
         """Handler para erros do WebSocket."""

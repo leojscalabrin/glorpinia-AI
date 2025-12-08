@@ -49,6 +49,10 @@ class GeminiClient:
 
         # Inicializa a ferramenta de busca
         self.search_tool = SearchTool()
+        
+    def set_cookie_system(self, cookie_system):
+        """Permite que o main.py injete o sistema de cookies aqui."""
+        self.cookie_system = cookie_system
 
     def _get_model_for_channel(self, channel_name):
         """
