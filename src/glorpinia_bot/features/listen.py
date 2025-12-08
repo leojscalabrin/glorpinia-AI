@@ -221,7 +221,8 @@ class Listen:
                 query=comment_query,
                 channel=channel,
                 author="system",
-                memory_mgr=memory_mgr
+                memory_mgr=memory_mgr,
+                skip_search=True
             )
             
             if 0 < len(comment) <= 200:

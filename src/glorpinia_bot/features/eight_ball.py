@@ -57,7 +57,8 @@ class EightBall:
                 query=prompt,
                 channel=channel,
                 author=author,
-                memory_mgr=self.bot.memory_mgr
+                memory_mgr=self.bot.memory_mgr,
+                skip_search=True
             )
 
             # Envia a resposta

@@ -97,7 +97,7 @@ class GeminiClient:
         self.models_cache[channel_name] = new_model
         return new_model
 
-    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None):
+    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False):
         """
         Gera uma resposta para o chat, usando o modelo específico do canal.
         """
@@ -115,8 +115,9 @@ class GeminiClient:
         # BUSCA NA WEB (Decisão Inteligente)
         web_context = ""
         try:
-            if self._should_search(clean_query):
-                # Usa a IA para limpar a query (ex: tira nicks, saudações)
+            if not skip_search and self._should_search(clean_query):
+                
+                # Usa a IA para limpar a query
                 optimized_query = self._generate_search_query(clean_query)
                 logging.info(f"[SearchTool] Query: '{clean_query}' -> '{optimized_query}'")
 
