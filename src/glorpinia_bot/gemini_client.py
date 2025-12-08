@@ -2,17 +2,11 @@ import os
 import re
 import logging
 import google.generativeai as genai
-
-from langchain_core.messages import HumanMessage, AIMessage
-from .memory_manager import MemoryManager
 from dotenv import load_dotenv
 
 from .features.search import SearchTool
 
 load_dotenv()
-
-from google.generativeai.types import Tool, FunctionDeclaration
-from google.ai.generativelanguage import Schema, Type
 
 try:
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -22,17 +16,21 @@ except Exception as e:
 
 class GeminiClient:
     """
-    Cliente para interagir com o modelo Gemini, com
-    memória de curto prazo, longo prazo (RAG) e busca na web (via Análise de IA).
+    Cliente para interagir com o modelo Gemini, com suporte a 
+    múltiplos perfis (Lores de Canal), memória RAG e busca na web.
     """
     def __init__(self, personality_profile):
-        self.personality_profile = personality_profile
+        # O profile base (Glorpinia Padrão) fica guardado aqui
+        self.base_profile = personality_profile
         
-        self.cookie_system = None # Referência ao sistema de cookies
+        # Dicionário para guardar os modelos prontos de cada canal
+        self.models_cache = {}
+        
+        self.cookie_system = None # Referência injetada posteriormente
 
         self.generation_config = {
             "temperature": 0.7,
-            "max_output_tokens": 2048, 
+            "max_output_tokens": 1024, 
         }
         
         self.safety_settings = [
@@ -42,308 +40,206 @@ class GeminiClient:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
-        # Modelo principal (para respostas)
-        self.model = genai.GenerativeModel(
-            model_name="gemini-flash-latest",
-            generation_config=self.generation_config,
-            safety_settings=self.safety_settings,
-            system_instruction=self.personality_profile 
-        )
-        
-        # Modelo leve (apenas para decidir se busca ou não)
+        # Modelo Leve para Análises (Busca, Sumarização)
         self.analysis_model = genai.GenerativeModel(
             model_name="gemini-flash-latest",
-            generation_config={"temperature": 0.0},
-            safety_settings=self.safety_settings 
+            generation_config={"temperature": 0.1},
+            safety_settings=self.safety_settings
         )
-        
+
         # Inicializa a ferramenta de busca
-        try:
-            self.search_tool = SearchTool()
-        except Exception as e:
-            logging.error(f"[GeminiClient] Falha ao inicializar SearchTool: {e}")
-            self.search_tool = None
-    
-    def set_cookie_system(self, cookie_system):
-        """Recebe a instância do CookieSystem para executar ordens da IA."""
-        self.cookie_system = cookie_system
-        print("[GeminiClient] CookieSystem conectado com sucesso.")
+        self.search_tool = SearchTool()
 
-    def _build_search_analysis_prompt(self, query: str) -> str:
+    def _get_model_for_channel(self, channel_name):
         """
-        Cria um prompt específico para a IA decidir se a busca é necessária.
+        Recupera (ou cria) o modelo Gemini configurado especificamente para o canal.
+        Verifica se existe um arquivo 'profile_{canal}.txt' para adicionar lore extra.
         """
-        return f"""
-        Você é um assistente de análise de busca. Sua única tarefa é decidir se a pergunta do usuário precisa de uma busca na internet para ser respondida.
-        A IA (Glorpinia) NÃO tem conhecimento de eventos após 2023, pessoas específicas pouco conhecidas, ou dados em tempo real (como clima ou resultados de jogos).
+        # Se já carregamos esse canal antes, retorna o modelo do cache (memória RAM)
+        if channel_name in self.models_cache:
+            return self.models_cache[channel_name]
 
-        Responda APENAS 'SIM' ou 'NÃO'.
-
-        Responda 'SIM' se a pergunta for sobre:
-        - Eventos recentes (notícias de hoje, "o que aconteceu ontem")
-        - Pessoas, lugares ou fatos históricos/reais (ex: "quem é o presidente da frança?", "o que é o 'Alabama Hot Pocket'?")
-        - Informações em tempo real (ex: "vai chover hoje?", "qual o resultado do jogo X?")
-
-        Responda 'NÃO' se a pergunta for:
-        - Uma conversa fiada (ex: "oi, tudo bem?", "qual sua cor favorita?")
-        - Uma pergunta sobre a PRÓPRIA IA (ex: "você é uma IA?", "qual seu nome?")
-        - Um comando (ex: "!glorp cookie")
-
-        Pergunta do Usuário: "{query}"
-        Decisão (SIM/NÃO):
-        """
-
-    def _should_search(self, query: str) -> bool:
-        """
-        Decide se uma query deve ou não disparar uma busca na web.
-        """
-        if not self.search_tool:
-            return False 
-
-        if query.lower().startswith('*'):
-            return False
-
-        # Monta o prompt de análise
-        analysis_prompt = self._build_search_analysis_prompt(query)
+        # Se é a primeira vez, vamos construir o modelo
+        logging.info(f"[Gemini] Configurando personalidade para o canal: #{channel_name}...")
         
-        try:
-            response = self.analysis_model.generate_content(analysis_prompt)
-            decision = response.text.strip().upper()
-            logging.info(f"[SearchTool] Análise de busca para '{query}'. Decisão da IA: {decision}")
-            return decision == "SIM"
-        except Exception as e:
-            logging.error(f"[SearchTool] Erro na ANÁLISE de busca: {e}")
-            return False 
-
-    def _process_cookie_commands(self, text: str, interaction_author: str) -> str:
-        """
-        Procura por tags, executa a ação E substitui a tag pelo feedback visual formatado.
-        """
-        if not self.cookie_system or "[[COOKIE:" not in text:
-            return text
-
-        pattern = r'\[\[COOKIE:(GIVE|TAKE):([a-zA-Z0-9_]+):(\d+)\]\]'
-
-        def replace_match(match):
-            action = match.group(1)
-            target_user = match.group(2).lower()
+        # Começa com a personalidade base da Glorpinia
+        final_instruction = self.base_profile
+        
+        # Tenta carregar lore específica do canal
+        channel_profile_path = f"profile_{channel_name}.txt"
+        
+        if os.path.exists(channel_profile_path):
             try:
-                amount = int(match.group(3))
+                with open(channel_profile_path, "r", encoding="utf-8") as f:
+                    channel_lore = f.read()
                 
-                # Executa a transação real
-                if action == "GIVE":
-                    self.cookie_system.add_cookies(target_user, amount)
-                    logging.info(f"[IA-ECONOMY] IA deu {amount} cookies para {target_user}.")
-                    
-                    # Formatação condicional
-                    if target_user == interaction_author.lower():
-                        return f"(+{amount} 🍪)" # Se for para quem falou
-                    else:
-                        return f"(+{amount} 🍪 para {target_user})" # Se for para outro
-                
-                elif action == "TAKE":
-                    self.cookie_system.remove_cookies(target_user, amount)
-                    logging.info(f"[IA-ECONOMY] IA removeu {amount} cookies de {target_user}.")
-                    
-                    # Formatação condicional
-                    if target_user == interaction_author.lower():
-                        return f"(-{amount} 🍪)" # Se for de quem falou
-                    else:
-                        return f"(-{amount} 🍪 de {target_user})" # Se for de outro
-                    
+                # FUSÃO: Adiciona a lore do canal ao final do system prompt
+                final_instruction += f"\n\n[CONTEXTO ESPECÍFICO DO CANAL #{channel_name}]\n{channel_lore}"
+                logging.info(f"[Gemini] + Lore específica de {channel_name} carregada com sucesso!")
             except Exception as e:
-                logging.error(f"[IA-ECONOMY] Erro ao processar tag: {e}")
-                return "" # Remove a tag se der erro
-            
-            return "" # Fallback
+                logging.error(f"[Gemini] Erro ao ler {channel_profile_path}: {e}")
+        else:
+            logging.debug(f"[Gemini] Nenhum perfil específico encontrado para {channel_name}. Usando base.")
 
-        new_text = re.sub(pattern, replace_match, text)
-        
-        return re.sub(r'\s+', ' ', new_text).strip()
+        # Instancia o modelo para este canal
+        new_model = genai.GenerativeModel(
+            model_name="gemini-flash-latest", 
+            generation_config=self.generation_config,
+            safety_settings=self.safety_settings,
+            system_instruction=final_instruction
+        )
 
+        # Salva no cache para não ter que ler arquivo de novo
+        self.models_cache[channel_name] = new_model
+        return new_model
 
-    def get_response(self, query, channel, author, memory_mgr: 'MemoryManager', recent_chat_history=None):
+    def get_response(self, query, channel, author, memory_mgr=None):
         """
-        Gera uma resposta (Passagem 2), com memórias e busca na web.
+        Gera uma resposta para o chat, usando o modelo específico do canal.
         """
+        # Limpa o input do usuário
+        clean_query = query.replace(f"@{author}", "").strip()
         
-        clean_query = re.sub(r'@glorpinia\b[,\s]*', '', query, flags=re.IGNORECASE).strip()
-
-        # Preparar Memória de Longo Prazo (RAG)
-        memory_mgr.load_user_memory(channel, author)
-        vectorstore = memory_mgr.vectorstore
-        long_term_context = ""
-        if vectorstore:
-            try:
-                retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
-                docs = retriever.invoke(clean_query) 
-                if docs:
-                    long_term_context = "\n".join([doc.page_content for doc in docs])
-                    long_term_context = f"**CONTEXTO APRENDIDO (MEMÓRIA GLORPINIA):**\n{long_term_context}"
-            except Exception as e:
-                logging.error(f"[RAG ERROR] Falha ao buscar contexto: {e}")
-        
-        # Preparar Memória de Curto Prazo (Histórico Recente)
-        short_term_context = ""
-        if recent_chat_history:
-            recent_messages = list(recent_chat_history)[-3:] 
-            if recent_messages:
-                formatted_history = "\n".join([
-                    f"{msg['author']}: {msg['content']}" for msg in recent_messages
-                ])
-                short_term_context = f"**HISTÓRICO RECENTE (MEMÓRIA IMEDIATA):**\n{formatted_history}"
-        
-        # Preparar Contexto da Web
+        # BUSCA NA WEB (Decisão Inteligente)
         web_context = ""
         try:
             if self._should_search(clean_query):
-                
-                # Gera a query otimizada
+                # Usa a IA para limpar a query (ex: tira nicks, saudações)
                 optimized_query = self._generate_search_query(clean_query)
-                logging.info(f"[SearchTool] Query Original: '{clean_query}' | Query Otimizada: '{optimized_query}'")
+                logging.info(f"[SearchTool] Query: '{clean_query}' -> '{optimized_query}'")
 
-                # Faz a busca usando a versão otimizada
+                # Faz a busca
                 search_results = self.search_tool.perform_search(optimized_query)
-
                 if search_results:
-                    web_context = f"**CONTEXTO DA INTERNET (BUSCA EM TEMPO REAL SOBRE '{optimized_query}'):**\n{search_results}"
-        
+                    web_context = f"**CONTEXTO DA INTERNET (SOBRE '{optimized_query}'):**\n{search_results}"
         except Exception as e:
-             logging.error(f"[Search Analysis Error] Falha ao decidir/buscar: {e}")
+            logging.error(f"[Search Analysis Error] Falha: {e}")
 
-        # Montagem do Prompt
+        # MEMÓRIA RAG
+        memory_context = ""
+        if memory_mgr:
+            try:
+                retrieved_memories = memory_mgr.search_memory(channel, clean_query)
+                if retrieved_memories:
+                    memory_context = f"**HISTÓRICO RECENTE/RELEVANTE:**\n{retrieved_memories}"
+            except Exception as e:
+                logging.error(f"Erro ao buscar memória: {e}")
+
+        # Monta o Prompt Final
         prompt = f"""
-        {short_term_context}
-
-        {long_term_context}
+        {memory_context}
 
         {web_context}
 
-        **Query do Usuário:** {clean_query} 
+        **Mensagem do Usuário:** {query}
         """
 
-        # Chamada à API do Gemini
         try:
-            response = self.model.generate_content(prompt)
-
-            if response.prompt_feedback and response.prompt_feedback.block_reason:
-                reason = response.prompt_feedback.block_reason.name
-                logging.warning(f"[SAFETY] Prompt bloqueado. Razão: {reason}")
-                generated = f"Minhas anteninhas detectaram interferência perigosa ({reason}). Tente reformular. Sadge"
+            # Pega o modelo correto para este canal (com ou sem lore extra)
+            current_model = self._get_model_for_channel(channel)
             
-            elif not response.parts:
-                finish_reason = "DESCONHECIDO"
-                if response.candidates and response.candidates[0].finish_reason:
-                     finish_reason = response.candidates[0].finish_reason.name
-                
-                logging.warning(f"[SAFETY/EMPTY] Resposta vazia. Finish Reason: {finish_reason}")
-                generated = f"O sinal caiu no meio do caminho... (Razão: {finish_reason}). Sadge"
-            else:
-                generated = response.text.strip()
-
+            # Gera a resposta
+            response = current_model.generate_content(prompt)
+            generated = response.text.strip()
+            
         except Exception as e:
-            logging.error(f"Falha na comunicação com a API Gemini: {e}")
+            logging.error(f"[ERROR] Falha na comunicação com a API Gemini: {e}")
             generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
-        generated = self._process_cookie_commands(generated, author)
-
-        # Limpeza Final e Salvamento de Memória
+        # Limpeza e Cookies
         generated = self._clean_response(generated)
-        fallback = "Meow. O portal está com lag. Tente novamente! 😸"
-        is_system_message = (author.lower() == "system")
 
-        if generated:
-            if is_system_message:
-                return generated, None
-            else:
-                if "Sadge" not in generated: 
-                    memory_mgr.save_user_memory(channel, author, query, generated)
-                
-                final_response = f"@{author}, {generated}"
-                return final_response, None
+        # Processa comandos de Cookie ocultos na resposta da IA
+        if self.cookie_system:
+            generated = self.cookie_system.process_ai_response(generated)
+
+        # Salva na memória e retorna
+        if generated and "glorp-glorp" not in generated:
+            if memory_mgr:
+                memory_mgr.save_user_memory(channel, author, query, generated)
+            
+            final_response = f"@{author}, {generated}"
+            return final_response
         else:
-            if is_system_message:
-                return fallback
-            else:
-                final_fallback = f"@{author}, {fallback}"
-                return final_fallback
+            return f"@{author}, Meow. O portal está com lag. Tente novamente! 😸"
 
-    def _clean_response(self, generated):
-        """Limpa a resposta dos prefixos de prompt."""
-        generated = generated.strip()
+    def _should_search(self, query):
+        """Decide se a query precisa de busca externa."""
+        prompt = f"""
+        Analise a mensagem abaixo e responda APENAS "SIM" ou "NÃO".
+        O usuário está perguntando sobre um fato objetivo, notícia recente, definição técnica, data histórica ou algo que requer conhecimento externo atualizado?
+        Se for apenas papo furado, opinião, roleplay ou cumprimento, responda NÃO.
+
+        Mensagem: {query}
+        Resposta:
+        """
+        try:
+            response = self.analysis_model.generate_content(prompt)
+            decision = response.text.strip().upper()
+            logging.info(f"[SearchTool] Decisão para '{query}': {decision}")
+            return "SIM" in decision
+        except:
+            return False
+
+    def _generate_search_query(self, user_message):
+        """
+        Usa a IA para transformar texto de chat em query de busca eficiente.
+        """
+        prompt = f"""
+        Você é um otimizador de buscas do Google.
+        Transforme a mensagem do chat em uma query de pesquisa direta e simples.
         
-        generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
-        generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
+        Regras:
+        1. Remova saudações, menções (@Nick) e emojis.
+        2. Identifique o sujeito principal da dúvida.
+        3. Se parecer um nome desconhecido, adicione 'quem é' ou 'streamer'.
         
-        return generated
+        Exemplos:
+        Input: "@GlorpinIA quem é o fabo?" -> Output: quem é fabo streamer
+        Input: "mano tu conhece o jogo elden ring?" -> Output: elden ring o que é
+        
+        Input: {user_message}
+        Output:
+        """
+        
+        try:
+            response = self.analysis_model.generate_content(
+                prompt,
+                generation_config={"temperature": 0.1}
+            )
+            return response.text.strip()
+        except Exception as e:
+            logging.error(f"Falha ao gerar query otimizada: {e}")
+            return user_message
 
     def summarize_chat_topic(self, text_input: str) -> str:
         """
-        Usa o 'analysis_model' para extrair o tópico principal de um texto (audio ou chat).
+        Sumariza logs de chat ou transcrição de áudio.
         """
         if not text_input or len(text_input) < 5:
             return "nada em particular"
 
         prompt = f"""
-        Você é um analisador de conteúdo. Abaixo está a transcrição de um áudio ou chat.
-        Sua tarefa é identificar o tópico MAIS INTERESSANTE, ENGRAÇADO ou CURIOSO mencionado.
+        Identifique o tópico MAIS INTERESSANTE ou ENGRAÇADO mencionado no texto abaixo.
+        Seja breve (máx 5 palavras).
         
-        Se houver vários assuntos misturados, ESCOLHA APENAS UM (o que renderia o melhor comentário sarcástico).
-        NÃO responda "assuntos aleatórios" ou "nada". Invente um título para o assunto se necessário.
-
         Texto:
-        ---
         {text_input}
-        ---
-        Tópico Principal (apenas o assunto):
+        
+        Tópico:
         """
-
         try:
             response = self.analysis_model.generate_content(prompt)
-            if response.parts:
-                topic = response.text.strip().replace("Tópico Principal:", "").strip()
-                logging.info(f"[Summarizer] Tópico extraído: {topic}")
-                return topic
-            return "a vida no universo"
-        except Exception as e:
-            logging.error(f"[Summarizer] Falha: {e}")
-            return "o silêncio do espaço"
-        
-    def _generate_search_query(self, user_message):
-        """
-        Usa a IA para transformar uma mensagem de chat em uma query de busca otimizada.
-        Ex: "@GlorpinIA, quem é o fabo?" -> "quem é fabo streamer"
-        """
-        prompt = f"""
-        Você é um otimizador de buscas do Google.
-        Sua tarefa é converter a mensagem de chat do usuário em uma Query de Pesquisa simples e direta.
-        
-        Regras:
-        1. Remova menções (@GlorpinIA), saudações e emojis.
-        2. Identifique o núcleo da dúvida.
-        3. Se for sobre uma pessoa desconhecida, adicione palavras chave como "quem é", "streamer", "wiki".
-        4. Responda APENAS com a query, sem aspas.
+            topic = response.text.strip()
+            return topic
+        except:
+            return "assuntos aleatórios"
 
-        Exemplos:
-        Msg: "@GlorpinIA o que é o jogo elden ring?" -> elden ring o que é jogo
-        Msg: "mano você conhece o fabo?" -> quem é fabo streamer
-        Msg: "qual a altura do cellbit" -> altura cellbit
-
-        Msg: {user_message}
-        Query:
-        """
-
-        try:
-            response = self.analysis_model.generate_content(
-                prompt, 
-                generation_config={"temperature": 0.1}
-            )
-            
-            clean_query = response.text.strip()
-            logging.info(f"[SearchTool] Query Otimizada: '{user_message}' -> '{clean_query}'")
-            return clean_query
-            
-        except Exception as e:
-            logging.error(f"[SearchTool] Falha ao otimizar query: {e}")
-            # Fallback: Apenas remove o @BotName via regex simples se a IA falhar
-            return re.sub(r'@[a-zA-Z0-9_]+\s*,?', '', user_message).strip()
+    def _clean_response(self, generated):
+        """Limpa a resposta dos prefixos de prompt e metadados."""
+        generated = generated.strip()
+        # Remove blocos de contexto que a IA as vezes repete
+        generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
+        # Remove timestamps ou prefixos de log
+        generated = re.sub(r'^\[.*?\]\s*', '', generated)
+        return generated
