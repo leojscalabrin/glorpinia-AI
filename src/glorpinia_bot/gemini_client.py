@@ -173,11 +173,20 @@ class GeminiClient:
         if generated and "glorp-glorp" not in generated:
             if memory_mgr:
                 memory_mgr.save_user_memory(channel, author, query, generated)
+                
+            if author.lower() == "system":
+                return generated
             
             final_response = f"@{author}, {generated}"
             return final_response
         else:
-            return f"@{author}, Meow. O portal está com lag. Tente novamente! 😸"
+            fallback = "Meow. O portal está com lag. Tente novamente! 😸"
+            
+            if author.lower() == "system":
+                return fallback
+            
+            final_fallback = f"@{author}, {fallback}"
+            return final_fallback
 
     def _should_search(self, query):
         """Decide se a query precisa de busca externa."""
