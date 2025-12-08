@@ -495,13 +495,13 @@ class TwitchIRC:
 
     def _background_live_monitor(self):
         """
-        Roda em paralelo (thread) verificando a cada 60s se os canais estão ao vivo.
-        Atualiza a variável self.live_status.
+        Monitora status da live (Online/Offline) e dispara eventos.
         """
         print("[System] Monitor de Live iniciado.")
+        time.sleep(10)
+
         while True:
             try:
-                # Itera sobre todos os canais que o bot está conectado
                 for channel_name in self.auth.channels:
                     url = f"https://api.twitch.tv/helix/streams?user_login={channel_name}"
                     headers = {
@@ -509,25 +509,101 @@ class TwitchIRC:
                         "Authorization": f"Bearer {self.auth.access_token}"
                     }
                     
-                    # Faz a requisição para a Twitch
                     response = requests.get(url, headers=headers, timeout=5)
                     
                     if response.status_code == 200:
                         data = response.json()
-                        # Se a lista 'data' tiver itens, significa que tem stream ativa
                         is_online = len(data.get('data', [])) > 0
+                        
+                        # Pega o status anterior
+                        was_online = self.live_status.get(channel_name)
+
+                        # LÓGICA DE EVENTOS
+
+                        # TRIGGER DE BOAS-VINDAS (OFF -> ON)
+                        if was_online is False and is_online is True:
+                            print(f"[EVENT] Live iniciada em #{channel_name}! Enviando boas-vindas...")
+                            self._trigger_welcome_message(channel_name)
+
+                        # TRIGGER DE TCHAU (ON -> OFF)
+                        elif was_online is True and is_online is False:
+                            print(f"[EVENT] Live encerrada em #{channel_name}! Enviando despedida...")
+                            self._trigger_goodbye_message(channel_name)
+
+                        # Atualiza o cache
                         self.live_status[channel_name] = is_online
-                        print(f"[Monitor] Canal {channel_name} está {'ONLINE' if is_online else 'OFFLINE'}")
+                    
                     else:
-                        # Se der erro (ex: token expirou), assume OFF para não travar o jogo
                         print(f"[Monitor] Erro API Twitch: {response.status_code}")
-                        self.live_status[channel_name] = False
 
             except Exception as e:
                 print(f"[Monitor] Erro crítico na verificação: {e}")
 
-            # Espera 60 segundos antes de checar de novo
             time.sleep(60)
+            
+    def _trigger_welcome_message(self, channel):
+        """
+        Gera e envia uma mensagem de 'Boa Live' usando a IA.
+        """
+        try:
+            # Prompt simples para o modelo gerar algo criativo
+            prompt = (
+                f"O streamer @{channel} acabou de iniciar a live! "
+                "Como Glorpinia, mande uma mensagem curta, empolgada e fofa desejando uma ótima stream. "
+                "Diga que estava esperando ele(a) chegar. Use emotes."
+            )
+
+            if self.gemini_client:
+                # Aqui fazemos uma chamada direta simulando um 'system' trigger
+                response = self.gemini_client.model.generate_content(
+                    f"{self.auth.personality_profile}\n\nInput: {prompt}"
+                )
+                
+                welcome_msg = response.text.strip()
+                
+                # Limpeza básica caso venha com aspas ou prefixos
+                welcome_msg = welcome_msg.replace('"', '').replace("Glorpinia:", "")
+                
+                # Envia no chat
+                self.send_message(channel, welcome_msg)
+            else:
+                self.send_message(channel, f"LETSGO A LIVE COMEÇOU! Boa stream @{channel}! glorp")
+
+        except Exception as e:
+            print(f"[ERROR] Falha ao gerar welcome message: {e}")
+            self.send_message(channel, f"LESGO A LIVE COMEÇOU! Boa stream @{channel}!")
+    
+    def _trigger_goodbye_message(self, channel):
+        """
+        Gera e envia uma mensagem de despedida quando a live cai.
+        """
+        try:
+            # Prompt focado em descanso/término de missão
+            prompt = (
+                f"O streamer @{channel} acabou de encerrar a live! "
+                "Como Glorpinia, mande uma mensagem de despedida para o chat. "
+                "Diga algo como 'finalmente paz', ou que vai voltar a consertar a nave/dormir. "
+                "Seja fofa mas aliviada. Use emotes de sono ou despedida."
+            )
+
+            if self.gemini_client:
+                # Gera a resposta com a IA
+                response = self.gemini_client.model.generate_content(
+                    f"{self.auth.personality_profile}\n\nInput: {prompt}"
+                )
+                
+                goodbye_msg = response.text.strip()
+                
+                # Limpeza básica
+                goodbye_msg = goodbye_msg.replace('"', '').replace("Glorpinia:", "")
+                
+                self.send_message(channel, goodbye_msg)
+            else:
+                self.send_message(channel, f"A live acabou! Até a próxima, humanos! peepoLeave")
+
+        except Exception as e:
+            print(f"[ERROR] Falha ao gerar goodbye message: {e}")
+            self.send_message(channel, f"Fim da transmissão! A mimir Bedge")
 
 if __name__ == "__main__":
     bot = TwitchIRC()
