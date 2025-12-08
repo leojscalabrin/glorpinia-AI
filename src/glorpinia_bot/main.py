@@ -6,6 +6,7 @@ import logging
 import signal
 import sys
 import re
+import requests
 import threading
 from datetime import datetime
 from collections import deque
@@ -47,6 +48,12 @@ class TwitchIRC:
             personality_profile=self.auth.personality_profile
         )
         self.memory_mgr = MemoryManager()
+        
+        self.live_status = {} # Dicionário para guardar { 'canal': True/False }
+        
+        # Inicia a thread que vai ficar checando a API da Twitch em segundo plano
+        self.monitor_thread = threading.Thread(target=self._background_live_monitor, daemon=True)
+        self.monitor_thread.start()
         
         # Inicializa Features
         print("[INFO] Loading features...")
@@ -219,6 +226,12 @@ class TwitchIRC:
                     return
 
                 if command_raw == "slots":
+                    # Verifica se o canal atual está marcado como ONLINE no cache
+                    if self.live_status.get(channel, False):
+                        # Se estiver online, simplesmente ignora o comando (return)
+                        self.send_message(channel, f"@{author_part} O KASSINÃO está fechado durante a live Stare")
+                        return
+
                     if self.slots_feature:
                         bet = 10
                         if len(parts) > 1:
@@ -480,6 +493,41 @@ class TwitchIRC:
         """Handler para quando a conexao WebSocket é fechada."""
         print(f"[INFO] Conexao WebSocket fechada. Codigo: {close_status_code}, Msg: {close_msg}")
 
+    def _background_live_monitor(self):
+        """
+        Roda em paralelo (thread) verificando a cada 60s se os canais estão ao vivo.
+        Atualiza a variável self.live_status.
+        """
+        print("[System] Monitor de Live iniciado.")
+        while True:
+            try:
+                # Itera sobre todos os canais que o bot está conectado
+                for channel_name in self.auth.channels:
+                    url = f"https://api.twitch.tv/helix/streams?user_login={channel_name}"
+                    headers = {
+                        "Client-ID": self.auth.client_id,
+                        "Authorization": f"Bearer {self.auth.access_token}"
+                    }
+                    
+                    # Faz a requisição para a Twitch
+                    response = requests.get(url, headers=headers, timeout=5)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        # Se a lista 'data' tiver itens, significa que tem stream ativa
+                        is_online = len(data.get('data', [])) > 0
+                        self.live_status[channel_name] = is_online
+                        print(f"[Monitor] Canal {channel_name} está {'ONLINE' if is_online else 'OFFLINE'}")
+                    else:
+                        # Se der erro (ex: token expirou), assume OFF para não travar o jogo
+                        print(f"[Monitor] Erro API Twitch: {response.status_code}")
+                        self.live_status[channel_name] = False
+
+            except Exception as e:
+                print(f"[Monitor] Erro crítico na verificação: {e}")
+
+            # Espera 60 segundos antes de checar de novo
+            time.sleep(60)
 
 if __name__ == "__main__":
     bot = TwitchIRC()
