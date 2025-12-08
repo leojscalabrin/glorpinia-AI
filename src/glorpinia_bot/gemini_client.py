@@ -252,10 +252,21 @@ class GeminiClient:
             return "assuntos aleatórios"
 
     def _clean_response(self, generated):
-        """Limpa a resposta dos prefixos de prompt e metadados."""
+        """Limpa a resposta dos prefixos de prompt e formatação indesejada."""
         generated = generated.strip()
-        # Remove blocos de contexto que a IA as vezes repete
+        
+        # Remove blocos de contexto internos (RAG, Web, etc)
         generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
-        # Remove timestamps ou prefixos de log
-        generated = re.sub(r'^\[.*?\]\s*', '', generated)
-        return generated
+        generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
+        
+        # Remove tags HTML (como </blockquote>, <b>, etc)
+        generated = re.sub(r'<[^>]*>', '', generated)
+        
+        # Remove aspas se a IA respondeu "Texto"
+        if generated.startswith('"') and generated.endswith('"'):
+            generated = generated[1:-1]
+            
+        # Remove blocos de código Markdown
+        generated = generated.replace("```", "").replace("`", "")
+
+        return generated.strip()
