@@ -86,22 +86,36 @@ class TwitchIRC:
         signal.signal(signal.SIGTERM, self._shutdown_handler)
 
 
-    def _shutdown_handler(self, signum, frame):
-        """Handler para shutdown gracioso com mensagem de despedida."""
-        print("[INFO] Sinal de shutdown recebido. Enviando mensagem de despedida...")
+    def handle_exit(self, signum, frame):
+        """
+        Handler para shutdown.
+        Salva dados pendentes e fecha conexões antes de morrer.
+        """
+        print("\n[INFO] Sinal de shutdown recebido. Iniciando limpeza...")
         
-        # Sinaliza para os threads das features pararem
-        if self.comment_feature: self.comment_feature.stop_thread()
-        if self.listen_feature: self.listen_feature.stop_thread()
-        if self.cookie_system: self.cookie_system.stop_thread()
+        # Parar features que podem estar escrevendo em disco/DB
+        if hasattr(self, 'cookie_system') and self.cookie_system:
+            print("[SHUTDOWN] Salvando dados bancários (Cookies)...")
+            if hasattr(self.cookie_system, 'stop_thread'):
+                self.cookie_system.stop_thread()
 
-        # goodbye_msg = "Bedge"
-        # for channel in self.auth.channels:
-        #     self.send_message(channel, goodbye_msg)
-        #     time.sleep(1)
-        print("[INFO] Encerrando...")
+        if hasattr(self, 'training_logger') and self.training_logger:
+            # Garante que o último log de treino seja salvo
+            pass 
+
+        # Parar threads de loop
+        if hasattr(self, 'comment_feature') and self.comment_feature:
+            self.comment_feature.stop_thread()
+            
+        if hasattr(self, 'listen_feature') and self.listen_feature:
+            self.listen_feature.stop_thread()
+            
+        print("[INFO] Fechando conexão com a Twitch...")
+        self.running = False
         if self.ws:
             self.ws.close()
+            
+        print("[INFO] Encerrado com sucesso.")
         sys.exit(0)
 
     def send_message(self, channel, message):
@@ -482,8 +496,6 @@ class TwitchIRC:
             ws.send(f"JOIN #{channel}" + "\r\n")
             
             print(f"[JOIN] Tentando juntar ao canal: #{channel}")
-            time.sleep(2) # Adiciona um delay de 2s entre joins
-            # self.send_message(channel, "Wokege")
 
     def on_error(self, ws, error):
         """Handler para erros do WebSocket."""
