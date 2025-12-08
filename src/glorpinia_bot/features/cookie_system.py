@@ -24,8 +24,10 @@ class CookieSystem:
         self._cleanup_forbidden_users()
         self.timer_running = True
         self.last_bonus_time = 0
-        self.thread = threading.Thread(target=self._daily_bonus_thread, daemon=True)
-        self.thread.start()
+        
+        if self.bot:
+            self.thread = threading.Thread(target=self._daily_bonus_thread, daemon=True)
+            self.thread.start()
 
     def _initialize_db(self):
         """Cria a tabela de cookies se ela não existir."""
@@ -210,3 +212,36 @@ class CookieSystem:
                 conn.commit()
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao dar cookie de interação para {nick}: {e}")
+    
+    def process_ai_response(self, text: str) -> str:
+        """
+        Analisa a resposta da IA procurando por tags de transação bancária.
+        Tags esperadas: [[COOKIE:GIVE:user:amount]] ou [[COOKIE:TAKE:user:amount]]
+        Executa a transação e remove a tag do texto final.
+        """
+        if not text: return ""
+
+        # Regex para encontrar as tags [[COOKIE:TYPE:USER:AMOUNT]]
+        pattern = r"\[\[COOKIE:(GIVE|TAKE):(\w+):(\d+)\]\]"
+        
+        matches = re.findall(pattern, text)
+        
+        for action, user, amount_str in matches:
+            try:
+                amount = int(amount_str)
+                if action == "GIVE":
+                    self.add_cookies(user, amount)
+                    logging.info(f"[AI-BANK] IA deu {amount} cookies para {user}")
+                elif action == "TAKE":
+                    self.remove_cookies(user, amount)
+                    logging.info(f"[AI-BANK] IA tirou {amount} cookies de {user}")
+            except Exception as e:
+                logging.error(f"[AI-BANK] Erro ao processar transação da IA: {e}")
+
+        # Remove as tags do texto para não aparecerem no chat
+        clean_text = re.sub(pattern, "", text).strip()
+        
+        # Limpa espaços duplos que podem ter sobrado
+        clean_text = re.sub(r'\s+', ' ', clean_text)
+        
+        return clean_text

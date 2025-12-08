@@ -133,6 +133,30 @@ class MemoryManager:
                   (channel, user, path, datetime.now()))
         conn.commit()
         conn.close()
+    
+    def search_memory(self, channel, query, k=3):
+        """
+        Busca memórias relevantes no banco vetorial (RAG).
+        Retorna uma string formatada com as memórias encontradas.
+        """
+        # Se o FAISS não estiver ativo ou não houver banco carregado, retorna vazio
+        if not self._use_faiss or not self.vectorstore:
+            return ""
+
+        try:
+            # Busca os K documentos mais similares à pergunta atual
+            docs = self.vectorstore.similarity_search(query, k=k)
+            
+            if not docs:
+                return ""
+
+            # Formata para ser inserido no prompt
+            memory_text = "\n".join([f"- {doc.page_content}" for doc in docs])
+            return memory_text
+
+        except Exception as e:
+            logging.error(f"[GLORP-MEMORY] Erro na busca vetorial: {e}")
+            return ""
 
     @property
     def vectorstore(self):
