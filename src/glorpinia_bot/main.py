@@ -82,8 +82,8 @@ class TwitchIRC:
         self.ws = None
         self.running = False
         self.auth.validate_and_refresh_token()
-        signal.signal(signal.SIGINT, self._shutdown_handler)
-        signal.signal(signal.SIGTERM, self._shutdown_handler)
+        signal.signal(signal.SIGINT, self.handle_exit)
+        signal.signal(signal.SIGTERM, self.handle_exit)
 
 
     def handle_exit(self, signum, frame):
