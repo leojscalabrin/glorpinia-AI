@@ -97,13 +97,21 @@ class GeminiClient:
         self.models_cache[channel_name] = new_model
         return new_model
 
-    def get_response(self, query, channel, author, memory_mgr=None):
+    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None):
         """
         Gera uma resposta para o chat, usando o modelo específico do canal.
         """
         # Limpa o input do usuário
         clean_query = query.replace(f"@{author}", "").strip()
         
+        # Formata o Histórico Recente (Context Window)
+        chat_context_str = ""
+        if recent_history:
+            # Pega as últimas 15 mensagens para não estourar tokens
+            msgs = recent_history[-15:] 
+            formatted_msgs = [f"- {m['author']}: {m['content']}" for m in msgs]
+            chat_context_str = "**MENSAGENS RECENTES DO CHAT (Contexto Imediato):**\n" + "\n".join(formatted_msgs)
+            
         # BUSCA NA WEB (Decisão Inteligente)
         web_context = ""
         try:
@@ -131,6 +139,8 @@ class GeminiClient:
 
         # Monta o Prompt Final
         prompt = f"""
+        {chat_context_str}
+        
         {memory_context}
 
         {web_context}

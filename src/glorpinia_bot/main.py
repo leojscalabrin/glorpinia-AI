@@ -181,40 +181,34 @@ class TwitchIRC:
             ws.send("PONG :tmi.twitch.tv\r\n")
             return
 
-        if "PRIVMSG" in message:
+        if " JOIN #" in message:
             try:
-                if message.startswith("@"):
-                    tags_part, message_part = message.split(" :", 1)
-                else:
-                    message_part = message
-
-                author_part = message_part.split("!")[0].strip()
-                channel_part = message_part.split("#")[1]
-                channel = channel_part.split(" :")[0].strip()
-                content = channel_part.split(" :", 1)[1].strip()
-
-            except Exception as e:
-                return
-
-            print(f"[CHAT] {author_part}: {content}")
+                channel_joined = message.split("#")[1].strip()
+                print(f"[DEBUG] Sucesso! Conectado ao chat do canal: #{channel_joined}")
+            except:
+                pass
+            return
             
+        # Processar mensagens de chat (PRIVMSG)
+        match = re.search(r":(\w+)!\w+@\w+\.tmi\.twitch\.tv PRIVMSG #(\w+) :(.*)", message)
+        if match:
+            author, channel, content = match.groups()
+            content = content.strip()
             content_lower = content.lower()
-
-            msg_data = {
-                'timestamp': time.time(),
-                'author': author_part,
-                'content': content
-            }
-            if channel in self.recent_messages:
-                self.recent_messages[channel].append(msg_data)
-
-            if content == "!test_duplicate":
-                print("[DEBUG] Simulando mensagem duplicada para teste...")
-                self.on_message(ws, message)
+            
+            # Ignora mensagens do próprio bot
+            if author.lower() == self.auth.bot_nick.lower():
                 return
 
-            if author_part.lower() == self.auth.bot_nick.lower():
-                return
+            # Salvar no Histórico Recente (Memória de Curto Prazo)
+            if channel not in self.recent_messages:
+                self.recent_messages[channel] = deque(maxlen=100)
+            
+            self.recent_messages[channel].append({
+                "author": author,
+                "content": content,
+                "timestamp": time.time()
+            })
             
             # PROCESSA COMANDOS E TRIGGERS
 
@@ -229,21 +223,21 @@ class TwitchIRC:
                 if command_raw == "8ball":
                     question = " ".join(parts[1:])
                     if not question:
-                        self.send_message(channel, f"@{author_part}, faça uma pergunta! glorp")
+                        self.send_message(channel, f"@{author}, faça uma pergunta! glorp") # CORREÇÃO 2: author_part -> author
                         return
-                    self.eight_ball_feature.get_8ball_response(question, channel, author_part)
+                    self.eight_ball_feature.get_8ball_response(question, channel, author)
                     return
                 
                 if command_raw == "cookie":
                     if self.fortune_cookie_feature:
-                        self.fortune_cookie_feature.get_fortune(channel, author_part)
+                        self.fortune_cookie_feature.get_fortune(channel, author)
                     return
 
                 if command_raw == "slots":
                     # Verifica se o canal atual está marcado como ONLINE no cache
                     if self.live_status.get(channel, False):
                         # Se estiver online, simplesmente ignora o comando (return)
-                        self.send_message(channel, f"@{author_part} O KASSINÃO está fechado durante a live Stare")
+                        self.send_message(channel, f"@{author} O KASSINÃO está fechado durante a live Stare")
                         return
 
                     if self.slots_feature:
@@ -253,13 +247,13 @@ class TwitchIRC:
                                 bet = int(parts[1])
                             except ValueError:
                                 pass
-                        result = self.slots_feature.play(channel, author_part, bet)
+                        result = self.slots_feature.play(channel, author, bet)
                         self.send_message(channel, result)
                     return
 
                 if command_raw == "balance":
                     if self.cookie_system:
-                        target = author_part.lower()
+                        target = author.lower()
                         if len(parts) > 1:
                             target = parts[1].lower().replace("@", "")
                         
@@ -267,10 +261,10 @@ class TwitchIRC:
                             return
 
                         count = self.cookie_system.get_cookies(target)
-                        if target == author_part.lower():
-                            self.send_message(channel, f"@{author_part}, você tem {count}🍪 glorp")
+                        if target == author.lower():
+                            self.send_message(channel, f"@{author}, você tem {count}🍪 glorp")
                         else:
-                            self.send_message(channel, f"@{author_part}, {target} tem {count}🍪  glorp")
+                            self.send_message(channel, f"@{author}, {target} tem {count}🍪  glorp")
                     return
 
                 if command_raw == "empire":
@@ -281,7 +275,7 @@ class TwitchIRC:
                         empire_query = f"Seu império de cookies já acumulou {count} cookies. Faça um comentário curto (uma frase), triunfante, arrogante e divertido sobre como sua dominação galática está sendo financiada por esses 'tributos' dos humanos."
                         
                         try:
-                            comment, _ = self.gemini_client.get_response(
+                            comment = self.gemini_client.get_response(
                                 empire_query, channel, "system", self.memory_mgr
                             )
                             if comment:
@@ -333,34 +327,34 @@ class TwitchIRC:
                 admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "commands"]
                 
                 if command_raw in admin_cmds:
-                    if author_part.lower() in self.admin_nicks:
+                    if author.lower() in self.admin_nicks:
                         self.handle_admin_command(content, channel)
                     else:
-                        self.send_message(channel, f"@{author_part}, comando apenas para os chegados arnoldHalt")
+                        self.send_message(channel, f"@{author}, comando apenas para os chegados arnoldHalt")
                     return
 
                 # Se chegou aqui com *, é comando desconhecido
                 self.send_message(channel, "glorp Comando desconhecido. Use *commands")
                 return
             
-            # Menções Diretas à IA
-            if self.chat_enabled and self.auth.bot_nick.lower() in content.lower():
-                print(f"[DEBUG] Bot mencionado por {author_part}. Gerando resposta...")
+            # MENÇÕES DIRETAS À IA
+            if self.chat_enabled and self.auth.bot_nick.lower() in content_lower:
+                print(f"[DEBUG] Bot mencionado por {author}. Gerando resposta...")
                 
                 if self.cookie_system:
-                    self.cookie_system.handle_interaction(author_part.lower())
+                    self.cookie_system.handle_interaction(author.lower())
 
                 try:
-                    
-                    recent_history = self.recent_messages.get(channel)
+                    # Convertendo Deque para List para a IA poder ler
+                    recent_history_list = list(self.recent_messages.get(channel, []))
                     
                     if self.gemini_client and self.memory_mgr:
-                        response_text, cookie_feedback = self.gemini_client.get_response(
-                            content, 
-                            channel, 
-                            author_part, 
-                            self.memory_mgr,
-                            recent_history 
+                        response_text = self.gemini_client.get_response(
+                            query=content, 
+                            channel=channel, 
+                            author=author, 
+                            memory_mgr=self.memory_mgr,
+                            recent_history=recent_history_list
                         )
                         
                         if response_text:
@@ -369,14 +363,10 @@ class TwitchIRC:
                             if self.training_logger:
                                 self.training_logger.log_interaction(
                                     channel, 
-                                    author_part, 
+                                    author, 
                                     content,
                                     response_text
                                 )
-                        
-                        if cookie_feedback:
-                            time.sleep(0.5)
-                            self.send_message(channel, f"glorp {cookie_feedback}")
 
                 except Exception as e:
                     print(f"[ERROR] Falha ao gerar resposta: {e}")
@@ -386,13 +376,13 @@ class TwitchIRC:
             # Triggers Passivos
             if "oziell" in content_lower:
                 now = time.time()
-                if (now - self.last_oziell_time) > 1800: # 30m
+                if (now - self.last_oziell_time) > 1800:
                     self.last_oziell_time = now
                     self.send_message(channel, "Olá @oziell ! Tudo bem @oziell ? Tchau @oziell !")
                 return 
 
-            # Duplicatas
-            unique_id = f"{author_part}-{channel}-{content}"
+            # Duplicatas (Log Anti-Spam do console)
+            unique_id = f"{author}-{channel}-{content}"
             msg_hash = hash(unique_id)
             if msg_hash in self.processed_message_ids:
                 return
@@ -400,7 +390,7 @@ class TwitchIRC:
 
             # Comment Trigger
             if self.comment_feature:
-                self.comment_feature.roll_for_comment(channel, author_part)
+                self.comment_feature.roll_for_comment(channel, author)
             
     def handle_admin_command(self, command, channel):
         """Processa comandos de admin."""
@@ -555,10 +545,9 @@ class TwitchIRC:
             
     def _trigger_welcome_message(self, channel):
         """
-        Gera e envia uma mensagem de 'Boa Live' usando a IA.
+        Gera e envia uma mensagem de 'Boas Vindas' usando a IA.
         """
         try:
-            # Prompt simples para o modelo gerar algo criativo
             prompt = (
                 f"O streamer @{channel} acabou de iniciar a live! "
                 "Como Glorpinia, mande uma mensagem curta, empolgada e fofa desejando uma ótima stream. "
@@ -566,31 +555,24 @@ class TwitchIRC:
             )
 
             if self.gemini_client:
-                # Aqui fazemos uma chamada direta simulando um 'system' trigger
-                response = self.gemini_client.model.generate_content(
-                    f"{self.auth.personality_profile}\n\nInput: {prompt}"
-                )
+                response = self.gemini_client.get_response(prompt, channel, "system")
                 
-                welcome_msg = response.text.strip()
+                # Limpeza: remove a menção ao @system que o bot adiciona automaticamente
+                welcome_msg = response.replace("@system, ", "").strip()
                 
-                # Limpeza básica caso venha com aspas ou prefixos
-                welcome_msg = welcome_msg.replace('"', '').replace("Glorpinia:", "")
-                
-                # Envia no chat
                 self.send_message(channel, welcome_msg)
             else:
                 self.send_message(channel, f"LETSGO A LIVE COMEÇOU! Boa stream @{channel}! glorp")
 
         except Exception as e:
             print(f"[ERROR] Falha ao gerar welcome message: {e}")
-            self.send_message(channel, f"LESGO A LIVE COMEÇOU! Boa stream @{channel}!")
+            self.send_message(channel, f"LETSGO A LIVE COMEÇOU! Boa stream @{channel}!")
     
     def _trigger_goodbye_message(self, channel):
         """
         Gera e envia uma mensagem de despedida quando a live cai.
         """
         try:
-            # Prompt focado em descanso/término de missão
             prompt = (
                 f"O streamer @{channel} acabou de encerrar a live! "
                 "Como Glorpinia, mande uma mensagem de despedida para o chat. "
@@ -599,15 +581,9 @@ class TwitchIRC:
             )
 
             if self.gemini_client:
-                # Gera a resposta com a IA
-                response = self.gemini_client.model.generate_content(
-                    f"{self.auth.personality_profile}\n\nInput: {prompt}"
-                )
+                response = self.gemini_client.get_response(prompt, channel, "system")
                 
-                goodbye_msg = response.text.strip()
-                
-                # Limpeza básica
-                goodbye_msg = goodbye_msg.replace('"', '').replace("Glorpinia:", "")
+                goodbye_msg = response.replace("@system, ", "").strip()
                 
                 self.send_message(channel, goodbye_msg)
             else:
