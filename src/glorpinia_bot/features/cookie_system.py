@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import logging
+import re
 
 class CookieSystem:
     def __init__(self, bot):
