@@ -52,7 +52,7 @@ class TwitchIRC:
         self.live_status = {} # Dicionário para guardar { 'canal': True/False }
         
         # Inicia a thread que vai ficar checando a API da Twitch em segundo plano
-        self.monitor_thread = threading.Thread(target=self._background_live_monitor, daemon=True)
+        self.monitor_thread = threading.Thread(target=self._monitor_live_status, daemon=True)
         self.monitor_thread.start()
         
         # Inicializa Features
@@ -495,52 +495,64 @@ class TwitchIRC:
         """Handler para quando a conexao WebSocket é fechada."""
         print(f"[INFO] Conexao WebSocket fechada. Codigo: {close_status_code}, Msg: {close_msg}")
 
-    def _background_live_monitor(self):
+    def _monitor_live_status(self):
         """
-        Monitora status da live (Online/Offline) e dispara eventos.
+        Thread secundário que verifica a cada 60s se os canais estão online.
+        Renovação automática de Token em caso de erro 401.
         """
-        print("[System] Monitor de Live iniciado.")
-        time.sleep(10)
-
-        while True:
-            try:
-                for channel_name in self.auth.channels:
-                    url = f"https://api.twitch.tv/helix/streams?user_login={channel_name}"
-                    headers = {
-                        "Client-ID": self.auth.client_id,
-                        "Authorization": f"Bearer {self.auth.access_token}"
-                    }
-                    
-                    response = requests.get(url, headers=headers, timeout=5)
+        print("[Monitor] Iniciando monitoramento de status da stream...")
+        
+        while self.running:
+            for channel in self.auth.channels:
+                url = f"https://api.twitch.tv/helix/streams?user_login={channel}"
+                headers = {
+                    "Client-ID": self.auth.client_id,
+                    "Authorization": f"Bearer {self.auth.access_token}"
+                }
+                
+                try:
+                    response = requests.get(url, headers=headers, timeout=10)
                     
                     if response.status_code == 200:
                         data = response.json()
-                        is_online = len(data.get('data', [])) > 0
+                        is_live = len(data.get("data", [])) > 0
                         
-                        # Pega o status anterior
-                        was_online = self.live_status.get(channel_name)
+                        was_live = self.live_status.get(channel, False)
+                        
+                        # Atualiza estado
+                        self.live_status[channel] = is_live
+                        
+                        # Detecta transições
+                        if is_live and not was_live:
+                            print(f"[Monitor] {channel} entrou AO VIVO!")
+                            self._trigger_welcome_message(channel)
+                        elif not is_live and was_live:
+                            print(f"[Monitor] {channel} ficou OFFLINE!")
+                            self._trigger_goodbye_message(channel)
 
-                        # LÓGICA DE EVENTOS
+                    # Tratamento de Token Expirado
+                    elif response.status_code == 401:
+                        print("[Monitor] Token expirado (401). Tentando renovação automática...")
+                        
+                        # Faz o refresh e atualiza o self.auth.access_token
+                        if self.auth.validate_token():
+                            print("[Monitor] Token renovado com sucesso! Reiniciando WebSocket...")
+                            
+                            # Força a desconexão do WebSocket. 
+                            if self.ws:
+                                self.ws.close()
+                                
+                            # Espera um pouco para garantir que a reconexão ocorra
+                            time.sleep(5)
+                        else:
+                            print("[Monitor] Falha crítica ao renovar token. Tentando novamente em 60s.")
 
-                        # TRIGGER DE BOAS-VINDAS (OFF -> ON)
-                        if was_online is False and is_online is True:
-                            print(f"[EVENT] Live iniciada em #{channel_name}! Enviando boas-vindas...")
-                            self._trigger_welcome_message(channel_name)
-
-                        # TRIGGER DE TCHAU (ON -> OFF)
-                        elif was_online is True and is_online is False:
-                            print(f"[EVENT] Live encerrada em #{channel_name}! Enviando despedida...")
-                            self._trigger_goodbye_message(channel_name)
-
-                        # Atualiza o cache
-                        self.live_status[channel_name] = is_online
-                    
                     else:
                         print(f"[Monitor] Erro API Twitch: {response.status_code}")
-
-            except Exception as e:
-                print(f"[Monitor] Erro crítico na verificação: {e}")
-
+                        
+                except Exception as e:
+                    print(f"[Monitor] Erro de conexão: {e}")
+            
             time.sleep(60)
             
     def _trigger_welcome_message(self, channel):
