@@ -51,6 +51,9 @@ class TwitchIRC:
         
         self.live_status = {} # Dicionário para guardar { 'canal': True/False }
         
+        # Define como True antes de iniciar a thread
+        self.running = True 
+        
         # Inicia a thread que vai ficar checando a API da Twitch em segundo plano
         self.monitor_thread = threading.Thread(target=self._monitor_live_status, daemon=True)
         self.monitor_thread.start()
@@ -75,13 +78,15 @@ class TwitchIRC:
 
         # Lista de Admins
         admin_nicks_str = os.getenv("ADMIN_NICKS") 
-        self.admin_nicks = [nick.strip().lower() for nick in admin_nicks_str.split(',')]
+        self.admin_nicks = [nick.strip().lower() for nick in admin_nicks_str.split(',')] if admin_nicks_str else []
         print(f"[AUTH] Admins carregados: {self.admin_nicks}")
 
         # Configuração do WebSocket e Shutdown
         self.ws = None
-        self.running = False
+        
+        # Validação inicial do Token
         self.auth.validate_and_refresh_token()
+        
         signal.signal(signal.SIGINT, self.handle_exit)
         signal.signal(signal.SIGTERM, self.handle_exit)
 
