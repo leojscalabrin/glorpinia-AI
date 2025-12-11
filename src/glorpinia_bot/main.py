@@ -540,7 +540,7 @@ class TwitchIRC:
                         print("[Monitor] Token expirado (401). Tentando renovação automática...")
                         
                         # Faz o refresh e atualiza o self.auth.access_token
-                        if self.auth.validate_token():
+                        if self.auth.validate_and_refresh_token():
                             print("[Monitor] Token renovado com sucesso! Reiniciando WebSocket...")
                             
                             # Força a desconexão do WebSocket. 

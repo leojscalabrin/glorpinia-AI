@@ -150,12 +150,17 @@ class GeminiClient:
         """
 
         try:
-            # Pega o modelo correto para este canal (com ou sem lore extra)
+            # Pega o modelo correto para este canal
             current_model = self._get_model_for_channel(channel)
             
             # Gera a resposta
             response = current_model.generate_content(prompt)
-            generated = response.text.strip()
+            
+            if response.parts:
+                generated = response.text.strip()
+            else:
+                logging.warning(f"[Gemini] Bloqueio de Segurança/Vazio. Feedback: {response.prompt_feedback}")
+                generated = "Os protocolos de segurança da nave-mãe me impedem de responder isso. Susge"
             
         except Exception as e:
             logging.error(f"[ERROR] Falha na comunicação com a API Gemini: {e}")
