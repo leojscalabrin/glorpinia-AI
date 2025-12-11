@@ -252,6 +252,10 @@ class CookieSystem:
 
         # Remove as tags técnicas do texto
         clean_text = re.sub(pattern, "", text).strip()
+        
+        # Remove finais como " para", " o", " de" se sobrarem sozinhos
+        clean_text = re.sub(r'\s+(o|a|os|as|de|da|do|em|por|para)$', '', clean_text, flags=re.IGNORECASE).strip()
+
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
         # Anexa o feedback visual ao final da mensagem
