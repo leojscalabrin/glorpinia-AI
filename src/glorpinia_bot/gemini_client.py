@@ -277,18 +277,18 @@ class GeminiClient:
         """Limpa a resposta dos prefixos de prompt e formatação indesejada."""
         generated = generated.strip()
         
-        # Remove blocos de contexto internos (RAG, Web, etc)
-        generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
-        generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
+        # # Remove blocos de contexto internos (RAG, Web, etc)
+        # generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
+        # generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         
-        # Remove tags HTML (como </blockquote>, <b>, etc)
-        generated = re.sub(r'<[^>]*>', '', generated)
+        # # Remove tags HTML (como </blockquote>, <b>, etc)
+        # generated = re.sub(r'<[^>]*>', '', generated)
         
-        # Remove aspas se a IA respondeu "Texto"
-        if generated.startswith('"') and generated.endswith('"'):
-            generated = generated[1:-1]
+        # # Remove aspas se a IA respondeu "Texto"
+        # if generated.startswith('"') and generated.endswith('"'):
+        #     generated = generated[1:-1]
             
-        # Remove blocos de código Markdown
-        generated = generated.replace("```", "").replace("`", "")
+        # # Remove blocos de código Markdown
+        # generated = generated.replace("```", "").replace("`", "")
 
         return generated.strip()

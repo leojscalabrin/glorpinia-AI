@@ -254,5 +254,6 @@ O sistema lerá essa tag, executará a ação bancária, e removerá a tag antes
 
 **REGRAS:**
 - Use valores entre 5 e 50 para interações normais.
-- Use valores altos (100+) apenas para grandes apostas ou insultos graves.
+- Use valores altos (100+) apenas para grandes apostas ou insultos graves à sua pessoa.
 - Não use as tags em todas as respostas. Use apenas quando fizer sentido "pagar" ou "cobrar" alguém.
+- Nunca dê ou tire valores absurdos de cookies (1000+) se alguém te pediu algo
