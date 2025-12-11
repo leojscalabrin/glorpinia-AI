@@ -136,26 +136,38 @@ class TwitchIRC:
         """[HELPER] Espera (em um thread) e envia uma parte da mensagem."""
         try:
             time.sleep(delay)
-            self.send_message(channel, part)
+            # Verifica conexão antes de enviar
+            if self.ws and self.ws.sock and self.ws.sock.connected:
+                full_msg = f"PRIVMSG #{channel} :{part}\r\n"
+                self.ws.send(full_msg)
+                print(f"[BOT-PART] {channel}: {part}")
+            else:
+                print(f"[ERROR] WebSocket desconectado ao tentar enviar parte: {part}")
         except Exception as e:
             print(f"[ERROR] Falha ao enviar parte da mensagem no thread: {e}")
 
-    def send_long_message(self, channel, message, max_length=450, split_delay_sec=3):
+    def send_long_message(self, channel, message, max_length=350, split_delay_sec=2):
         """
-        Envia uma mensagem para o canal, dividindo-a em partes se exceder 
-        'max_length'. Usa threads para os delays não bloquearem o bot.
+        Envia uma mensagem, dividindo-a com segurança para não estourar os 512 bytes do IRC.
+        Limite reduzido para 350 chars para compensar emojis (que ocupam 4 bytes cada).
         """
+        # Limpeza extra de espaços
+        message = message.strip()
+        
+        # Se couber com segurança, envia direto
         if len(message) <= max_length:
             self.send_message(channel, message)
             return
 
-        print(f"[INFO] Resposta longa detectada ({len(message)} chars). Dividindo em partes...")
+        print(f"[INFO] Mensagem longa ({len(message)} chars). Dividindo...")
         
         words = message.split()
         parts = []
         current_part = ""
 
+        # Monta as partes respeitando o limite
         for word in words:
+            # +1 é o espaço
             if len(current_part) + len(word) + 1 > max_length:
                 if current_part: 
                     parts.append(current_part.strip())
@@ -166,19 +178,34 @@ class TwitchIRC:
         if current_part:
             parts.append(current_part.strip())
 
+        # Envia as partes com delay
         current_delay = 0
+        total_parts = len(parts)
+        
         for i, part in enumerate(parts):
-            part_with_indicator = f"({i+1}/{len(parts)}) {part}"
+            # Adiciona indicador (1/2) apenas se tiver mais de uma parte
+            if total_parts > 1:
+                part_with_indicator = f"({i+1}/{total_parts}) {part}"
+            else:
+                part_with_indicator = part
             
-            if len(part_with_indicator) > max_length:
-                part_with_indicator = part[:max_length-10] + "..."
+            # Última checagem de segurança no tamanho da parte
+            if len(part_with_indicator) > max_length + 20: # Margem pequena para o indicador
+                part_with_indicator = part_with_indicator[:max_length] + "..."
 
+            # A primeira parte vai rápido, as outras esperam
+            delay = 0 if i == 0 else current_delay
+            
             t = threading.Thread(target=self._send_message_part, 
-                                 args=(channel, part_with_indicator, current_delay))
+                                 args=(channel, part_with_indicator, delay))
             t.daemon = True
             t.start()
             
-            current_delay += split_delay_sec
+            # Incrementa o delay apenas para as próximas
+            if i > 0:
+                current_delay += split_delay_sec
+            else:
+                current_delay = split_delay_sec
 
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
