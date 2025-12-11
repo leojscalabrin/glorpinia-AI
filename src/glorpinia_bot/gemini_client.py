@@ -156,11 +156,19 @@ class GeminiClient:
             # Gera a resposta
             response = current_model.generate_content(prompt)
             
-            if response.parts:
-                generated = response.text.strip()
+            # Verifica se foi bloqueado por segurança antes de acessar .text
+            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                logging.warning(f"[Gemini] Bloqueio de Segurança. Razão: {response.prompt_feedback.block_reason}")
+                generated = "Os protocolos de segurança da Nave-Mãe me impedem de responder isso. Susge"
+            
+            # Verifica se tem candidatos válidos
+            elif not response.candidates:
+                logging.warning("[Gemini] Resposta vazia (sem candidatos).")
+                generated = "O portal falhou e não veio resposta. WutFace"
+
+            # Se passou pelos checks, tenta pegar o texto
             else:
-                logging.warning(f"[Gemini] Bloqueio de Segurança/Vazio. Feedback: {response.prompt_feedback}")
-                generated = "Os protocolos de segurança da nave-mãe me impedem de responder isso. Susge"
+                generated = response.text.strip()
             
         except Exception as e:
             logging.error(f"[ERROR] Falha na comunicação com a API Gemini: {e}")
