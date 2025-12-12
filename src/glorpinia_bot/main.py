@@ -35,6 +35,12 @@ class TwitchIRC:
         # Configurações de Estado
         self.chat_enabled = True  # Para respostas a menções
         
+        self.IGNORED_NICKS = {
+            "system", "usuario", "user", "usuário", "você", "eu", "everyone", "here", "chat",
+            "pokemoncommunitygame", "streamelements", "nightbot", 
+            "wizebot", "creatisbot", "own3d"
+        }
+        
         print("[INFO] Starting Glorpinia Bot in FULL MODE.")
 
         # Inicializa Componentes Pesados
@@ -229,7 +235,7 @@ class TwitchIRC:
             content_lower = content.lower()
             
             # Ignora mensagens do próprio bot
-            if author.lower() == self.auth.bot_nick.lower():
+            if author_lower == self.auth.bot_nick.lower() or author_lower in self.IGNORED_NICKS:
                 return
 
             # Salvar no Histórico Recente (Memória de Curto Prazo)

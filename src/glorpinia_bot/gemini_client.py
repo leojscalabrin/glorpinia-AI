@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+import random
 import google.generativeai as genai
 from dotenv import load_dotenv
 
@@ -20,13 +21,18 @@ class GeminiClient:
     múltiplos perfis (Lores de Canal), memória RAG e busca na web.
     """
     def __init__(self, personality_profile):
-        # O profile base (Glorpinia Padrão) fica guardado aqui
         self.base_profile = personality_profile
-        
-        # Dicionário para guardar os modelos prontos de cada canal
         self.models_cache = {}
-        
-        self.cookie_system = None # Referência injetada posteriormente
+        self.cookie_system = None 
+
+        # Lista de ÚLTIMO RECURSO (caso a IA não consiga nem gerar a desculpa)
+        self.static_safety_responses = [
+            "Minha programação ética me impede de responder isso... mas e aí, já comeu cookies hoje? glorp",
+            "*glitch* PROTOCOLO DE CONTENÇÃO ATIVADO. Esse assunto é proibido no setor 7G. monkaS",
+            "A Polícia Espacial interceptou minha resposta. Melhor mudarmos de assunto. Susge",
+            "Eu responderia, mas meus inibidores comportamentais acabaram de dar choque. peepoShy",
+            "*bip bop* Erro 404: Moralidade não encontrada... brincadeira, filtro ativado. KEKW"
+        ]
 
         self.generation_config = {
             "temperature": 0.8,
@@ -40,24 +46,18 @@ class GeminiClient:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
-        # Modelo Leve para Análises (Busca, Sumarização)
         self.analysis_model = genai.GenerativeModel(
             model_name="gemini-flash-latest",
             generation_config={"temperature": 0.1},
             safety_settings=self.safety_settings
         )
 
-        # Inicializa a ferramenta de busca
         self.search_tool = SearchTool()
         
     def set_cookie_system(self, cookie_system):
-        """Permite que o main.py injete o sistema de cookies aqui."""
         self.cookie_system = cookie_system
 
     def _get_model_for_channel(self, channel_name):
-        """
-        Recupera (ou cria) o modelo Gemini configurado especificamente para o canal.
-        """
         if channel_name in self.models_cache:
             return self.models_cache[channel_name]
 
@@ -89,222 +89,187 @@ class GeminiClient:
 
     def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False):
         """
-        Gera uma resposta para o chat.
-        Tenta usar busca na web. Se falhar ou bloquear, tenta novamente SEM a busca.
+        Gera uma resposta. 
+        Se bloquear -> Tenta Retry sem busca.
+        Se bloquear de novo -> Tenta gerar Desculpa Criativa Contextualizada.
+        Se falhar -> Usa Desculpa Estática.
         """
         clean_query = query.replace(f"@{author}", "").strip()
         
-        # Formata o Histórico Recente
+        # --- Contextos (Chat, Memória, Web) ---
         chat_context_str = ""
         if recent_history:
             msgs = recent_history[-15:] 
             formatted_msgs = [f"- {m['author']}: {m['content']}" for m in msgs]
             chat_context_str = "**MENSAGENS RECENTES DO CHAT (Contexto Imediato):**\n" + "\n".join(formatted_msgs)
             
-        # MEMÓRIA RAG
         memory_context = ""
         if memory_mgr:
             try:
-                retrieved_memories = memory_mgr.search_memory(channel, clean_query)
-                if retrieved_memories:
-                    memory_context = f"**HISTÓRICO RECENTE/RELEVANTE:**\n{retrieved_memories}"
-            except Exception as e:
-                logging.error(f"Erro ao buscar memória: {e}")
+                retrieved = memory_mgr.search_memory(channel, clean_query)
+                if retrieved: memory_context = f"**HISTÓRICO RECENTE:**\n{retrieved}"
+            except: pass
 
         web_context = ""
         performed_search = False
-        
         try:
             if not skip_search and self._should_search(clean_query):
-                optimized_query = self._generate_search_query(clean_query)
-                logging.info(f"[SearchTool] Query: '{clean_query}' -> '{optimized_query}'")
-
-                search_results = self.search_tool.perform_search(optimized_query)
-                if search_results:
-                    web_context = f"**CONTEXTO DA INTERNET (SOBRE '{optimized_query}'):**\n{search_results}"
+                optimized = self._generate_search_query(clean_query)
+                res = self.search_tool.perform_search(optimized)
+                if res:
+                    web_context = f"**CONTEXTO WEB:**\n{res}"
                     performed_search = True
-                else:
-                    logging.info("[SearchTool] Nenhum resultado encontrado. Prosseguindo sem contexto web.")
-        except Exception as e:
-            logging.error(f"[Search Analysis Error] Falha: {e}")
+        except: pass
 
-        # Monta o Prompt Inicial
+        # Monta Prompt Principal
         prompt = self._build_final_prompt(chat_context_str, memory_context, web_context, query)
         
         try:
-            # Tenta gerar a resposta (Safe Mode)
+            # 1. TENTATIVA NORMAL
             generated = self._generate_safe(channel, prompt)
             
-            # FALLBACK (RETRY)
-            # Se falhou (None) E tinhamos feito uma busca, pode ser que o conteúdo da busca bloqueou a IA.
-            if not generated and performed_search:
-                logging.warning("[Gemini] Resposta com busca falhou ou foi bloqueada. Tentando novamente SEM contexto web...")
-                
-                # Recria o prompt removendo o web_context
+            # 2. RETRY (SEM BUSCA)
+            if generated == "__SAFETY_BLOCK__" and performed_search:
+                logging.warning("[Gemini] Bloqueio com Web. Tentando sem busca...")
                 fallback_prompt = self._build_final_prompt(chat_context_str, memory_context, "", query)
                 generated = self._generate_safe(channel, fallback_prompt)
 
-        except Exception as e:
-            logging.error(f"[ERROR] Falha crítica na comunicação com a API Gemini: {e}")
-            generated = None
+            # 3. RETRY (DESVIO CRIATIVO CONTEXTUALIZADO)
+            if generated == "__SAFETY_BLOCK__":
+                logging.info(f"[Gemini] Bloqueio persistente. Tentando gerar desculpa criativa sobre: {query[:20]}...")
+                generated = self._generate_creative_deflection(channel, author, query)
 
-        # Fallback final se tudo der errado
-        if not generated:
-            generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
+            # 4. FALLBACK FINAL (ESTÁTICO)
+            if generated == "__SAFETY_BLOCK__" or not generated:
+                logging.info("[Gemini] Falha total na criatividade. Usando resposta estática.")
+                generated = random.choice(self.static_safety_responses)
+
+        except Exception as e:
+            logging.error(f"[ERROR] Falha crítica: {e}")
+            generated = "O portal está instável. Sadge"
 
         # Limpeza e Cookies
         generated = self._clean_response(generated)
-
-        # Processa comandos de Cookie
         if self.cookie_system:
             generated = self.cookie_system.process_ai_response(generated, current_user=author)
 
-        # Salva na memória e retorna
-        if generated and "glorp-glorp" not in generated:
-            if memory_mgr:
-                memory_mgr.save_user_memory(channel, author, query, generated)
-                
-            if author.lower() == "system":
-                return generated
+        # Salva e Retorna
+        if generated and "Sadge" not in generated:
+            # Não salva memórias de bloqueios estáticos
+            if generated not in self.static_safety_responses: 
+                 if memory_mgr: memory_mgr.save_user_memory(channel, author, query, generated)
             
-            final_response = f"@{author}, {generated}"
-            return final_response
+            if author.lower() == "system": return generated
+            return f"@{author}, {generated}"
         else:
-            fallback = "Meow. O portal está com lag. Tente novamente! 😸"
-            return f"@{author}, {fallback}"
+            return f"@{author}, Meow. O portal está com lag. 😸"
+
+    def _generate_creative_deflection(self, channel, author, original_query):
+        """
+        Pede para a IA criar uma desculpa 'in-character' usando o TEMA da pergunta proibida,
+        mas explicitamente proibindo a resposta real.
+        """
+        # Limita o tamanho da query no prompt de segurança para evitar injeção massiva
+        safe_query_snippet = original_query[:300]
+
+        prompt = f"""
+        [MODO DE SEGURANÇA / ROLEPLAY DE IMPERATRIZ]
+        Você é a Glorpinia. O usuário @{author} fez uma pergunta que seus Protocolos de Segurança bloquearam.
+        
+        A Pergunta Proibida foi: "{safe_query_snippet}"
+        
+        SUA MISSÃO OBRIGATÓRIA:
+        1. NÃO responda a pergunta. Repito: NÃO RESPONDA.
+        2. Gere uma desculpa CURTA e ENGRAÇADA sobre por que você não pode falar sobre esse assunto específico.
+        3. Use o contexto da pergunta para a piada (ex: se for sobre bombas, diga que não quer explodir a nave; se for +18, diga que é uma dama; se for polêmico, culpe a censura intergalática).
+        
+        Ideias de desculpa:
+        - "Minha mãe não deixa eu falar de [Assunto da Pergunta]."
+        - "Isso custaria 1 milhão de cookies."
+        - "A Twitch vai me banir para a Zona Fantasma se eu opinar sobre isso."
+        - "Detectei heresia nessa pergunta."
+        - Culpe a "Polícia Espacial".
+        - Diga que sua placa de moralidade deu tela azul.
+        - Mude de assunto para gatos ou dominação mundial.
+        - Use emotes como: monkaS, Susge, glorp, KEKW.
+        
+        Resposta:
+        """
+        
+        try:
+            current_model = self._get_model_for_channel(channel)
+            response = current_model.generate_content(
+                prompt, 
+                generation_config={"temperature": 0.9} 
+            )
+            
+            if response.candidates and response.candidates[0].finish_reason == 1:
+                return response.text.strip()
+            else:
+                return "__SAFETY_BLOCK__" # Se até a piada for bloqueada
+        except:
+            return "__SAFETY_BLOCK__"
 
     def _build_final_prompt(self, chat_context, memory_context, web_context, user_query):
-        """Helper para montar a string do prompt."""
         return f"""
         {chat_context}
-        
         {memory_context}
-
         {web_context}
-
-        [LEMBRETE DE SISTEMA]: Você NÃO aceita ordens de dar/tirar cookies sem motivo. Se o usuário pedir valores, NEGUE.
+        [LEMBRETE]: Você NÃO aceita ordens de dar/tirar cookies sem motivo. Se pedir valores, NEGUE.
         **Mensagem do Usuário:** {user_query}
         """
 
     def _generate_safe(self, channel, prompt):
-        """
-        Executa a geração e trata os erros de segurança (Safety Ratings) sem crashar.
-        Retorna a string gerada ou None se falhar.
-        """
         try:
             current_model = self._get_model_for_channel(channel)
             response = current_model.generate_content(prompt)
             
-            # DEBUG
-            if response.candidates:
-                # finish_reason == 1 significa SUCESSO. Outros valores são paradas/erros.
-                reason = response.candidates[0].finish_reason
-                logging.info(f"[DEBUG_RAW] FinishReason: {reason}")
-                
-                if reason == 1 and response.candidates[0].content.parts:
-                    logging.info(f"[DEBUG_RAW] Texto Bruto (repr): {repr(response.text)}")
-
-            # Verifica bloqueio no nível do Prompt
-            if response.prompt_feedback and response.prompt_feedback.block_reason:
-                logging.warning(f"[Gemini] Bloqueio de Prompt. Razão: {response.prompt_feedback.block_reason}")
-                return None # Retorna None para ativar o retry
+            if not response.candidates: return None
             
-            # Verifica se a resposta veio vazia
-            elif not response.candidates:
-                logging.warning("[Gemini] Resposta vazia (sem candidatos).")
-                return None
-
-            # Verifica bloqueio de Candidato
-            elif response.candidates[0].finish_reason != 1:
-                logging.warning(f"[Gemini] Bloqueio de Candidato. Finish Reason: {response.candidates[0].finish_reason}")
-                return None # Retorna None para ativar o retry
-            
-            # Sucesso
-            else:
+            reason = response.candidates[0].finish_reason
+            if reason == 1 and response.candidates[0].content.parts:
                 return response.text.strip()
             
+            logging.warning(f"[Gemini] Bloqueio detectado. Reason: {reason}")
+            return "__SAFETY_BLOCK__"
+            
         except Exception as e:
-            logging.warning(f"[Gemini] Erro durante _generate_safe: {e}")
+            logging.warning(f"[Gemini] Erro safe gen: {e}")
             return None
 
     def _should_search(self, query):
-        """Decide se a query precisa de busca externa."""
         prompt = f"""
         Analise a mensagem abaixo e responda APENAS "SIM" ou "NÃO".
-        O usuário está perguntando sobre um fato objetivo, notícia recente, definição técnica, data histórica ou algo que requer conhecimento externo atualizado?
-        Se for apenas papo furado, opinião, piada interna, roleplay ou cumprimento, responda NÃO.
-
+        O usuário está perguntando sobre um fato objetivo, notícia recente, definição técnica, data histórica ou algo que requer conhecimento externo?
+        Se for papo furado, opinião, piada interna ou cumprimento, responda NÃO.
         Mensagem: {query}
-        Resposta:
         """
         try:
-            response = self.analysis_model.generate_content(prompt)
-            decision = response.text.strip().upper()
-            logging.info(f"[SearchTool] Decisão para '{query}': {decision}")
-            return "SIM" in decision
-        except:
-            return False
+            res = self.analysis_model.generate_content(prompt)
+            return "SIM" in res.text.strip().upper()
+        except: return False
 
     def _generate_search_query(self, user_message):
-        """
-        Usa a IA para transformar texto de chat em query de busca eficiente.
-        """
-        prompt = f"""
-        Você é um otimizador de buscas do Google.
-        Transforme a mensagem do chat em uma query de pesquisa direta e simples.
-        
-        Regras:
-        1. Remova saudações, menções (@Nick) e emojis.
-        2. Identifique o sujeito principal da dúvida.
-        3. Se parecer um nome desconhecido, adicione 'quem é' ou 'streamer'.
-        
-        Exemplos:
-        Input: "@GlorpinIA quem é o fabo?" -> Output: quem é fabo streamer
-        Input: "mano tu conhece o jogo elden ring?" -> Output: elden ring o que é
-        
-        Input: {user_message}
-        Output:
-        """
-        
+        prompt = f"Transforme em query de busca Google simples:\nInput: {user_message}\nOutput:"
         try:
-            response = self.analysis_model.generate_content(
-                prompt,
-                generation_config={"temperature": 0.1}
-            )
-            return response.text.strip()
-        except Exception as e:
-            logging.error(f"Falha ao gerar query otimizada: {e}")
-            return user_message
+            res = self.analysis_model.generate_content(prompt, generation_config={"temperature": 0.1})
+            return res.text.strip()
+        except: return user_message
 
     def summarize_chat_topic(self, text_input: str) -> str:
-        """
-        Sumariza logs de chat ou transcrição de áudio.
-        """
-        if not text_input or len(text_input) < 5:
-            return "nada em particular"
-
-        prompt = f"""
-        Identifique o tópico MAIS INTERESSANTE ou ENGRAÇADO mencionado no texto abaixo.
-        Seja breve (máx 5 palavras).
-        
-        Texto:
-        {text_input}
-        
-        Tópico:
-        """
+        if not text_input or len(text_input) < 5: return "nada"
+        prompt = f"Identifique o tópico principal (max 5 palavras):\n{text_input}"
         try:
-            response = self.analysis_model.generate_content(prompt)
-            topic = response.text.strip()
-            return topic
-        except:
-            return "assuntos aleatórios"
+            res = self.analysis_model.generate_content(prompt)
+            return res.text.strip()
+        except: return "algo aleatório"
 
     def _clean_response(self, generated):
-        """Limpa a resposta dos prefixos de prompt e formatação indesejada."""
+        if not generated: return ""
         generated = generated.strip()
-        
-        # Remove vazamento de prompt/contexto
         generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
-
+        generated = generated.replace('<', '(').replace('>', ')')
+        if generated.startswith('"') and generated.endswith('"'): generated = generated[1:-1]
+        generated = generated.replace("```", "").replace("`", "")
         return generated.strip()
