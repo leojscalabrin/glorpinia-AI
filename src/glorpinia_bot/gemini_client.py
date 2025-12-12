@@ -155,6 +155,12 @@ class GeminiClient:
             
             # Gera a resposta
             response = current_model.generate_content(prompt)
+
+            if response.candidates:
+                raw_text = response.text
+                reason = response.candidates[0].finish_reason
+                logging.info(f"[DEBUG_RAW] FinishReason: {reason}")
+                logging.info(f"[DEBUG_RAW] Texto Bruto (repr): {repr(raw_text)}")
             
             # 1. Verifica bloqueio no nível do Prompt (Raro, mas acontece)
             if response.prompt_feedback and response.prompt_feedback.block_reason:
@@ -285,17 +291,7 @@ class GeminiClient:
         generated = generated.strip()
         
         # # Remove blocos de contexto internos (RAG, Web, etc)
-        # generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
-        # generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
-        
-        # # Remove tags HTML (como </blockquote>, <b>, etc)
-        # generated = re.sub(r'<[^>]*>', '', generated)
-        
-        # # Remove aspas se a IA respondeu "Texto"
-        # if generated.startswith('"') and generated.endswith('"'):
-        #     generated = generated[1:-1]
-            
-        # # Remove blocos de código Markdown
-        # generated = generated.replace("```", "").replace("`", "")
+        generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
+        generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
 
         return generated.strip()
