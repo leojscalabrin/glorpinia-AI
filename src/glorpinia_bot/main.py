@@ -234,6 +234,8 @@ class TwitchIRC:
             content = content.strip()
             content_lower = content.lower()
             
+            author_lower = author.lower()
+            
             # Ignora mensagens do próprio bot
             if author_lower == self.auth.bot_nick.lower() or author_lower in self.IGNORED_NICKS:
                 return
