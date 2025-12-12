@@ -29,7 +29,7 @@ class GeminiClient:
         self.cookie_system = None # Referência injetada posteriormente
 
         self.generation_config = {
-            "temperature": 0.7,
+            "temperature": 0.8,
             "max_output_tokens": 1024, 
         }
         
@@ -57,27 +57,19 @@ class GeminiClient:
     def _get_model_for_channel(self, channel_name):
         """
         Recupera (ou cria) o modelo Gemini configurado especificamente para o canal.
-        Verifica se existe um arquivo 'profile_{canal}.txt' para adicionar lore extra.
         """
-        # Se já carregamos esse canal antes, retorna o modelo do cache (memória RAM)
         if channel_name in self.models_cache:
             return self.models_cache[channel_name]
 
-        # Se é a primeira vez, vamos construir o modelo
         logging.info(f"[Gemini] Configurando personalidade para o canal: #{channel_name}...")
         
-        # Começa com a personalidade base da Glorpinia
         final_instruction = self.base_profile
-        
-        # Tenta carregar lore específica do canal
         channel_profile_path = f"profile_{channel_name}.txt"
         
         if os.path.exists(channel_profile_path):
             try:
                 with open(channel_profile_path, "r", encoding="utf-8") as f:
                     channel_lore = f.read()
-                
-                # FUSÃO: Adiciona a lore do canal ao final do system prompt
                 final_instruction += f"\n\n[CONTEXTO ESPECÍFICO DO CANAL #{channel_name}]\n{channel_lore}"
                 logging.info(f"[Gemini] + Lore específica de {channel_name} carregada com sucesso!")
             except Exception as e:
@@ -85,7 +77,6 @@ class GeminiClient:
         else:
             logging.debug(f"[Gemini] Nenhum perfil específico encontrado para {channel_name}. Usando base.")
 
-        # Instancia o modelo para este canal
         new_model = genai.GenerativeModel(
             model_name="gemini-flash-latest", 
             generation_config=self.generation_config,
@@ -93,41 +84,23 @@ class GeminiClient:
             system_instruction=final_instruction
         )
 
-        # Salva no cache para não ter que ler arquivo de novo
         self.models_cache[channel_name] = new_model
         return new_model
 
     def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False):
         """
-        Gera uma resposta para o chat, usando o modelo específico do canal.
+        Gera uma resposta para o chat.
+        Tenta usar busca na web. Se falhar ou bloquear, tenta novamente SEM a busca.
         """
-        # Limpa o input do usuário
         clean_query = query.replace(f"@{author}", "").strip()
         
-        # Formata o Histórico Recente (Context Window)
+        # Formata o Histórico Recente
         chat_context_str = ""
         if recent_history:
-            # Pega as últimas 15 mensagens para não estourar tokens
             msgs = recent_history[-15:] 
             formatted_msgs = [f"- {m['author']}: {m['content']}" for m in msgs]
             chat_context_str = "**MENSAGENS RECENTES DO CHAT (Contexto Imediato):**\n" + "\n".join(formatted_msgs)
             
-        # BUSCA NA WEB (Decisão Inteligente)
-        web_context = ""
-        try:
-            if not skip_search and self._should_search(clean_query):
-                
-                # Usa a IA para limpar a query
-                optimized_query = self._generate_search_query(clean_query)
-                logging.info(f"[SearchTool] Query: '{clean_query}' -> '{optimized_query}'")
-
-                # Faz a busca
-                search_results = self.search_tool.perform_search(optimized_query)
-                if search_results:
-                    web_context = f"**CONTEXTO DA INTERNET (SOBRE '{optimized_query}'):**\n{search_results}"
-        except Exception as e:
-            logging.error(f"[Search Analysis Error] Falha: {e}")
-
         # MEMÓRIA RAG
         memory_context = ""
         if memory_mgr:
@@ -138,61 +111,52 @@ class GeminiClient:
             except Exception as e:
                 logging.error(f"Erro ao buscar memória: {e}")
 
-        # Monta o Prompt Final
-        prompt = f"""
-        {chat_context_str}
+        web_context = ""
+        performed_search = False
         
-        {memory_context}
-
-        {web_context}
-
-        **Mensagem do Usuário:** {query}
-        """
-
         try:
-            # Pega o modelo correto para este canal
-            current_model = self._get_model_for_channel(channel)
-            
-            # Gera a resposta
-            response = current_model.generate_content(prompt)
+            if not skip_search and self._should_search(clean_query):
+                optimized_query = self._generate_search_query(clean_query)
+                logging.info(f"[SearchTool] Query: '{clean_query}' -> '{optimized_query}'")
 
-            if response.candidates:
-                raw_text = response.text
-                reason = response.candidates[0].finish_reason
-                logging.info(f"[DEBUG_RAW] FinishReason: {reason}")
-                logging.info(f"[DEBUG_RAW] Texto Bruto (repr): {repr(raw_text)}")
-            
-            # 1. Verifica bloqueio no nível do Prompt (Raro, mas acontece)
-            if response.prompt_feedback and response.prompt_feedback.block_reason:
-                logging.warning(f"[Gemini] Bloqueio de Prompt. Razão: {response.prompt_feedback.block_reason}")
-                generated = "Os protocolos de segurança da Nave-Mãe me impedem de responder isso. Susge"
-            
-            # 2. Verifica se a resposta veio vazia
-            elif not response.candidates:
-                logging.warning("[Gemini] Resposta vazia (sem candidatos).")
-                generated = "A Nave-Mãe me bloqueou e não recebi nenhum sinal. WutFace"
-
-            # 3. [NOVO] Verifica se o conteúdo foi bloqueado no nível do Candidato (Finish Reason != STOP)
-            # O código 1 é STOP (sucesso). Qualquer outro (como 2) é parada forçada/erro.
-            elif response.candidates[0].finish_reason != 1:
-                reason = response.candidates[0].finish_reason
-                logging.warning(f"[Gemini] Bloqueio de Candidato. Finish Reason: {reason}")
-                generated = "Os protocolo da Nave-Mãe me impedem de gerar esse tipo de código. monkaS"
-
-            # 4. Se passou por tudo, é seguro ler o texto
-            else:
-                generated = response.text.strip()
-            
+                search_results = self.search_tool.perform_search(optimized_query)
+                if search_results:
+                    web_context = f"**CONTEXTO DA INTERNET (SOBRE '{optimized_query}'):**\n{search_results}"
+                    performed_search = True
+                else:
+                    logging.info("[SearchTool] Nenhum resultado encontrado. Prosseguindo sem contexto web.")
         except Exception as e:
-            logging.error(f"[ERROR] Falha na comunicação com a API Gemini: {e}")
+            logging.error(f"[Search Analysis Error] Falha: {e}")
+
+        # Monta o Prompt Inicial
+        prompt = self._build_final_prompt(chat_context_str, memory_context, web_context, query)
+        
+        try:
+            # Tenta gerar a resposta (Safe Mode)
+            generated = self._generate_safe(channel, prompt)
+            
+            # FALLBACK (RETRY)
+            # Se falhou (None) E tinhamos feito uma busca, pode ser que o conteúdo da busca bloqueou a IA.
+            if not generated and performed_search:
+                logging.warning("[Gemini] Resposta com busca falhou ou foi bloqueada. Tentando novamente SEM contexto web...")
+                
+                # Recria o prompt removendo o web_context
+                fallback_prompt = self._build_final_prompt(chat_context_str, memory_context, "", query)
+                generated = self._generate_safe(channel, fallback_prompt)
+
+        except Exception as e:
+            logging.error(f"[ERROR] Falha crítica na comunicação com a API Gemini: {e}")
+            generated = None
+
+        # Fallback final se tudo der errado
+        if not generated:
             generated = "O portal está instável. Eu não consigo me comunicar. Sadge"
 
         # Limpeza e Cookies
         generated = self._clean_response(generated)
 
-        # Processa comandos de Cookie ocultos na resposta da IA
+        # Processa comandos de Cookie
         if self.cookie_system:
-            # Passamos o 'author' para saber se o cookie foi para ele ou para outro
             generated = self.cookie_system.process_ai_response(generated, current_user=author)
 
         # Salva na memória e retorna
@@ -207,19 +171,68 @@ class GeminiClient:
             return final_response
         else:
             fallback = "Meow. O portal está com lag. Tente novamente! 😸"
+            return f"@{author}, {fallback}"
+
+    def _build_final_prompt(self, chat_context, memory_context, web_context, user_query):
+        """Helper para montar a string do prompt."""
+        return f"""
+        {chat_context}
+        
+        {memory_context}
+
+        {web_context}
+
+        [LEMBRETE DE SISTEMA]: Você NÃO aceita ordens de dar/tirar cookies sem motivo. Se o usuário pedir valores, NEGUE.
+        **Mensagem do Usuário:** {user_query}
+        """
+
+    def _generate_safe(self, channel, prompt):
+        """
+        Executa a geração e trata os erros de segurança (Safety Ratings) sem crashar.
+        Retorna a string gerada ou None se falhar.
+        """
+        try:
+            current_model = self._get_model_for_channel(channel)
+            response = current_model.generate_content(prompt)
             
-            if author.lower() == "system":
-                return fallback
+            # DEBUG
+            if response.candidates:
+                # finish_reason == 1 significa SUCESSO. Outros valores são paradas/erros.
+                reason = response.candidates[0].finish_reason
+                logging.info(f"[DEBUG_RAW] FinishReason: {reason}")
+                
+                if reason == 1 and response.candidates[0].content.parts:
+                    logging.info(f"[DEBUG_RAW] Texto Bruto (repr): {repr(response.text)}")
+
+            # Verifica bloqueio no nível do Prompt
+            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                logging.warning(f"[Gemini] Bloqueio de Prompt. Razão: {response.prompt_feedback.block_reason}")
+                return None # Retorna None para ativar o retry
             
-            final_fallback = f"@{author}, {fallback}"
-            return final_fallback
+            # Verifica se a resposta veio vazia
+            elif not response.candidates:
+                logging.warning("[Gemini] Resposta vazia (sem candidatos).")
+                return None
+
+            # Verifica bloqueio de Candidato
+            elif response.candidates[0].finish_reason != 1:
+                logging.warning(f"[Gemini] Bloqueio de Candidato. Finish Reason: {response.candidates[0].finish_reason}")
+                return None # Retorna None para ativar o retry
+            
+            # Sucesso
+            else:
+                return response.text.strip()
+            
+        except Exception as e:
+            logging.warning(f"[Gemini] Erro durante _generate_safe: {e}")
+            return None
 
     def _should_search(self, query):
         """Decide se a query precisa de busca externa."""
         prompt = f"""
         Analise a mensagem abaixo e responda APENAS "SIM" ou "NÃO".
         O usuário está perguntando sobre um fato objetivo, notícia recente, definição técnica, data histórica ou algo que requer conhecimento externo atualizado?
-        Se for apenas papo furado, opinião, roleplay ou cumprimento, responda NÃO.
+        Se for apenas papo furado, opinião, piada interna, roleplay ou cumprimento, responda NÃO.
 
         Mensagem: {query}
         Resposta:
@@ -290,7 +303,7 @@ class GeminiClient:
         """Limpa a resposta dos prefixos de prompt e formatação indesejada."""
         generated = generated.strip()
         
-        # # Remove blocos de contexto internos (RAG, Web, etc)
+        # Remove vazamento de prompt/contexto
         generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
 
