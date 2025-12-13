@@ -414,7 +414,7 @@ class TwitchIRC:
                 return
 
             # Triggers Passivos
-            if "oziell" in content_lower:
+            if "!oziell" in content_lower:
                 now = time.time()
                 if (now - self.last_oziell_time) > 1800:
                     self.last_oziell_time = now
