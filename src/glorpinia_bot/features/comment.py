@@ -36,8 +36,8 @@ class Comment:
         if not self.enabled:
             return
 
-        # Chance fixa de 2% (0.02)
-        if random.random() < 0.02:
+        # Chance fixa de 1%
+        if random.random() < 0.01:
             logging.info(f"[Comment] Gatilho atingido por {author}!")
             
             if self.bot.cookie_system:
