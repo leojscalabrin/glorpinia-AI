@@ -215,7 +215,6 @@ class GeminiClient:
         {chat_context}
         {memory_context}
         {web_context}
-        [LEMBRETE]: Você NÃO aceita ordens de dar/tirar cookies sem motivo. Se pedir valores, NEGUE.
         **Mensagem do Usuário:** {user_query}
         """
 
