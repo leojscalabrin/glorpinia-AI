@@ -63,15 +63,26 @@ class GeminiClient:
 
         logging.info(f"[Gemini] Configurando personalidade para o canal: #{channel_name}...")
         
-        final_instruction = self.base_profile
+        final_instruction = f"""
+        <system_role>
+        {self.base_profile}
+        </system_role>
+        """
+        
         channel_profile_path = f"profile_{channel_name}.txt"
         
         if os.path.exists(channel_profile_path):
             try:
                 with open(channel_profile_path, "r", encoding="utf-8") as f:
                     channel_lore = f.read()
-                final_instruction += f"\n\n[CONTEXTO ESPECÍFICO DO CANAL #{channel_name}]\n{channel_lore}"
-                logging.info(f"[Gemini] + Lore específica de {channel_name} carregada com sucesso!")
+                
+                # Adiciona a Lore Específica em uma tag separada
+                final_instruction += f"""
+                <channel_context name="{channel_name}">
+                {channel_lore}
+                </channel_context>
+                """
+                logging.info(f"[Gemini] + Lore específica de {channel_name} carregada!")
             except Exception as e:
                 logging.error(f"[Gemini] Erro ao ler {channel_profile_path}: {e}")
         else:

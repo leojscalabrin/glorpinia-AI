@@ -263,7 +263,7 @@ class TwitchIRC:
                 if command_raw == "8ball":
                     question = " ".join(parts[1:])
                     if not question:
-                        self.send_message(channel, f"@{author}, faça uma pergunta! glorp") # CORREÇÃO 2: author_part -> author
+                        self.send_message(channel, f"@{author}, faça uma pergunta! glorp")
                         return
                     self.eight_ball_feature.get_8ball_response(question, channel, author)
                     return
