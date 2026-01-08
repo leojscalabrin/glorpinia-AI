@@ -277,9 +277,25 @@ class GeminiClient:
     def _clean_response(self, generated):
         if not generated: return ""
         generated = generated.strip()
+        
+        # Remove blocos de contexto internos (RAG, Web, etc)
         generated = re.sub(r'\*\*(CONTEXTO APRENDIDO|HISTÓRICO RECENTE|CONTEXTO DA INTERNET)\*\*.*?\*RESPOSTA\*:?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
+        
+        # Remove menções ao sistema (ex: "@system:", "@system", "system:")
+        generated = re.sub(r'@?system[:,\s]*', '', generated, flags=re.IGNORECASE)
+
+        # Substitui < > por ( ) para não perder roleplays
         generated = generated.replace('<', '(').replace('>', ')')
-        if generated.startswith('"') and generated.endswith('"'): generated = generated[1:-1]
+        
+        # Remove tags HTML transformadas em parênteses (com ou sem barra /)
+        generated = re.sub(r'\((/?)(blockquote|b|i|strong|em|br|p|div|span|pre|code)\)', '', generated, flags=re.IGNORECASE)
+
+        # Remove aspas em volta da frase inteira
+        if generated.startswith('"') and generated.endswith('"'):
+            generated = generated[1:-1]
+            
+        # Remove markdown de código
         generated = generated.replace("```", "").replace("`", "")
+
         return generated.strip()
