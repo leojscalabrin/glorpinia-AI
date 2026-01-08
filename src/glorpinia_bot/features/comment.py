@@ -12,6 +12,9 @@ class Comment:
         print("[Feature] Comment Initialized.")
         self.bot = bot
         self.enabled = True
+        
+        self.last_comment_time = 0
+        self.COOLDOWN_SECONDS = 1200
 
     def set_enabled(self, state: bool):
         """Ativa ou desativa esta feature."""
@@ -36,6 +39,9 @@ class Comment:
         if not self.enabled:
             return
 
+        if (time.time() - self.last_comment_time) < self.COOLDOWN_SECONDS:
+            return
+        
         # Chance fixa de 1%
         if random.random() < 0.01:
             logging.info(f"[Comment] Gatilho atingido por {author}!")
