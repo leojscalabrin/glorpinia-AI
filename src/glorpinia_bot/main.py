@@ -154,8 +154,7 @@ class TwitchIRC:
 
     def send_long_message(self, channel, message, max_length=350, split_delay_sec=2):
         """
-        Envia uma mensagem, dividindo-a com segurança para não estourar os 512 bytes do IRC.
-        Limite reduzido para 350 chars para compensar emojis (que ocupam 4 bytes cada).
+        Envia uma mensagem, dividindo-a com segurança para não estourar 350 bytes
         """
         # Limpeza extra de espaços
         message = message.strip()
@@ -364,7 +363,7 @@ class TwitchIRC:
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)
-                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "commands"]
+                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie"]
                 
                 if command_raw in admin_cmds:
                     if author.lower() in self.admin_nicks:

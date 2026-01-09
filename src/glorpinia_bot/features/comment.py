@@ -23,7 +23,7 @@ class Comment:
             logging.info("[Comment] Desativado.")
 
     def get_status(self):
-        """Retorna o status formatado para o comando !glorp check."""
+        """Retorna o status formatado para o comando *check."""
         status = "ATIVADO" if self.enabled else "DESATIVADO"
         return f"{status}"
 
@@ -39,30 +39,41 @@ class Comment:
         if not self.enabled:
             return
 
+        # VERIFICAÇÃO DE COOLDOWN
+        # Se ainda não passou 20 minutos desde o último comentário, ignora.
         if (time.time() - self.last_comment_time) < self.COOLDOWN_SECONDS:
-            return
+            return 
         
         # Chance fixa de 1%
         if random.random() < 0.01:
             logging.info(f"[Comment] Gatilho atingido por {author}!")
             
+            # Atualiza o timer para evitar disparos duplos
+            self.last_comment_time = time.time()
+            
+            # Premiação (Cookies)
             if self.bot.cookie_system:
                 self.bot.cookie_system.add_cookies(author, 10)
                 logging.info(f"[Comment] {author} ganhou 10 cookies pelo trigger!")
             
+            # Coleta de Contexto
             now = time.time()
             recent_msgs = self.bot.recent_messages.get(channel, None)
+            
             if not recent_msgs:
                 return
 
+            # Pega mensagens dos últimos 2 minutos (120s)
             recent_context = [msg for msg in recent_msgs if now - msg['timestamp'] <= 120]
             
+            # Se tiver muito pouca conversa, pula e não comenta
             if len(recent_context) < 3: 
-                logging.debug(f"[Comment] Gatilho atingido, mas poucas mensagens. Pulando.")
+                logging.debug(f"[Comment] Gatilho atingido, mas poucas mensagens recentes. Pulando.")
                 return
             
             context_str = "\n".join([f"{msg['author']}: {msg['content']}" for msg in recent_context])
             
+            # Dispara a thread de geração
             t = threading.Thread(target=self._generate_comment_thread, 
                                  args=(context_str, channel, self.bot.memory_mgr))
             t.daemon = True

@@ -283,7 +283,7 @@ class GeminiClient:
         generated = re.sub(r'(\*\*ESPACO DE EMOTES\*\*|\*\*ESPACO APRENDIDO\*\*):?.*?\s?', '', generated, flags=re.IGNORECASE | re.DOTALL).strip()
         
         # Remove menções ao sistema (ex: "@system:", "@system", "system:")
-        generated = re.sub(r'@?system[:,\s]*', '', generated, flags=re.IGNORECASE)
+        generated = re.sub(r'@?system\b[:,\s]*', '', generated, flags=re.IGNORECASE)
 
         # Substitui < > por ( ) para não perder roleplays
         generated = generated.replace('<', '(').replace('>', ')')
