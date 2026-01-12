@@ -335,6 +335,10 @@ class TwitchIRC:
                             self.send_message(channel, f"glorp {msg}")
                     return
                 
+                if command_raw == "commands":
+                    self.send_message(channel, "glorp Comandos: *8ball, *cookie, *balance, *empire, *leaderboard, *slots, *help. (Use *help [comando] para detalhes)")
+                    return
+                
                 if command_raw == "help":
                     cmd_target = parts[1].lower() if len(parts) > 1 else ""
                     
