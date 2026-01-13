@@ -16,9 +16,9 @@ class Slots:
             
             # Alto Valor
             "PartyParrot":     {"weight": 40,  "multiplier": 250}, # Triplo Sete
-            "AYAYAjam":     {"weight": 55,  "multiplier": 150}, # 3x BAR
+            "AYAYA":     {"weight": 55,  "multiplier": 150}, # 3x BAR
             "nanaAYAYA":    {"weight": 70,  "multiplier": 100}, # 2x BAR
-            "AYAYA":        {"weight": 90,  "multiplier": 75},  # 1x BAR
+            "KonCha":        {"weight": 90,  "multiplier": 75},  # 1x BAR
             
             # Médio/Baixo Valor
             "EZ":     {"weight": 110, "multiplier": 50},  # Sino
