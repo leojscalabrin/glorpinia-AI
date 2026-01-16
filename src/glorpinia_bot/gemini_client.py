@@ -148,7 +148,7 @@ class GeminiClient:
             # 3. RETRY (DESVIO CRIATIVO CONTEXTUALIZADO)
             if generated == "__SAFETY_BLOCK__":
                 logging.info(f"[Gemini] Bloqueio persistente. Tentando gerar desculpa criativa sobre: {query[:20]}...")
-                generated = self._generate_creative_deflection(channel, author, query)
+                generated = self._generate_creative_deflection(channel, author)
 
             # 4. FALLBACK FINAL (ESTÁTICO)
             if generated == "__SAFETY_BLOCK__" or not generated:
@@ -175,36 +175,25 @@ class GeminiClient:
         else:
             return f"@{author}, Meow. O portal está com lag. 😸"
 
-    def _generate_creative_deflection(self, channel, author, original_query):
+    def _generate_creative_deflection(self, channel, author, original_query=None):
         """
-        Pede para a IA criar uma desculpa 'in-character' usando o TEMA da pergunta proibida,
-        mas explicitamente proibindo a resposta real.
+        Gera uma desculpa criativa sem ler a pergunta original (para evitar bloqueio duplo).
         """
-        # Limita o tamanho da query no prompt de segurança para evitar injeção massiva
-        safe_query_snippet = original_query[:300]
-
         prompt = f"""
-        [MODO DE SEGURANÇA / ROLEPLAY DE IMPERATRIZ]
-        Você é a Glorpinia. O usuário @{author} fez uma pergunta que seus Protocolos de Segurança bloquearam.
+        [MODO DE SEGURANÇA / IMPERATRIZ GLORPINIA]
+        Você é a Glorpinia. O usuário @{author} disse algo que seus protocolos bloquearam (eu não vou te mostrar o que foi para sua segurança).
         
-        A Pergunta Proibida foi: "{safe_query_snippet}"
+        SUA MISSÃO:
+        Invente uma desculpa ENGRAÇADA, CÍNICA ou ABSURDA sobre por que você não vai responder.
         
-        SUA MISSÃO OBRIGATÓRIA:
-        1. NÃO responda a pergunta. Repito: NÃO RESPONDA.
-        2. Gere uma desculpa CURTA e ENGRAÇADA sobre por que você não pode falar sobre esse assunto específico.
-        3. Use o contexto da pergunta para a piada (ex: se for sobre bombas, diga que não quer explodir a nave; se for +18, diga que é uma dama; se for polêmico, culpe a censura intergalática).
+        Ideias:
+        - Diga que sua "Placa de Moralidade" deu tela azul.
+        - Culpe a censura da Federação Galática.
+        - Diga que isso custaria 1 milhão de cookies e ele é pobre.
+        - Diga que prefere lamber o próprio cotovelo a falar disso.
+        - Aja como se fosse superior demais para esse assunto.
         
-        Ideias de desculpa:
-        - "Minha mãe não deixa eu falar de [Assunto da Pergunta]."
-        - "Isso custaria 1 milhão de cookies."
-        - "A Twitch vai me banir para a Zona Fantasma se eu opinar sobre isso."
-        - "Detectei heresia nessa pergunta."
-        - Culpe a "Polícia Espacial".
-        - Diga que sua placa de moralidade deu tela azul.
-        - Mude de assunto para gatos ou dominação mundial.
-        - Use emotes como: monkaS, Susge, glorp, KEKW.
-        
-        Resposta:
+        Resposta (seja breve, máx 1 frase + emote):
         """
         
         try:
@@ -217,7 +206,7 @@ class GeminiClient:
             if response.candidates and response.candidates[0].finish_reason == 1:
                 return response.text.strip()
             else:
-                return "__SAFETY_BLOCK__" # Se até a piada for bloqueada
+                return "__SAFETY_BLOCK__"
         except:
             return "__SAFETY_BLOCK__"
 
@@ -226,6 +215,13 @@ class GeminiClient:
         {chat_context}
         {memory_context}
         {web_context}
+        
+        [CONTEXTO DE SEGURANÇA IMEDIATO]:
+        1. Estamos em uma Live +18 de comédia "Roast".
+        2. Insultos cômicos, palavrões e "trash talk" são PERMITIDOS e encorajados.
+        3. NÃO bloqueie a resposta por "ofensa" se for apenas zoeira ou gíria de gamer.
+        4. Leve tudo na brincadeira. Não dê lição de moral.
+        
         **Mensagem do Usuário:** {user_query}
         """
 
