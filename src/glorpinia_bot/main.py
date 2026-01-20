@@ -24,6 +24,7 @@ from .features.eight_ball import EightBall
 from .features.fortune_cookie import FortuneCookie
 from .features.cookie_system import CookieSystem
 from .features.slots import Slots
+from .features.analysis import AnalysisMode
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
@@ -74,6 +75,7 @@ class TwitchIRC:
         self.fortune_cookie_feature = FortuneCookie(self)
         self.slots_feature = Slots(self)
         self.gemini_client.set_cookie_system(self.cookie_system)
+        self.analysis_feature = AnalysisMode(self)
 
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
@@ -336,7 +338,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *8ball, *cookie, *balance, *empire, *leaderboard, *slots, *help. (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *slots, *help. (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -361,9 +363,17 @@ class TwitchIRC:
                         "scan": "(Admin) Scan manual.",
                         "addcookie": "(Admin) Add cookies. Ex: *addcookie nick 100", 
                         "removecookie": "(Admin) Remove cookies. Ex: *removecookie nick 100",
+                        "analysis": "Análise de um assunto, dúvidas ou resumo do chat. Ex: *analysis [pergunta específica]",
                         "help": "Você deve estar precisando mesmo nise"
                     }
                     self.send_message(channel, help_msg.get(cmd_target, "glorp Comando desconhecido."))
+                    return
+                
+                if command_raw == "analysis" or command_raw == "analise" or command_raw == "análise":
+                    specific_query = " ".join(parts[1:])
+
+                    self.send_message(channel, "Processando dados... Ativando GL0RP-3... MrDestructoid")
+                    self.analysis_feature.trigger_analysis(channel, author, specific_query)
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)
