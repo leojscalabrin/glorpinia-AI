@@ -25,6 +25,7 @@ from .features.fortune_cookie import FortuneCookie
 from .features.cookie_system import CookieSystem
 from .features.slots import Slots
 from .features.analysis import AnalysisMode
+from .features.tarot import TarotReader
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
@@ -76,6 +77,7 @@ class TwitchIRC:
         self.slots_feature = Slots(self)
         self.gemini_client.set_cookie_system(self.cookie_system)
         self.analysis_feature = AnalysisMode(self)
+        self.tarot_feature = TarotReader(self)
 
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
@@ -338,7 +340,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *slots, *help. (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *slots, *fortune, *help. (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -364,7 +366,8 @@ class TwitchIRC:
                         "addcookie": "(Admin) Add cookies. Ex: *addcookie nick 100", 
                         "removecookie": "(Admin) Remove cookies. Ex: *removecookie nick 100",
                         "analysis": "Análise de um assunto, dúvidas ou resumo do chat. Ex: *analysis [pergunta específica]",
-                        "help": "Você deve estar precisando mesmo nise"
+                        "help": "Você deve estar precisando mesmo nise",
+                        "fortune": "Tire uma leitura do seu arcano"
                     }
                     self.send_message(channel, help_msg.get(cmd_target, "glorp Comando desconhecido."))
                     return
@@ -373,6 +376,10 @@ class TwitchIRC:
                     specific_query = " ".join(parts[1:])
 
                     self.analysis_feature.trigger_analysis(channel, author, specific_query)
+                    return
+                
+                if command_raw == "fortune" or command_raw == "tarot":
+                    self.tarot_feature.read_fate(channel, author)
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)
