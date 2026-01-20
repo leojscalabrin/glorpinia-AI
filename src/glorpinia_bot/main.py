@@ -379,7 +379,11 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "fortune" or command_raw == "tarot":
-                    self.tarot_feature.read_fate(channel, author)
+                    target = None
+                    if len(parts) > 1:
+                        target = parts[1]
+                    
+                    self.tarot_feature.read_fate(channel, author, target)
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)

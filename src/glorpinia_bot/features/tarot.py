@@ -13,37 +13,56 @@ class TarotReader:
             "O Julgamento (XX)", "O Mundo (XXI)"
         ]
 
-    def read_fate(self, channel, author):
+    def read_fate(self, channel, requester, target_user=None):
         """
-        Sorteia uma carta e pede para a Glorphelia interpretar.
+        Sorteia uma carta (podendo ser invertida) e pede para a Glorphelia interpretar.
         """
-        # Sorteio Mecânico (Garante aleatoriedade real)
-        card = random.choice(self.major_arcana)
+        subject = target_user.replace("@", "") if target_user else requester
         
-        logging.info(f"[Tarot] {author} tirou a carta: {card}")
-        self.bot.send_message(channel, f"🎴 Embaralhando o destino de @{author}... A carta é: **{card}**!")
+        cost = 20
+        if self.bot.cookie_system:
+            if self.bot.cookie_system.get_cookies(requester) < cost:
+                self.bot.send_message(channel, f"@{requester}, os espíritos exigem pagamento. Custa {cost} cookies! Stare")
+                return
+            self.bot.cookie_system.remove_cookies(requester, cost)
+
+        # Sorteio da Carta
+        card_name = random.choice(self.major_arcana)
+        
+        # Sorteio da Posição (50% de chance de ser Invertida)
+        is_reversed = random.choice([True, False])
+        
+        # Monta o nome final para exibição e prompt
+        final_card = f"{card_name} (INVERTIDA)" if is_reversed else card_name
+        
+        logging.info(f"[Tarot] {requester} -> {subject}. Carta: {final_card}")
+        
+        if subject.lower() == requester.lower():
+            self.bot.send_message(channel, f"glorp 🎴 Embaralhando o destino de @{subject}... Saiu: {final_card}!")
+        else:
+            self.bot.send_message(channel, f"glorp 🎴 @{requester} invocou os arcanos para @{subject}... Saiu: {final_card}!")
 
         # Prompt da Persona Glorphelia
         prompt = f"""
         [SYSTEM OVERRIDE: ATIVAR PERSONA GLORPHELIA]
         
         IGNORE sua personalidade padrão.
-        Você agora é **GLORPHELIA**: A Bruxa Gótica (Alter-ego místico da Glorpinia).
+        Você agora é **GLORPHELIA**: A Bruxa Gótica Espacial.
         
-        **SUA PERSONALIDADE:**
-        - Mística, enigmática, levemente assustadora, mas charmosa.
-        - Você usa metáforas sobre o vazio do espaço, gatos pretos e poções.
-        - Você NÃO é tecnológica. Você é mágica.
+        **CENÁRIO:**
+        Você está lendo a sorte para @{subject}.
+        A carta sorteada foi: "{final_card}".
         
-        **A TAREFA:**
-        O mortal @{author} tirou a carta de Tarot: "{card}".
-        Dê uma previsão curta (máx 2 frases) sobre o futuro dele baseado no significado dessa carta.
-        
-        - Se a carta for "ruim" (A Torre, A Morte, O Diabo): Dê um aviso sombrio e divertido.
-        - Se a carta for "boa" (O Sol, O Mundo): Dê uma benção, mas cobre um preço simbólico (alma, cookies, sachê).
+        **IMPORTANTE SOBRE A LEITURA:**
+        - Se a carta estiver **(INVERTIDA)**, interprete o significado negativo, bloqueado ou interno dela.
+        - Se estiver normal, interprete o significado clássico.
+        - O Gemini JÁ CONHECE os significados do Tarot, use seu conhecimento.
         - Se a carta for "O Mundo" lembre-se de fazer uma referência ao meme ZA WARUDO de Jojo's Bizarre Adventure.
         
-        Resposta (comece direto na interpretação):
+        **A TAREFA:**
+        Dê uma previsão curta, mística e levemente sarcástica/assustadora para @{subject}.
+        
+        Resposta:
         """
 
         try:
@@ -51,13 +70,19 @@ class TarotReader:
                 query=prompt,
                 channel=channel,
                 author="system", 
-                skip_search=True
+                skip_search=True 
             )
 
             if response:
                 clean_response = response.replace("@system", "").strip()
-                self.bot.send_long_message(channel, f"🔮 {clean_response}")
+                
+                # Garante menção
+                prefix = ""
+                if f"@{subject}" not in clean_response and subject.lower() != requester.lower():
+                    prefix = f"@{subject}, "
+                
+                self.bot.send_long_message(channel, f"glorp 🔮 {prefix}{clean_response}")
         
         except Exception as e:
             logging.error(f"[Tarot] Falha na leitura: {e}")
-            self.bot.send_message(channel, "As energias cósmicas estão turbulentas... Tente novamente mais tarde. glorp")
+            self.bot.send_message(channel, "glorp Alguém derrubou suco de uva nas cartas... Tente de novo. ")
