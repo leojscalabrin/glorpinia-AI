@@ -372,7 +372,6 @@ class TwitchIRC:
                 if command_raw == "analysis" or command_raw == "analise" or command_raw == "análise":
                     specific_query = " ".join(parts[1:])
 
-                    self.send_message(channel, "Processando dados... Ativando GL-0RP5... MrDestructoid")
                     self.analysis_feature.trigger_analysis(channel, author, specific_query)
                     return
                 
