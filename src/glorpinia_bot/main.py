@@ -243,6 +243,10 @@ class TwitchIRC:
             if author_lower == self.auth.bot_nick.lower() or author_lower in self.IGNORED_NICKS:
                 return
 
+            if content_lower.startswith("voltei") or content_lower.startswith("cheguei"):
+                self.send_message(channel, "Então to indo nessa pessoal peepoHey")
+                return
+            
             # Salvar no Histórico Recente (Memória de Curto Prazo)
             if channel not in self.recent_messages:
                 self.recent_messages[channel] = deque(maxlen=100)
