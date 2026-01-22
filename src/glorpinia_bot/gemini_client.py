@@ -298,3 +298,22 @@ class GeminiClient:
         generated = generated.replace("```", "").replace("`", "")
 
         return generated.strip()
+    
+    def request_pure_analysis(self, prompt):
+        """
+        Realiza uma solicitação direta ao modelo de análise (Flash, Temp 0.1),
+        ignorando completamente a personalidade da Glorpinia e os desvios de segurança criativos.
+        Ideal para *analysis e ferramentas de utilidade.
+        """
+        try:
+            response = self.analysis_model.generate_content(prompt)
+            
+            if response.candidates and response.candidates[0].finish_reason == 1:
+                return response.text.strip()
+            
+            logging.warning(f"[Analysis] Bloqueio técnico no request_pure_analysis. Reason: {response.candidates[0].finish_reason}")
+            return "**Erro de Processamento:** Meus filtros de segurança impediram a análise deste conteúdo específico. Tente reformular. glorp"
+
+        except Exception as e:
+            logging.error(f"[Analysis] Erro crítico: {e}")
+            return "**Erro de Sistema:** Falha na conexão com o módulo analítico. glorp"

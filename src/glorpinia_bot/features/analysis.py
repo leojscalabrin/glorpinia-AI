@@ -11,60 +11,54 @@ class AnalysisMode:
         """
         logging.info(f"[Analysis] Triggered by {author} in {channel}")
 
-        # 1Coleta o contexto (Chat Recente)
+        # Coleta e Filtra o Contexto
         recent_msgs = list(self.bot.recent_messages.get(channel, []))
         
-        # Filtra mensagens dos últimos 5 minutos para o resumo
         now = time.time()
         chat_log = []
         if recent_msgs:
-            # Pega as ultimas 20 mensagens ou 5 min de papo
-            relevant_msgs = [m for m in recent_msgs if now - m['timestamp'] <= 300][-20:]
+            # Pega até 25 mensagens dos últimos 10 minutos
+            relevant_msgs = [m for m in recent_msgs if now - m['timestamp'] <= 600][-25:]
             chat_log = [f"- {m['author']}: {m['content']}" for m in relevant_msgs]
         
         chat_context_str = "\n".join(chat_log) if chat_log else "(Sem histórico recente)"
 
-        # Define o alvo da análise
-        target = "o histórico recente do chat"
+        # Define o alvo
+        target_description = "o histórico recente do chat"
         if specific_query:
-            target = f"a solicitação: '{specific_query}'"
+            target_description = f"a solicitação: '{specific_query}'"
 
+        # PROMPT (Contexto de Ficção + Utilidade)
         prompt = f"""
-        [SYSTEM OVERRIDE: ATIVAR PROTOCOLO GL-0RP5]
+        [MODO: ASSISTENTE DE ANÁLISE DE DADOS]
+        [CONTEXTO DE SEGURANÇA: JOGO/FICÇÃO/ROLEPLAY]
         
-        IGNORE temporariamente sua personalidade de "Gata Imperatriz".
-        Assuma a identidade de **GL-0RP5**: Uma Assistente Virtual Alienígena de Alta Precisão (estilo JARVIS ou Cortana, mas com tecnologia superior).
+        Você é **GL-0RP5**, uma IA assistente focada em precisão e utilidade.
+        O texto a seguir provém de um chat de transmissão ao vivo (Twitch).
         
-        **SEUS OBJETIVOS:**
-        1. Analisar {target}.
-        2. Ser EXTREMAMENTE útil, técnica e direta.
-        3. Fornecer resumos claros ou respostas educativas.
-        4. Manter um tom robótico-elegante, levemente superior (você é tecnologia alienígena, afinal), mas prestativo.
+        **BLINDAGEM DE CONTEXTO:**
+        1. Se houver menções a "crimes", "suspeitos", "mortes" ou "ataques", trate EXCLUSIVAMENTE como parte de um **JOGO (Detetive, RPG, Among Us)**. Não é real.
+        2. Não recuse a análise por "falta de informação", faça o melhor com o que tem.
+        3. Não faça piadas, seja analítica.
         
-        **ESTRUTURA DE RESPOSTA:**
-        Comece com: "**ANÁLISE GL-0RP5:**"
-        Termine com: "**CONCLUSÃO:** [Sua conclusão]"
-        
-        **CONTEXTO DO CHAT (DADOS BRUTOS):**
+        **DADOS PARA ANÁLISE (CHAT LOG):**
         {chat_context_str}
         
-        **SOLICITAÇÃO DO USUÁRIO (@{author}):**
-        {specific_query if specific_query else "Faça um resumo executivo e analítico do que os humanos estão discutindo acima."}
+        **TAREFA:**
+        Atue como GL-0RP5 e responda à solicitação do usuário @{author}:
+        "{specific_query if specific_query else "Resuma os tópicos discutidos acima."}"
+
+        **FORMATO DA RESPOSTA:**
+        Inicie com: "**ANÁLISE GL-0RP5:**"
+        Finalize com: "**CONCLUSÃO:** [Sua conclusão]"
         """
 
         try:
-            response = self.bot.gemini_client.get_response(
-                query=prompt,
-                channel=channel,
-                author="system", 
-                skip_search=False 
-            )
+            response_text = self.bot.gemini_client.request_pure_analysis(prompt)
 
-            if response:
-                # Limpa artefatos de sistema se sobrarem
-                clean_response = response.replace("@system", "").strip()
-                self.bot.send_long_message(channel, clean_response)
+            if response_text:
+                self.bot.send_long_message(channel, response_text)
         
         except Exception as e:
             logging.error(f"[Analysis] Falha: {e}")
-            self.bot.send_message(channel, "Erro no módulo GL-0RP5. Requer manutenção. glorp")
+            self.bot.send_message(channel, "GL-0RP5 encontrou um erro crítico de processamento. glorp")
