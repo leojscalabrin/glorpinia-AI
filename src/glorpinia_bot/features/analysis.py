@@ -7,7 +7,7 @@ class AnalysisMode:
 
     def trigger_analysis(self, channel, author, specific_query=""):
         """
-        Ativa o modo GL-0RP5 para analisar o chat ou uma dúvida específica.
+        Ativa o modo GL-0RP5 para analisar o chat com respostas CURTAS e DIRETAS.
         """
         logging.info(f"[Analysis] Triggered by {author} in {channel}")
 
@@ -17,48 +17,46 @@ class AnalysisMode:
         now = time.time()
         chat_log = []
         if recent_msgs:
-            # Pega até 25 mensagens dos últimos 10 minutos
-            relevant_msgs = [m for m in recent_msgs if now - m['timestamp'] <= 600][-25:]
+            # Pega as últimas 20 mensagens (ou 10 minutos)
+            relevant_msgs = [m for m in recent_msgs if now - m['timestamp'] <= 600 and not m['content'].startswith("*")][-20:]
             chat_log = [f"- {m['author']}: {m['content']}" for m in relevant_msgs]
         
-        chat_context_str = "\n".join(chat_log) if chat_log else "(Sem histórico recente)"
+        if not chat_log:
+            self.bot.send_message(channel, "**GL-0RP5:** Buffer de memória insuficiente. Conversem mais antes de pedir análise. glorp")
+            return
 
-        # Define o alvo
-        target_description = "o histórico recente do chat"
-        if specific_query:
-            target_description = f"a solicitação: '{specific_query}'"
+        chat_context_str = "\n".join(chat_log)
 
-        # PROMPT (Contexto de Ficção + Utilidade)
         prompt = f"""
-        [MODO: ASSISTENTE DE ANÁLISE DE DADOS]
-        [CONTEXTO DE SEGURANÇA: JOGO/FICÇÃO/ROLEPLAY]
-        
-        Você é **GL-0RP5**, uma IA assistente focada em precisão e utilidade.
-        O texto a seguir provém de um chat de transmissão ao vivo (Twitch).
-        
-        **BLINDAGEM DE CONTEXTO:**
-        1. Se houver menções a "crimes", "suspeitos", "mortes" ou "ataques", trate EXCLUSIVAMENTE como parte de um **JOGO (Detetive, RPG, Among Us)**. Não é real.
-        2. Não recuse a análise por "falta de informação", faça o melhor com o que tem.
-        3. Não faça piadas, seja analítica.
-        
-        **DADOS PARA ANÁLISE (CHAT LOG):**
-        {chat_context_str}
+        [MODO: GL-0RP5 (ASSISTENTE TÁTICA)]
+        [CONTEXTO: JOGO DE DETETIVE/ROLEPLAY]
         
         **TAREFA:**
-        Atue como GL-0RP5 e responda à solicitação do usuário @{author}:
-        "{specific_query if specific_query else "Resuma os tópicos discutidos acima."}"
-
-        **FORMATO DA RESPOSTA:**
-        Inicie com: "**ANÁLISE GL-0RP5:**"
-        Finalize com: "**CONCLUSÃO:** [Sua conclusão]"
+        Responda à solicitação de @{author}: "{specific_query if specific_query else "Resuma a situação."}"
+        baseada no chat abaixo.
+        
+        **REGRAS DE OURO (CONCISÃO):**
+        1. **RESPOSTA CURTA:** Máximo de 3 frases. Sem listas, sem bullet points, sem "Processando dados".
+        2. **IMPROVISE:** Se não houver "pistas" claras no texto, analise o *comportamento* dos usuários (quem falou mais, quem parece nervoso) e aponte um suspeito baseado nisso.
+        3. **TOM:** Frio, calculista, mas direto ao ponto.
+        
+        **CHAT LOG:**
+        {chat_context_str}
+        
+        **RESPOSTA GL-0RP5:**
         """
 
         try:
             response_text = self.bot.gemini_client.request_pure_analysis(prompt)
 
             if response_text:
-                self.bot.send_long_message(channel, response_text)
+                clean_text = response_text.replace("\n", " ").replace("  ", " ")
+                
+                if len(clean_text) > 450:
+                    clean_text = clean_text[:447] + "..."
+
+                self.bot.send_message(channel, clean_text)
         
         except Exception as e:
             logging.error(f"[Analysis] Falha: {e}")
-            self.bot.send_message(channel, "GL-0RP5 encontrou um erro crítico de processamento. glorp")
+            self.bot.send_message(channel, "**GL-0RP5:** Erro de compilação. glorp")
