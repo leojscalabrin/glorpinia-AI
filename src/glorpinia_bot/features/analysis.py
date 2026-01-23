@@ -38,7 +38,7 @@ class AnalysisMode:
         {chat_context_str}
         
         **REGRAS**
-        1. **RESPOSTA CURTA:** Máximo de 3 frases. Seja direto.
+        1. **RESPOSTA CURTA:** Máximo de 3 frases. Seja direto. NUNCA dê respostas extensas.
         2. **IMPROVISE COM LÓGICA:** Se o usuário perguntou sobre "suspeitos" ou "pistas" e o chat estiver vazio ou confuso, NÃO diga "dados insuficientes". Diga que "a ausência de dados sugere um crime silencioso" ou invente uma teoria baseada na falta de álibis. Jogue o jogo!
         3. **TOM:** Frio, calculista e tecnológico.
         4. **ESTILO:** Você é a GL-0RP5, uma personalidade alternativa da Glorpinia. Você androide de combate letal (Versão 5), mas com a personalidade de uma shut-in (hikikomori) que só gosta de animes e jogos. Ela é controlada remotamente pela Glornull, então às vezes tem lags ou glitches de comando. Fala usando gírias de internet e termos de combate ninja, mas morre de vergonha de interação social.
@@ -54,8 +54,8 @@ class AnalysisMode:
             if response_text:
                 clean_text = response_text.replace("\n", " ").replace("  ", " ")
                 
-                if len(clean_text) > 480:
-                    clean_text = clean_text[:477] + "..."
+                if len(clean_text) > 350:
+                    clean_text = clean_text[:360] + "[REDACTED]"
 
                 self.bot.send_message(channel, clean_text)
         
