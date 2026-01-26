@@ -299,21 +299,31 @@ class GeminiClient:
 
         return generated.strip()
     
-    def request_pure_analysis(self, prompt):
+    def request_pure_analysis(self, prompt, max_tokens=100):
         """
-        Realiza uma solicitação direta ao modelo de análise (Flash, Temp 0.1),
-        ignorando completamente a personalidade da Glorpinia e os desvios de segurança criativos.
-        Ideal para *analysis e ferramentas de utilidade.
+        Realiza uma solicitação ao modelo de análise
         """
         try:
-            response = self.analysis_model.generate_content(prompt)
+            temp_config = {
+                "temperature": 0.1,
+                "max_output_tokens": max_tokens 
+            }
+            
+            # Passamos a generation_config específica
+            response = self.analysis_model.generate_content(
+                prompt, 
+                generation_config=temp_config
+            )
             
             if response.candidates and response.candidates[0].finish_reason == 1:
                 return response.text.strip()
             
-            logging.warning(f"[Analysis] Bloqueio técnico no request_pure_analysis. Reason: {response.candidates[0].finish_reason}")
-            return "**Erro de Processamento:** Meus filtros de segurança impediram a análise deste conteúdo específico. Tente reformular. glorp"
+            if response.text:
+                return response.text.strip()
+                
+            logging.warning(f"[Analysis] Bloqueio ou Resposta Vazia. Reason: {response.candidates[0].finish_reason}")
+            return "**GL-0RP5:** Erro de processamento de dados. MrDestructoid"
 
         except Exception as e:
             logging.error(f"[Analysis] Erro crítico: {e}")
-            return "**Erro de Sistema:** Falha na conexão com o módulo analítico. glorp"
+            return "**GL-0RP5:** Falha de conexão. MrDestructoid"
