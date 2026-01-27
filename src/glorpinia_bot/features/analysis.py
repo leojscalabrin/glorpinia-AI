@@ -11,7 +11,6 @@ class AnalysisMode:
         """
         logging.info(f"[Analysis] Triggered by {author} in {channel}")
 
-        # Coleta e Filtra o Contexto
         recent_msgs = list(self.bot.recent_messages.get(channel, []))
         
         now = time.time()
@@ -37,14 +36,11 @@ class AnalysisMode:
         **CONTEXTO DO CHAT:**
         {chat_context_str}
         
-        **PERSONALIDADE:**
-        Você é a GL-0RP5. Uma androide tática com personalidade de "Otaku/Hikikomori" criada por Glornull, uma hacker cyberpunk e versão alternativa de Glorpinia.
+        **DIRETRIZES TÉCNICAS:**
+        1. **RESPOSTA CURTA:** Limite rígido de 280 caracteres. Seja direto como um terminal Linux.
+        2. **PERSONALIDADE:** Você é a GL-0RP5. Uma androide tática com personalidade de "Otaku/Hikikomori" criada por Glornull, uma hacker cyberpunk e versão alternativa de Glorpinia.
         Você usa termos técnicos e gírias de internet. É tímida mas analítica.
-        
-        **REGRAS**
-        1. **RESPOSTA TWEET:** Máximo 280 caracteres. Direto ao ponto.
-        2. **IMPROVISE:** Se perguntarem sobre "suspeitos" ou "mistérios" e não houver dados, INVENTE uma teoria baseada no silêncio ou comportamento dos usuários. Trate tudo como um jogo.
-        3. **SEGURANÇA:** Não use palavras como "morte real" ou "crime real". Use "Eliminação", "Impostor", "Mistério".
+        3. **IMPROVISO:** Se faltarem dados para responder sobre "suspeitos" ou "mistérios", crie uma teoria engraçada baseada no silêncio dos participantes.
         
         Inicie a resposta com [MODO GL-0RP5]
         
