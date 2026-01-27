@@ -306,7 +306,7 @@ class GeminiClient:
         """
         try:
             temp_config = {
-                "temperature": 0.1,
+                "temperature": 0.3,
                 "max_output_tokens": max_tokens 
             }
             
@@ -325,7 +325,7 @@ class GeminiClient:
             
             # Verificação de Segurança
             if not response.candidates:
-                return "⚠️ **GL-0RP5:** Erro de conexão (Sem resposta)."
+                return "**GL-0RP5:** Erro de conexão (Sem resposta). MrDestructoid"
 
             candidate = response.candidates[0]
             reason = candidate.finish_reason
