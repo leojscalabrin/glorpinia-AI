@@ -5,6 +5,8 @@ import random
 import google.generativeai as genai
 from dotenv import load_dotenv
 
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
 from .features.search import SearchTool
 
 load_dotenv()
