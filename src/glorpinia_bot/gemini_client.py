@@ -301,7 +301,8 @@ class GeminiClient:
     
     def request_pure_analysis(self, prompt, max_tokens=100):
         """
-        Realiza uma solicitação ao modelo de análise com tratamento seguro de erros.
+        Realiza uma solicitação ao modelo de análise com tratamento seguro de erros
+        e força as configurações de segurança para BLOCK_NONE.
         """
         try:
             temp_config = {
@@ -309,40 +310,39 @@ class GeminiClient:
                 "max_output_tokens": max_tokens 
             }
             
+            forced_safety = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+            
             response = self.analysis_model.generate_content(
                 prompt, 
-                generation_config=temp_config
+                generation_config=temp_config,
+                safety_settings=forced_safety
             )
             
-            # Verificação de Segurança antes de acessar .text
+            # Verificação de Segurança
             if not response.candidates:
-                return "**GL-0RP5:** Erro de conexão (Sem resposta). MrDestructoid"
+                return "⚠️ **GL-0RP5:** Erro de conexão (Sem resposta)."
 
             candidate = response.candidates[0]
             reason = candidate.finish_reason
 
-            # Reason 1 = STOP
             if reason == 1:
                 return response.text.strip()
             
-            # Reason 3 = MAX_TOKENS
-            if reason == 3:
+            if reason == 3: # Max Tokens (Texto parcial)
                 if candidate.content and candidate.content.parts:
                     return response.text.strip()
             
-            # Reason 2 = SAFETY (Bloqueio de Segurança)
             if reason == 2:
-                logging.warning(f"[Analysis] Bloqueio de Segurança (Reason 2). Prompt considerado perigoso.")
-                return "**GL-0RP5:** Acesso negado. Dados classificados como perigosos pela Conselho. MrDestructoid"
+                logging.warning(f"[Analysis] Bloqueio de Segurança (Reason 2). Prompt: {prompt[:50]}...")
+                return "**GL-0RP5:** Acesso negado. Protocolos de segurança do Conselho impedem essa análise. MrDestructoid"
 
-            # Outros erros
-            logging.warning(f"[Analysis] Finish Reason desconhecido: {reason}")
             return "**GL-0RP5:** Erro de processamento. MrDestructoid"
 
         except Exception as e:
             logging.error(f"[Analysis] Erro crítico: {e}")
             return "**GL-0RP5:** Falha crítica no sistema. MrDestructoid"
-
-        except Exception as e:
-            logging.error(f"[Analysis] Erro crítico: {e}")
-            return "**GL-0RP5:** Falha de conexão. MrDestructoid"
