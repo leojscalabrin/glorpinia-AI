@@ -48,17 +48,23 @@ class AnalysisMode:
            - Para descrever problemas ou indivíduos estranhos: Use "Bug", "Glitch", "Troll", "Lag".
         3. **FORMATO:** Resposta curta (Max 280 chars). Seja direta e técnica.
         
-        Inicie a resposta com: **GL-0RP5:**
+        Inicie a resposta com: **GL-0RP5:** ou algum enfeite dessa forma que reforce o roleplay de programação
         """
 
         try:
-            response_text = self.bot.gemini_client.request_pure_analysis(prompt)
+            response_text = self.bot.gemini_client.request_pure_analysis(prompt, max_tokens=150)
 
             if response_text:
                 clean_text = response_text.replace("\n", " ").replace("  ", " ")
                 
+                # CORTE RÍGIDO DO USUÁRIO (350 caracteres)
                 if len(clean_text) > 350:
-                    clean_text = clean_text[:360] + "[REDACTED]"
+                    clean_text = clean_text[:350]
+                    last_space = clean_text.rfind(" ")
+                    if last_space > 0:
+                        clean_text = clean_text[:last_space] + "..."
+                    else:
+                        clean_text += "..."
 
                 self.bot.send_message(channel, clean_text)
         
