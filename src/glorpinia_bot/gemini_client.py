@@ -5,8 +5,6 @@ import random
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
-
 from .features.search import SearchTool
 
 load_dotenv()
@@ -304,52 +302,62 @@ class GeminiClient:
     def request_pure_analysis(self, prompt, max_tokens=200):
         """
         Realiza uma solicitação ao modelo de análise.
+        Versão 'ROBUSTA' usando strings puras para garantir compatibilidade.
         """
         try:
-            # 1. Configuração de Geração (Tokens e Temperatura)
             temp_config = {
                 "temperature": 0.4, 
                 "max_output_tokens": max_tokens 
             }
 
-            # 2. SEGURANÇA (Usando Enums Oficiais)
-            forced_safety = {
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            }
+            forced_safety = [
+                {
+                    "category": "HARM_CATEGORY_HARASSMENT",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_HATE_SPEECH",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    "threshold": "BLOCK_NONE"
+                }
+            ]
             
-            # Chamada
+            logging.info(f"[Analysis] Enviando request com MAX_TOKENS={max_tokens} e BLOCK_NONE.")
+
             response = self.analysis_model.generate_content(
                 prompt, 
                 generation_config=temp_config,
                 safety_settings=forced_safety
             )
             
-            # Tratamento de Erros e Retorno
             if not response.candidates:
-                return "MrDestructoid **GL-0RP5:** Erro de conexão (Sem resposta)."
+                logging.error("[Analysis] Erro: Sem candidatos na resposta.")
+                return "MrDestructoid **GL-0RP5:** Erro de conexão (Vazio)."
 
             candidate = response.candidates[0]
             reason = candidate.finish_reason
 
-            # Sucesso (1) ou Corte por Tamanho (3)
+            logging.info(f"[Analysis] Finish Reason: {reason}")
+
+            # 1 = STOP, 3 = MAX_TOKENS
             if reason == 1 or reason == 3:
                 if candidate.content and candidate.content.parts:
                     return response.text.strip()
             
-            # Bloqueio de Segurança (2)
+            # 2 = SAFETY (Bloqueio)
             if reason == 2:
-                logging.warning(f"[Analysis] Bloqueio Reason 2 persistente. Prompt: {prompt[:50]}...")
-                return "MrDestructoid **GL-0RP5:** *Acesso Negado.* (Filtro Rígido Ativado)."
+                logging.warning(f"[Analysis] BLOQUEIO REASON 2. As configs de segurança foram ignoradas pela API.")
+                return "MrDestructoid **GL-0RP5:** *Acesso Negado.* (Erro de Configuração de API)."
 
             return f"MrDestructoid **GL-0RP5:** Erro desconhecido ({reason})."
 
         except Exception as e:
-            logging.error(f"[Analysis] Erro crítico: {e}")
-            return "MrDestructoid **GL-0RP5:** Falha crítica no sistema."
-
-        except Exception as e:
-            logging.error(f"[Analysis] Erro crítico: {e}")
+            logging.error(f"[Analysis] Erro crítico no request: {e}")
             return "MrDestructoid **GL-0RP5:** Falha crítica no sistema."
