@@ -318,7 +318,7 @@ class GeminiClient:
             }
 
             fresh_model = genai.GenerativeModel(
-                model_name="gemini-flash-latest",
+                model_name="gemini-pro-latest",
                 safety_settings=safety_settings,
                 generation_config=generation_config
             )
