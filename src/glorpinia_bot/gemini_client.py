@@ -299,52 +299,30 @@ class GeminiClient:
 
         return generated.strip()
     
-    def request_pure_analysis(self, prompt, max_tokens=150):
+    def request_pure_analysis(self, prompt):
         """
-        Realiza uma solicitação recriando o cliente do modelo para garantir
-        que as configurações de segurança (BLOCK_NONE) sejam aplicadas na raiz.
+        Realiza uma solicitação ao modelo de análise
         """
         try:
-            safety_settings = [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-            ]
-
-            generation_config = {
-                "temperature": 0.4,
-                "max_output_tokens": max_tokens
-            }
-
-            fresh_model = genai.GenerativeModel(
-                model_name="gemini-pro-latest",
-                safety_settings=safety_settings,
-                generation_config=generation_config
-            )
-
-            logging.info(f"[Analysis] Gerando com modelo dedicado (Safety: BLOCK_NONE)...")
-
-            response = fresh_model.generate_content(prompt)
+            logging.info("[Analysis] Solicitando análise (Modo Livre)...")
+            
+            response = self.analysis_model.generate_content(prompt)
 
             if not response.candidates:
-                return "MrDestructoid **GL-0RP5:** Erro de conexão (Sem resposta)."
+                return "MrDestructoid **GL-0RP5:** Sem resposta. Comentário adicional: sem comentários"
 
             candidate = response.candidates[0]
             reason = candidate.finish_reason
 
-            # 1=Stop, 3=MaxTokens
-            if reason == 1 or reason == 3:
-                if candidate.content and candidate.content.parts:
-                    return response.text.strip()
+            if reason == 1:
+                return response.text.strip()
             
-            # 2=Safety
             if reason == 2:
-                logging.warning(f"[Analysis] Bloqueio Reason 2 com modelo dedicado.")
-                return "MrDestructoid **GL-0RP5:** *Acesso Negado.* (Erro de Nível de Conta)."
+                logging.warning(f"[Analysis] Bloqueio de Segurança Padrão.")
+                return "⚠️ **GL-0RP5:** *Acesso Negado.* Comentário adicional: seje menos."
 
             return f"MrDestructoid **GL-0RP5:** Erro desconhecido ({reason})."
 
         except Exception as e:
             logging.error(f"[Analysis] Erro crítico: {e}")
-            return "MrDestructoid **GL-0RP5:** Falha crítica no sistema."
+            return "MrDestructoid **GL-0RP5:** Falha crítica. Comentário adicional: deu ruim paizão"
