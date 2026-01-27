@@ -301,7 +301,7 @@ class GeminiClient:
     
     def request_pure_analysis(self, prompt, max_tokens=100):
         """
-        Realiza uma solicitação ao modelo de análise
+        Realiza uma solicitação ao modelo de análise com tratamento seguro de erros.
         """
         try:
             temp_config = {
@@ -309,20 +309,39 @@ class GeminiClient:
                 "max_output_tokens": max_tokens 
             }
             
-            # Passamos a generation_config específica
             response = self.analysis_model.generate_content(
                 prompt, 
                 generation_config=temp_config
             )
             
-            if response.candidates and response.candidates[0].finish_reason == 1:
+            # Verificação de Segurança antes de acessar .text
+            if not response.candidates:
+                return "**GL-0RP5:** Erro de conexão (Sem resposta). MrDestructoid"
+
+            candidate = response.candidates[0]
+            reason = candidate.finish_reason
+
+            # Reason 1 = STOP
+            if reason == 1:
                 return response.text.strip()
             
-            if response.text:
-                return response.text.strip()
-                
-            logging.warning(f"[Analysis] Bloqueio ou Resposta Vazia. Reason: {response.candidates[0].finish_reason}")
-            return "**GL-0RP5:** Erro de processamento de dados. MrDestructoid"
+            # Reason 3 = MAX_TOKENS
+            if reason == 3:
+                if candidate.content and candidate.content.parts:
+                    return response.text.strip()
+            
+            # Reason 2 = SAFETY (Bloqueio de Segurança)
+            if reason == 2:
+                logging.warning(f"[Analysis] Bloqueio de Segurança (Reason 2). Prompt considerado perigoso.")
+                return "**GL-0RP5:** Acesso negado. Dados classificados como perigosos pela Conselho. MrDestructoid"
+
+            # Outros erros
+            logging.warning(f"[Analysis] Finish Reason desconhecido: {reason}")
+            return "**GL-0RP5:** Erro de processamento. MrDestructoid"
+
+        except Exception as e:
+            logging.error(f"[Analysis] Erro crítico: {e}")
+            return "**GL-0RP5:** Falha crítica no sistema. MrDestructoid"
 
         except Exception as e:
             logging.error(f"[Analysis] Erro crítico: {e}")
