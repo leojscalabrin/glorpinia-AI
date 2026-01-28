@@ -38,7 +38,7 @@ class MemoryManager:
         if not force_sqlite and GoogleGenerativeAIEmbeddings is not None and FAISS is not None:
             try:
                 # Usa o embedding da Google, que usa a mesma API_KEY do .env
-                self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+                self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-004")
                 self._use_faiss = True
                 logging.info("[GLORP-MEMORY] FAISS/RAG ATIVADO (usando Google Embeddings).")
             except Exception as e:
