@@ -16,7 +16,7 @@ def migrate_memories():
         return
 
     try:
-        new_embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+        new_embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
         logging.info("Novo modelo (text-embedding-004) inicializado.")
     except Exception as e:
         logging.error(f"Erro ao iniciar API do Google: {e}")
@@ -73,6 +73,6 @@ def migrate_memories():
     logging.info(f"Migração concluída! {success_count}/{len(rows)} arquivos atualizados.")
 
 if __name__ == "__main__":
-    print("--- INICIANDO MIGRAÇÃO DE MEMÓRIA (v001 -> v004) ---")
+    print("--- INICIANDO MIGRAÇÃO DE MEMÓRIA ---")
     print("Isso pode levar alguns minutos dependendo do tamanho do histórico.")
     migrate_memories()
