@@ -47,7 +47,7 @@ class GeminiClient:
         ]
 
         self.analysis_model = genai.GenerativeModel(
-            model_name="gemini-flash-latest",
+            model_name="gemini-flash-preview",
             generation_config={"temperature": 0.1},
             safety_settings=self.safety_settings
         )
@@ -89,7 +89,7 @@ class GeminiClient:
             logging.debug(f"[Gemini] Nenhum perfil específico encontrado para {channel_name}. Usando base.")
 
         new_model = genai.GenerativeModel(
-            model_name="gemini-flash-latest", 
+            model_name="gemini-flash-preview", 
             generation_config=self.generation_config,
             safety_settings=self.safety_settings,
             system_instruction=final_instruction
