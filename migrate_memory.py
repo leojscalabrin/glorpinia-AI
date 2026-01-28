@@ -1,10 +1,12 @@
 import os
 import sqlite3
 import logging
+import time
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from dotenv import load_dotenv
 
+# Configuração
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -17,7 +19,7 @@ def migrate_memories():
 
     try:
         new_embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
-        logging.info("Novo modelo (text-embedding-004) inicializado.")
+        logging.info("Modelo (gemini-embedding-001) inicializado.")
     except Exception as e:
         logging.error(f"Erro ao iniciar API do Google: {e}")
         return
@@ -32,47 +34,43 @@ def migrate_memories():
         return
     conn.close()
 
-    logging.info(f"Encontrados {len(rows)} arquivos de memória para migrar...")
+    logging.info(f"Encontrados {len(rows)} arquivos...")
 
     success_count = 0
     
     for row in rows:
         path = row[0]
         if not os.path.exists(path):
-            logging.warning(f"Arquivo não encontrado (pulando): {path}")
             continue
 
         logging.info(f"Migrando: {path}...")
 
         try:
-            old_vectorstore = FAISS.load_local(
-                path, 
-                embeddings=None, 
-                allow_dangerous_deserialization=True
-            )
-
+            old_vectorstore = FAISS.load_local(path, embeddings=None, allow_dangerous_deserialization=True)
+            
             raw_docs = list(old_vectorstore.docstore._dict.values())
             texts = [doc.page_content for doc in raw_docs]
             
             if not texts:
-                logging.warning(f"Arquivo vazio ou sem texto recuperável: {path}")
                 continue
 
-            logging.info(f"  -> Re-processando {len(texts)} memórias com o novo modelo...")
-
             new_vectorstore = FAISS.from_texts(texts, new_embeddings)
-
             new_vectorstore.save_local(path)
             
             success_count += 1
             logging.info(f"  -> Sucesso! {path} atualizado.")
+            
+            logging.info("  -> Esperando 10 segundos para resfriar a API...")
+            time.sleep(10) 
 
         except Exception as e:
-            logging.error(f"  -> Falha ao migrar {path}: {e}")
+            if "429" in str(e):
+                logging.error(f"  -> ERRO DE QUOTA (429). Esperando 60 segundos antes de continuar...")
+                time.sleep(60)
+            else:
+                logging.error(f"  -> Falha ao migrar {path}: {e}")
 
     logging.info(f"Migração concluída! {success_count}/{len(rows)} arquivos atualizados.")
 
 if __name__ == "__main__":
-    print("--- INICIANDO MIGRAÇÃO DE MEMÓRIA ---")
-    print("Isso pode levar alguns minutos dependendo do tamanho do histórico.")
     migrate_memories()
