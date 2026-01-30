@@ -26,6 +26,7 @@ from .features.cookie_system import CookieSystem
 from .features.slots import Slots
 from .features.analysis import AnalysisMode
 from .features.tarot import TarotReader
+from .features.rpg_roll import RPGRollFeature
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
 
@@ -78,6 +79,7 @@ class TwitchIRC:
         self.gemini_client.set_cookie_system(self.cookie_system)
         self.analysis_feature = AnalysisMode(self)
         self.tarot_feature = TarotReader(self)
+        self.rpg_feature = RPGRollFeature(self)
 
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
@@ -388,6 +390,12 @@ class TwitchIRC:
                         target = parts[1]
                     
                     self.tarot_feature.read_fate(channel, author, target)
+                    return
+                
+                if content.startswith("*roll") or content.startswith("*d20"):
+                    query = content.replace("*roll", "").replace("*d20", "").strip()
+
+                    self.rpg_feature.trigger_roll(channel, author, query)
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)

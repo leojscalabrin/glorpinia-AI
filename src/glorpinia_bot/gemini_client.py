@@ -326,3 +326,34 @@ class GeminiClient:
         except Exception as e:
             logging.error(f"[Analysis] Erro crítico: {e}")
             return "MrDestructoid **GL-0RP5:** Falha crítica. Comentário adicional: deu ruim paizão"
+
+    def request_rpg_narration(self, prompt):
+        """
+        Gera uma narração de RPG rápida com a persona Gloriana.
+        """
+        try:
+            generation_config = {
+                "temperature": 0.8,
+                "max_output_tokens": 150
+            }
+            
+            forced_safety = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+
+            response = self.analysis_model.generate_content(
+                prompt,
+                generation_config=generation_config,
+                safety_settings=forced_safety
+            )
+
+            if response.text:
+                return response.text.strip()
+            return "A barda esqueceu a letra da música..."
+
+        except Exception as e:
+            logging.error(f"[RPG Client] Erro: {e}")
+            return "A barda bebeu demais e desmaiou."
