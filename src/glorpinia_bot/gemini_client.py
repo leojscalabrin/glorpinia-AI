@@ -329,12 +329,12 @@ class GeminiClient:
 
     def request_rpg_narration(self, prompt):
         """
-        Gera uma narração de RPG rápida com a persona Gloriana.
+        Gera narração RPG com tratamento robusto de erros e segurança.
         """
         try:
             generation_config = {
-                "temperature": 0.8,
-                "max_output_tokens": 150
+                "temperature": 0.85, 
+                "max_output_tokens": 200 
             }
             
             forced_safety = [
@@ -350,9 +350,25 @@ class GeminiClient:
                 safety_settings=forced_safety
             )
 
-            if response.text:
-                return response.text.strip()
-            return "A barda esqueceu a letra da música..."
+            if not response.candidates:
+                return "*afinando o alaúde* (Erro de conexão)..."
+
+            candidate = response.candidates[0]
+            reason = candidate.finish_reason
+
+            if reason == 1 or reason == 3:
+                if candidate.content and candidate.content.parts:
+                    return response.text.strip()
+            
+            if reason == 2:
+                logging.warning(f"[RPG] Bloqueio (Reason 2). A narrativa foi censurada.")
+                return "As lendas sobre este feito são proibidas pelos Deuses do Conteúdo!"
+
+            return "A barda esqueceu a letra da música."
+
+        except Exception as e:
+            logging.error(f"[RPG Client] Erro: {e}")
+            return "A barda bebeu demais e desmaiou no palco."
 
         except Exception as e:
             logging.error(f"[RPG Client] Erro: {e}")
