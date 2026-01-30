@@ -373,7 +373,8 @@ class TwitchIRC:
                         "removecookie": "(Admin) Remove cookies. Ex: *removecookie nick 100",
                         "analysis": "Análise de um assunto, dúvidas ou resumo do chat. Ex: *analysis [pergunta específica]",
                         "help": "Você deve estar precisando mesmo nise",
-                        "fortune": "Tire uma leitura do seu arcano"
+                        "fortune": "Tire uma leitura do seu arcano",
+                        "roll": "Rolar um D20 para RPG com narração temática. Ex: *roll [ação desejada]"
                     }
                     self.send_message(channel, help_msg.get(cmd_target, "glorp Comando desconhecido."))
                     return
@@ -392,8 +393,8 @@ class TwitchIRC:
                     self.tarot_feature.read_fate(channel, author, target)
                     return
                 
-                if content.startswith("*roll") or content.startswith("*d20"):
-                    query = content.replace("*roll", "").replace("*d20", "").strip()
+                if command_raw == "roll" or command_raw == "d20":
+                    query = " ".join(parts[1:]) if len(parts) > 1 else ""
 
                     self.rpg_feature.trigger_roll(channel, author, query)
                     return
@@ -481,7 +482,7 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: check, scan, 8ball, cookie, balance, empire, leaderboard, slots, help, chat/listen/comment [on/off], addcookie/removecookie [nick] [valor]")
+                self.send_message(channel, "glorp Comandos: check, scan, 8ball, cookie, balance, empire, leaderboard, slots, help, fortune, analysis, roll, chat/listen/comment [on/off], addcookie/removecookie [nick] [valor]")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)
