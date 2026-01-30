@@ -333,8 +333,7 @@ class GeminiClient:
         """
         try:
             generation_config = {
-                "temperature": 0.85, 
-                "max_output_tokens": 200 
+                "temperature": 0.8, 
             }
             
             forced_safety = [
@@ -356,12 +355,11 @@ class GeminiClient:
             candidate = response.candidates[0]
             reason = candidate.finish_reason
 
-            if reason == 1 or reason == 3:
-                if candidate.content and candidate.content.parts:
-                    return response.text.strip()
+            if reason == 1:
+                return response.text.strip()
             
             if reason == 2:
-                logging.warning(f"[RPG] Bloqueio (Reason 2). A narrativa foi censurada.")
+                logging.warning(f"[RPG] Bloqueio (Reason 2).")
                 return "As lendas sobre este feito são proibidas pelos Deuses do Conteúdo!"
 
             return "A barda esqueceu a letra da música."

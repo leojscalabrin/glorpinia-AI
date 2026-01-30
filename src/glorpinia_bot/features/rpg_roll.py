@@ -14,20 +14,20 @@ class RPGRollFeature:
 
         d20_result = random.randint(1, 20)
         
-        # Determina o status do resultado para guiar a IA
         if d20_result == 20:
-            status = "SUCESSO CRÍTICO (NAT 20) - Feito Lendário/Divino"
+            status = "SUCESSO CRÍTICO (NAT 20) - Feito Lendário"
             emoji = "🔥🐲"
         elif d20_result == 1:
-            status = "FALHA CRÍTICA (NAT 1) - Desastre Humilhante/Cômico"
+            status = "FALHA CRÍTICA (NAT 1) - Desastre Cômico"
             emoji = "💀🤡"
         elif d20_result >= 10:
-            status = "Sucesso - O herói conseguiu"
+            status = "Sucesso"
             emoji = "⚔️"
         else:
-            status = "Falha - O herói tentou e falhou"
+            status = "Falha"
             emoji = "🍃"
 
+        # Contexto
         context_str = ""
         if not action_query:
             recent_msgs = list(self.bot.recent_messages.get(channel, []))
@@ -36,34 +36,27 @@ class RPGRollFeature:
                 relevant_msgs = [m for m in recent_msgs if now - m['timestamp'] <= 300][-5:]
                 chat_log = [f"- {m['author']}: {m['content']}" for m in relevant_msgs]
                 context_str = "\n".join(chat_log)
-                action_query = "Realizar uma ação baseada no contexto atual da conversa."
+                action_query = "Realizar uma ação baseada no contexto atual."
         
+        # Prompt
         prompt = f"""
-        [MODO: GLORIANA (A BARDA / MESTRE DE RPG)]
-        [AMBIENTE: TAVERNA MEDIEVAL / FANTASIA]
+        [MODO: GLORIANA (A BARDA)]
+        [CONTEXTO: TAVERNA RPG / HUMOR]
 
-        **O JOGADOR:** @{author}
-        **A AÇÃO TENTADA:** "{action_query}"
-        **RESULTADO DO DADO (D20):** {d20_result}
-        **VEREDITO DO DESTINO:** {status}
+        **JOGADOR:** @{author}
+        **AÇÃO:** "{action_query}"
+        **DADO:** {d20_result} ({status})
 
-        **CONTEXTO RECENTE (OPCIONAL):**
+        **CONTEXTO CHAT (OPCIONAL):**
         {context_str}
 
         **SUA TAREFA:**
-        Como Gloriana, a Barda, narre o resultado dessa rolagem.
-        1. **SE FOI 20:** Narre um feito épico, exagerado, quase divino.
-        2. **SE FOI 1:** Narre um desastre engraçado (tropeçou, quebrou o alaúde, o monstro riu).
-        3. **NORMAL:** Narre a ação dando certo ou errado de forma dramática.
-
-        **PERSONALIDADE:** - Você toca um alaúde desafinado.
-        - Tente fazer uma rima ruim ou usar palavras arcaicas ("Vós", "Deveras", "Maldito Goblin").
-        - Trate o chat como uma Taverna.
-
-        **REGRAS:**
-        - Resposta CURTA (Máx 250 caracteres).
-        - NÃO explique as regras, vá direto para a narração.
-        - Use emojis de RPG.
+        Narre o resultado desta ação como Gloriana.
+        - Se foi 20: Épico e exagerado.
+        - Se foi 1: Desastre engraçado.
+        - Tente fazer rimas ruins ou usar linguagem arcaica.
+        
+        **SEGURANÇA:** Descreva combates de forma fantasiosa e limpa).
 
         **RESPOSTA GLORIANA:**
         """
@@ -71,15 +64,21 @@ class RPGRollFeature:
         try:
             narrative = self.bot.gemini_client.request_rpg_narration(prompt)
             
-            narrative = narrative.replace("\n", " ").strip()
-            if len(narrative) > 380:
-                narrative = narrative[:380] + "..."
+            # Limpeza
+            clean_text = narrative.replace("\n", " ").replace("  ", " ").strip()
 
-            # Monta a mensagem final: Resultado Numérico + Narração
-            final_msg = f"🎲 **{d20_result}** {emoji} | {narrative}"
-            
+            MAX_CHARS = 350
+            if len(clean_text) > MAX_CHARS:
+                cut_text = clean_text[:MAX_CHARS]
+                last_space = cut_text.rfind(" ")
+                if last_space > 0:
+                    clean_text = cut_text[:last_space] + "..."
+                else:
+                    clean_text = cut_text + "..."
+
+            final_msg = f"🎲 **{d20_result}** {emoji} | {clean_text}"
             self.bot.send_message(channel, final_msg)
 
         except Exception as e:
             logging.error(f"[RPG] Erro: {e}")
-            self.bot.send_message(channel, f"🎲 **{d20_result}** | *Gloriana derrubou o alaúde e não conseguiu narrar.* (Erro de sistema)")
+            self.bot.send_message(channel, f"🎲 **{d20_result}** | *A barda engasgou com hidromel.*")
