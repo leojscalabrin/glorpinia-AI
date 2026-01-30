@@ -54,10 +54,11 @@ class RPGRollFeature:
         Narre o resultado desta ação como Gloriana.
         - Se foi 20: Épico e exagerado.
         - Se foi 1: Desastre engraçado.
-        - Tente fazer rimas ruins ou usar linguagem arcaica.
+        - Usar linguagem arcaica
+        - Equilibrar entre 20 e 1 para sucesso e falha normais.
+        - Incluir humor leve e referências medievais.
+        - Ser breve: máximo 3 a 4 frases.
         
-        **SEGURANÇA:** Descreva combates de forma fantasiosa e limpa).
-
         **RESPOSTA GLORIANA:**
         """
 
