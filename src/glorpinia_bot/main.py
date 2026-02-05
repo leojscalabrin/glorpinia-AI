@@ -283,19 +283,21 @@ class TwitchIRC:
                     return
 
                 if command_raw == "slots":
-                    # Verifica se o canal atual está marcado como ONLINE no cache
                     if self.live_status.get(channel, False):
-                        # Se estiver online, simplesmente ignora o comando (return)
                         self.send_message(channel, f"@{author} O KASSINÃO está fechado durante a live Stare")
                         return
 
                     if self.slots_feature:
                         bet = 10
                         if len(parts) > 1:
-                            try:
-                                bet = int(parts[1])
-                            except ValueError:
-                                pass
+                            if parts[1].lower() == "all":
+                                bet = "all"
+                            else:
+                                try:
+                                    bet = int(parts[1])
+                                except ValueError:
+                                    pass
+                        
                         result = self.slots_feature.play(channel, author, bet)
                         self.send_message(channel, result)
                     return

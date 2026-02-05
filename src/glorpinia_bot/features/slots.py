@@ -64,9 +64,9 @@ class Slots:
             logging.error(f"[Slots] Erro ao conectar na API Twitch: {e}")
             return False
 
-    def play(self, channel, user, bet_amount):
+    def play(self, channel, user, bet_input):
         """
-        Executa uma rodada de slots.
+        Executa uma rodada de slots aceitando valor numérico ou 'all'.
         """
         if not self.bot.cookie_system:
             return "O sistema de cookies está offline. Sadge"
@@ -86,17 +86,21 @@ class Slots:
             seconds = remaining % 60
             return f"@{user}, o cassino está limpando as máquinas! Volte em {minutes}m {seconds}s. GAMBA"
 
-        # Valida a Aposta
+        user_balance = self.bot.cookie_system.get_cookies(user)
+
         try:
-            bet_amount = int(bet_amount)
+            if str(bet_input).lower() == "all":
+                bet_amount = user_balance
+            else:
+                bet_amount = int(bet_input)
+            
             if bet_amount < 10:
                 return f"@{user}, a aposta mínima é 10 cookies! glorp"
         except ValueError:
-            return f"@{user}, valor de aposta inválido! Use: !glorp slots [valor]"
+            return f"@{user}, valor de aposta inválido! Use: *slots [valor] ou *slots all"
 
         # Verifica Saldo
-        user_balance = self.bot.cookie_system.get_cookies(user)
-        if user_balance < bet_amount:
+        if user_balance < bet_amount or user_balance <= 0:
             return f"@{user}, você não tem cookies suficientes! Saldo: {user_balance} 🍪. poor"
 
         self.cooldowns[user] = now
