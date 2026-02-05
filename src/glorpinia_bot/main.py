@@ -400,7 +400,7 @@ class TwitchIRC:
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)
-                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie"]
+                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check"]
                 
                 if command_raw in admin_cmds:
                     if author.lower() in self.admin_nicks:
@@ -482,7 +482,7 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: check, scan, 8ball, cookie, balance, empire, leaderboard, slots, help, fortune, analysis, roll, chat/listen/comment [on/off], addcookie/removecookie [nick] [valor]")
+                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, slots, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], check, scan")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)

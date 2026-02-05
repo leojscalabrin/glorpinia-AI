@@ -1,5 +1,6 @@
 import random
 import logging
+import time
 
 class TarotReader:
     def __init__(self, bot):
@@ -33,7 +34,7 @@ class TarotReader:
         is_reversed = random.choice([True, False])
         
         # Monta o nome final para exibição e prompt
-        final_card = f"{card_name} (INVERTIDA)" if is_reversed else card_name
+        final_card = f"{card_name} (INVERTIDO)" if is_reversed else card_name
         
         logging.info(f"[Tarot] {requester} -> {subject}. Carta: {final_card}")
         
@@ -42,7 +43,8 @@ class TarotReader:
         else:
             self.bot.send_message(channel, f"glorp 🎴 @{requester} invocou os arcanos para @{subject}... Saiu: {final_card}!")
 
-        # Prompt da Persona Glorphelia
+        time.sleep(2.0)
+        
         prompt = f"""
         [SYSTEM OVERRIDE: ATIVAR PERSONA GLORPHELIA]
         
