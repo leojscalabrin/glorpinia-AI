@@ -458,7 +458,11 @@ class TwitchIRC:
                     self.last_oziell_time = now
                     self.send_message(channel, "Olá @oziell ! Tudo bem @oziell ? Tchau @oziell !")
                 return 
-
+            
+            if "thomezord fiddy" in content_lower:
+                self.send_message(channel, "thomezord Fiddy")
+                return
+        
             # Duplicatas (Log Anti-Spam do console)
             unique_id = f"{author}-{channel}-{content}"
             msg_hash = hash(unique_id)
