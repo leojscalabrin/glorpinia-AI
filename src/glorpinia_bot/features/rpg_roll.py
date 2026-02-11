@@ -57,7 +57,7 @@ class RPGRollFeature:
         - Usar linguagem arcaica
         - Equilibrar entre 20 e 1 para sucesso e falha normais.
         - Incluir humor leve e referências medievais.
-        - Ser breve: máximo 3 a 4 frases. Levando em consideração o máximo de caracteres de 400 do chat da twitch.
+        - Ser breve: máximo 3 a 4 frases. Levando em consideração o máximo de caracteres de 300 do chat da twitch.
         
         **RESPOSTA GLORIANA:**
         """
