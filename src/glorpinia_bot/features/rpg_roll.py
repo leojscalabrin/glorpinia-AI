@@ -57,7 +57,7 @@ class RPGRollFeature:
         - Usar linguagem arcaica
         - Equilibrar entre 20 e 1 para sucesso e falha normais.
         - Incluir humor leve e referências medievais.
-        - Ser breve: máximo 3 a 4 frases. Levando em consideração o máximo de caracteres de 300 do chat da twitch.
+        - Ser breve: máximo 3 a 4 frases. NUNCA passar de 350 caracteres por resposta.
         
         **RESPOSTA GLORIANA:**
         """
@@ -68,7 +68,7 @@ class RPGRollFeature:
             # Limpeza
             clean_text = narrative.replace("\n", " ").replace("  ", " ").strip()
 
-            MAX_CHARS = 350
+            MAX_CHARS = 450
             if len(clean_text) > MAX_CHARS:
                 cut_text = clean_text[:MAX_CHARS]
                 last_space = cut_text.rfind(" ")
