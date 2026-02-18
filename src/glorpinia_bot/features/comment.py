@@ -73,26 +73,38 @@ class Comment:
             
             context_str = "\n".join([f"{msg['author']}: {msg['content']}" for msg in recent_context])
             
+            # Extrai lista de usuários únicos ativos para passar ao prompt
+            active_users = list(set([msg['author'] for msg in recent_context]))
+
             # Dispara a thread de geração
             t = threading.Thread(target=self._generate_comment_thread, 
-                                 args=(context_str, channel, self.bot.memory_mgr))
+                                 args=(context_str, channel, self.bot.memory_mgr, active_users))
             t.daemon = True
             t.start()
             
     
-    def _generate_comment_thread(self, context_str: str, channel: str, memory_mgr):
+    def _generate_comment_thread(self, context_str: str, channel: str, memory_mgr, active_users: list):
         """
         Thread que chama a IA (2 passagens), para não travar a 'on_message'.
         """
         try:
-            # 1. PASSAGEM 1: Sumarizar o log do chat
+            # Sumarizar o log do chat
             topic = self.bot.gemini_client.summarize_chat_topic(context_str)
 
             if not topic or topic == "assuntos aleatórios":
                 return
 
-            # 2. PASSAGEM 2: Comentar sobre o tópico
-            comment_query = f"O chat está falando sobre: '{topic}'. Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto."
+            # Formata a lista de usuários para o prompt
+            users_str = ", ".join(active_users)
+
+            comment_query = (
+                f"O chat está falando sobre: '{topic}'. "
+                f"Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto. "
+                f"Use estritamente os Emotes da sua lista (não invente emotes).\n\n"
+                f"Se quiser usar o sistema de Cookies para punir ou premiar alguém por uma opinião no contexto, "
+                f"os ÚNICOS usuários válidos presentes agora são: [{users_str}]. "
+                f"NÃO use cookies em 'user', 'system' ou pessoas fora dessa lista."
+            )
 
             comment = self.bot.gemini_client.get_response(
                 query=comment_query,
@@ -102,8 +114,13 @@ class Comment:
                 skip_search=True
             )
             
-            if 0 < len(comment) <= 200:
-                self.bot.send_message(channel, comment)
-                logging.debug(f"[Comment] Comentario enviado em {channel}: {comment[:50]}...")
+            if 0 < len(comment) <= 350:
+                if self.bot.cookie_system:
+                    final_message = self.bot.cookie_system.process_ai_response(comment)
+                else:
+                    final_message = comment
+
+                self.bot.send_message(channel, final_message)
+                logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:50]}...")
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
