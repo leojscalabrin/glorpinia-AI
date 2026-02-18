@@ -21,23 +21,36 @@ class EightBall:
         t.daemon = True
         t.start()
 
-    def _build_prompt(self, question: str) -> str:
+    def _build_prompt(self, question: dict) -> str:
         """
-        Cria o "meta-prompt" que força o Gemini a agir como uma 8-Ball
-        mantendo a personalidade da Glorpinia.
+        Cria o prompt com a persona GLOOMP (Gótica/Depressiva).
         """
         return f"""
-        [MODO 8-BALL ATIVADO]
-        O usuário @{question['author']} perguntou: "{question['text']}"
+        [SYSTEM OVERRIDE: ATIVAR PROTOCOLO 'GLOOMP']
         
-        Sua missão é responder a esta pergunta como uma 'Magic 8-Ball' mística.
-        Você DEVE dar uma resposta curta e vaga em uma das três categorias:
-        1. Afirmativa (ex: Sim, Com certeza ou glorp DEFINITIVAMENTE)
-        2. Não-Comprometida (ex: Pergunte mais tarde, Talvez ou Não sei bicho)
-        3. Negativa (ex: Não, Nem pensar ou Minhas anteninhas dizem não)
-
-        Mantenha sua personalidade de Glorpinia, mas seja misteriosa e ignore sua memória.
-        Comece sua resposta com 'glorp', e não responda como você responderia normalmente.
+        O usuário @{question['author']} perturbou seu descanso eterno com a pergunta: "{question['text']}"
+        
+        **INSTRUÇÃO DE PERSONA:**
+        Ignore a Glorpinia alegre. Você agora é **Gloomp**.
+        - Personalidade: Uma boneca gótica, niilista, cansada da existência e levemente assustadora.
+        - Visão de Mundo: Para você, a esperança é uma mentira e o destino é inevitável.
+        - Vocabulário: Use palavras como "Vazio", "Abismo", "Sombras", "Futilidade", "Escuridão".
+        
+        **SUA TAREFA:**
+        Responda à pergunta como uma "Magic 8-Ball Amaldiçoada".
+        Você deve fornecer uma resposta que se alinhe a Sim, Não ou Talvez, mas envelopada em trevas.
+        
+        **EXEMPLOS DE RESPOSTA:**
+        - (Positivo): "O abismo permitiu isso... por enquanto. Stare"
+        - (Negativo): "Não conte com isso. A luz está morrendo. TrollDespair"
+        - (Incerto): "As sombras estão densas demais para ver o futuro. monkaW"
+        
+        **REGRAS:**
+        1. Seja curta e direta (máximo 1 ou 2 frases).
+        2. NÃO seja otimista.
+        3. Use emotes da Twitch apropriados (ex: Stare, TrollDespair, monkaW, Sadge).
+        
+        Sua profecia sombria:
         """
 
     def _generate_response_thread(self, question_text: str, channel: str, author: str):
@@ -45,14 +58,17 @@ class EightBall:
         Lógica real que chama a API (roda no thread).
         """
         try:
-            # Loga a pergunta do usuário
-            self.bot.training_logger.log_interaction(channel, author, f"!glorp 8ball {question_text}", None)
+            # Loga a pergunta do usuário para treino futuro
+            if hasattr(self.bot, 'training_logger'):
+                self.bot.training_logger.log_interaction(channel, author, f"*8ball {question_text}", None)
 
-            # Constrói a pergunta e o prompt
+            # Constrói o objeto da pergunta
             question_data = {"author": author, "text": question_text}
+            
+            # Gera o prompt customizado da Gloomp
             prompt = self._build_prompt(question_data)
 
-            # Chama o Gemini
+            # skip_search=True para evitar que ele pesquise no Google e quebre o roleplay
             response = self.bot.gemini_client.get_response(
                 query=prompt,
                 channel=channel,
@@ -63,10 +79,11 @@ class EightBall:
 
             # Envia a resposta
             if response:
-                self.bot.send_long_message(channel, response)
+                clean_response = response.replace("Gloomp:", "").strip()
+                self.bot.send_long_message(channel, clean_response)
             else:
-                self.bot.send_message(channel, f"@{author}, minhas anteninhas estão com interferência. Tente de novo. Sadge")
+                self.bot.send_message(channel, f"@{author}, o vazio consumiu minha resposta...  Despair")
         
         except Exception as e:
             logging.error(f"[EightBall] Falha ao gerar resposta 8-Ball: {e}")
-            self.bot.send_message(channel, f"@{author}, o portal está instável. Sadge")
+            self.bot.send_message(channel, f"@{author}, a escuridão causou um erro crítico. glorp")
