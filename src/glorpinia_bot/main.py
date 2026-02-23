@@ -348,7 +348,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *slots, *fortune, *roll, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *debt, *slots, *fortune, *roll, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -376,7 +376,8 @@ class TwitchIRC:
                         "analysis": "Análise de um assunto, dúvidas ou resumo do chat. Ex: *analysis [pergunta específica]",
                         "help": "Você deve estar precisando mesmo nise",
                         "fortune": "Tire uma leitura do seu arcano",
-                        "roll": "Rolar um D20 para RPG com narração temática. Ex: *roll [ação desejada]"
+                        "roll": "Rolar um D20 para RPG com narração temática. Ex: *roll [ação desejada]",
+                        "debt": "Veja os maiores devedores do império (quem deve mais cookies)."
                     }
                     self.send_message(channel, help_msg.get(cmd_target, "glorp Comando desconhecido."))
                     return
@@ -411,6 +412,16 @@ class TwitchIRC:
                         self.send_message(channel, f"@{author}, comando apenas para os chegados arnoldHalt")
                     return
 
+                if command_raw == "debt" or command_raw == "divida":
+                    if self.cookie_system:
+                        top_debtors = self.cookie_system.get_debt_leaderboard(5)
+                        if not top_debtors:
+                            self.send_message(channel, "baseg Ninguém deve ao império! Todos estão em dia.")
+                        else:
+                            msg = "Esses são os maiores devedores galáticos: " + " | ".join([f"#{i+1} {n} [{c} 🍪]" for i, (n, c) in enumerate(top_debtors)])
+                            self.send_message(channel, f"xdd {msg}")
+                    return
+                
                 # Se chegou aqui com *, é comando desconhecido
                 self.send_message(channel, "glorp Comando desconhecido. Use *commands")
                 return
@@ -426,9 +437,28 @@ class TwitchIRC:
                     # Convertendo Deque para List para a IA poder ler
                     recent_history_list = list(self.recent_messages.get(channel, []))
                     
+                    enriched_content = content
+                    if self.cookie_system:
+                        system_notes = []
+                        # Pega o saldo de quem falou
+                        author_bal = self.cookie_system.get_cookies(author.lower())
+                        system_notes.append(f"{author}: {author_bal}🍪")
+                        
+                        # Tenta pegar o saldo de alguém que ele mencionou na mensagem
+                        for w in content_lower.split():
+                            if w.startswith("@"):
+                                target_nick = w.replace("@", "").strip()
+                                if target_nick and target_nick != self.auth.bot_nick.lower():
+                                    target_bal = self.cookie_system.get_cookies(target_nick)
+                                    system_notes.append(f"{target_nick}: {target_bal}🍪")
+                        
+                        if system_notes:
+                            unique_notes = list(set(system_notes))
+                            enriched_content += f"\n\n[SISTEMA: Saldos atuais -> {' | '.join(unique_notes)}. Se o saldo for negativo, a pessoa é uma devedora/caloteira do Império.]"
+                    
                     if self.gemini_client and self.memory_mgr:
                         response_text = self.gemini_client.get_response(
-                            query=content, 
+                            query=enriched_content,
                             channel=channel, 
                             author=author, 
                             memory_mgr=self.memory_mgr,

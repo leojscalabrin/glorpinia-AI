@@ -147,6 +147,33 @@ class CookieSystem:
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao buscar leaderboard: {e}")
             return []
+        
+    def get_debt_leaderboard(self, limit=5):
+        """
+        Retorna os maiores devedores (cookies negativos).
+        """
+        try:
+            bot_nick = self.bot.auth.bot_nick.lower()
+            forbidden_placeholders = ','.join(['?'] * len(self.FORBIDDEN_NICKS))
+            query_args = [bot_nick] + list(self.FORBIDDEN_NICKS) + [limit]
+            
+            query = f"""
+                SELECT user_nick, cookie_count 
+                FROM user_cookies 
+                WHERE user_nick != ? 
+                AND user_nick NOT IN ({forbidden_placeholders})
+                AND cookie_count < 0
+                ORDER BY cookie_count ASC 
+                LIMIT ?
+            """
+            
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                c.execute(query, query_args)
+                return c.fetchall()
+        except Exception as e:
+            logging.error(f"[CookieSystem] Falha ao buscar leaderboard de dívidas: {e}")
+            return []
 
     def add_cookies(self, nick: str, amount_to_add: int):
         """Adiciona cookies a um usuário."""
@@ -165,7 +192,8 @@ class CookieSystem:
 
     def remove_cookies(self, nick: str, amount_to_remove: int):
         """
-        Remove cookies de um usuário e TRANSFERE para a conta do bot.
+        Remove cookies de um usuário (podendo deixá-lo negativo/em dívida) 
+        e TRANSFERE para a conta do bot.
         """
         if not self._is_nick_valid(nick): return 
         
@@ -180,20 +208,13 @@ class CookieSystem:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
-                
-                c.execute("SELECT cookie_count FROM user_cookies WHERE user_nick = ?", (nick,))
-                result = c.fetchone()
-                current_balance = result[0] if result else 0
-                
-                actual_removed = min(current_balance, amount_to_remove)
-                
-                if actual_removed > 0:
-                    c.execute("UPDATE user_cookies SET cookie_count = cookie_count - ? WHERE user_nick = ?", (actual_removed, nick))
-                    c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (actual_removed, bot_nick))
-                    conn.commit()
-                    logging.info(f"[CookieSystem] Transferidos {actual_removed} cookies de {nick} para {bot_nick}.")
-                else:
-                    logging.info(f"[CookieSystem] {nick} não tinha cookies suficientes para remover.")
+                c.execute("UPDATE user_cookies SET cookie_count = cookie_count - ? WHERE user_nick = ?", (amount_to_remove, nick))
+                c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_remove, bot_nick))
+                conn.commit()
+                logging.info(f"[CookieSystem] Transferidos {amount_to_remove} cookies de {nick} para {bot_nick}. Saldo pode estar negativo.")
+                    
+        except Exception as e:
+            logging.error(f"[CookieSystem] Falha ao remover/transferir cookies de {nick}: {e}")
                     
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao remover/transferir cookies de {nick}: {e}")
@@ -216,8 +237,7 @@ class CookieSystem:
     
     def process_ai_response(self, text: str, current_user: str = None) -> str:
         """
-        Analisa resposta, executa transações e adiciona feedback visual na mensagem.
-        Ex: Transforma [[COOKIE:GIVE:user:5]] em '... (+5 🍪)'
+        Analisa resposta, executa transações e previne exploits de altos valores.
         """
         if not text: return ""
 
@@ -225,23 +245,24 @@ class CookieSystem:
         matches = re.findall(pattern, text)
         
         feedback_parts = []
+        MAX_TRANSACTION = 999
 
         for action, user, amount_str in matches:
             try:
                 amount = int(amount_str)
                 sign = "+"
                 
+                if amount > MAX_TRANSACTION:
+                    logging.warning(f"[AI-BANK] Tentativa de exploit detectada ({amount}). Limitando para {MAX_TRANSACTION}.")
+                    amount = MAX_TRANSACTION
+                
                 if action == "GIVE":
                     self.add_cookies(user, amount)
-                    logging.info(f"[AI-BANK] IA deu {amount} cookies para {user}")
                     sign = "+"
                 elif action == "TAKE":
                     self.remove_cookies(user, amount)
-                    logging.info(f"[AI-BANK] IA tirou {amount} cookies de {user}")
                     sign = "-"
                 
-                # Lógica de Feedback Visual
-                # Se o alvo for diferente de quem falou com o bot, mostra o nome
                 if current_user and user.lower() != current_user.lower():
                     feedback_parts.append(f"({sign}{amount} 🍪 para {user})")
                 else:
@@ -250,15 +271,10 @@ class CookieSystem:
             except Exception as e:
                 logging.error(f"[AI-BANK] Erro ao processar transação: {e}")
 
-        # Remove as tags técnicas do texto
         clean_text = re.sub(pattern, "", text).strip()
-        
-        # Remove finais como " para", " o", " de" se sobrarem sozinhos
         clean_text = re.sub(r'\s+(o|a|os|as|de|da|do|em|por|para)$', '', clean_text, flags=re.IGNORECASE).strip()
-
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
-        # Anexa o feedback visual ao final da mensagem
         if feedback_parts:
             clean_text += " " + " ".join(feedback_parts)
         
