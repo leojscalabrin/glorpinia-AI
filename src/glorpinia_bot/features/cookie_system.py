@@ -272,7 +272,11 @@ class CookieSystem:
                 logging.error(f"[AI-BANK] Erro ao processar transação: {e}")
 
         clean_text = re.sub(pattern, "", text).strip()
+        
+        clean_text = re.sub(r'(DAR|TIRAR|GIVE|TAKE|RECOMPENSA|PUNIÇÃO|AÇÃO|COMANDO|VALOR):\s*$', '', clean_text, flags=re.IGNORECASE).strip()
+
         clean_text = re.sub(r'\s+(o|a|os|as|de|da|do|em|por|para)$', '', clean_text, flags=re.IGNORECASE).strip()
+        
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
         if feedback_parts:
