@@ -12,7 +12,7 @@ class Slots:
         self.symbols = {
             # Especiais
             "glorp":        {"weight": 8,   "multiplier": 1000}, # Jackpot (Muito Raro)
-            "WhySoSerious": {"weight": 20,  "multiplier": 500},  # Wild (Coringa)
+            "Paiaso": {"weight": 20,  "multiplier": 500},  # Wild (Coringa)
             
             # Alto Valor
             "PartyParrot":     {"weight": 40,  "multiplier": 250}, # Triplo Sete
@@ -115,14 +115,14 @@ class Slots:
         
         # Calcula
         multiplier = 0
-        if s1 == "WhySoSerious" and s2 == "WhySoSerious" and s3 == "WhySoSerious":
-            multiplier = self.symbols["WhySoSerious"]["multiplier"]
+        if s1 == "Paiaso" and s2 == "Paiaso" and s3 == "Paiaso":
+            multiplier = self.symbols["Paiaso"]["multiplier"]
         elif s1 == s2 == s3:
             multiplier = self.symbols[s1]["multiplier"]
         else:
-            wilds = result.count("WhySoSerious")
+            wilds = result.count("Paiaso")
             if wilds > 0:
-                others = [s for s in result if s != "WhySoSerious"]
+                others = [s for s in result if s != "Paiaso"]
                 if len(others) == 0: pass
                 elif len(set(others)) == 1: 
                     symbol_type = others[0]
