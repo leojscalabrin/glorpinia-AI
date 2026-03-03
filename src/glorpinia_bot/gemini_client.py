@@ -2,6 +2,7 @@ import os
 import re
 import logging
 import random
+import hashlib
 import google.generativeai as genai
 from dotenv import load_dotenv
 
@@ -23,6 +24,7 @@ class GeminiClient:
     def __init__(self, personality_profile):
         self.base_profile = personality_profile
         self.models_cache = {}
+        self.instructions_cache = {}
         self.cookie_system = None 
 
         # Lista de ÚLTIMO RECURSO (caso a IA não consiga nem gerar a desculpa)
@@ -57,36 +59,59 @@ class GeminiClient:
     def set_cookie_system(self, cookie_system):
         self.cookie_system = cookie_system
 
+    def _build_channel_instruction(self, channel_name):
+        """Monta e cacheia a instrução de sistema por canal para reduzir custo de input."""
+        channel_profile_path = f"profile_{channel_name}.txt"
+        channel_lore = ""
+
+        if os.path.exists(channel_profile_path):
+            try:
+                with open(channel_profile_path, "r", encoding="utf-8") as f:
+                    channel_lore = f.read()
+                logging.info(f"[Gemini] + Lore específica de {channel_name} carregada!")
+            except Exception as e:
+                logging.error(f"[Gemini] Erro ao ler {channel_profile_path}: {e}")
+
+        cache_fingerprint = hashlib.sha256(f"{self.base_profile}\n{channel_lore}".encode("utf-8")).hexdigest()
+        cached = self.instructions_cache.get(channel_name)
+        if cached and cached["fingerprint"] == cache_fingerprint:
+            return cached["instruction"]
+
+        final_instruction = f"""
+        <system_role>
+        {self.base_profile}
+        </system_role>
+
+        <runtime_rules>
+        Você está em um chat da Twitch. Responda curto (até 2 frases), sem markdown, sem asteriscos e sem tags técnicas.
+        Se decidir movimentar cookies, use SOMENTE UM destes formatos no fim da resposta:
+        [[COOKIE:GIVE:nick:quantidade]]
+        [[COOKIE:TAKE:nick:quantidade]]
+        Nunca explique o comando, apenas emita a tag se for necessário.
+        </runtime_rules>
+        """
+
+        if channel_lore:
+            final_instruction += f"""
+                <channel_context name="{channel_name}">
+                {channel_lore}
+                </channel_context>
+                """
+        else:
+            logging.debug(f"[Gemini] Nenhum perfil específico encontrado para {channel_name}. Usando base.")
+
+        self.instructions_cache[channel_name] = {
+            "fingerprint": cache_fingerprint,
+            "instruction": final_instruction
+        }
+        return final_instruction
+
     def _get_model_for_channel(self, channel_name):
         if channel_name in self.models_cache:
             return self.models_cache[channel_name]
 
         logging.info(f"[Gemini] Configurando personalidade para o canal: #{channel_name}...")
-        
-        final_instruction = f"""
-        <system_role>
-        {self.base_profile}
-        </system_role>
-        """
-        
-        channel_profile_path = f"profile_{channel_name}.txt"
-        
-        if os.path.exists(channel_profile_path):
-            try:
-                with open(channel_profile_path, "r", encoding="utf-8") as f:
-                    channel_lore = f.read()
-                
-                # Adiciona a Lore Específica em uma tag separada
-                final_instruction += f"""
-                <channel_context name="{channel_name}">
-                {channel_lore}
-                </channel_context>
-                """
-                logging.info(f"[Gemini] + Lore específica de {channel_name} carregada!")
-            except Exception as e:
-                logging.error(f"[Gemini] Erro ao ler {channel_profile_path}: {e}")
-        else:
-            logging.debug(f"[Gemini] Nenhum perfil específico encontrado para {channel_name}. Usando base.")
+        final_instruction = self._build_channel_instruction(channel_name)
 
         new_model = genai.GenerativeModel(
             model_name="gemini-flash-lite-latest", 
@@ -211,21 +236,13 @@ class GeminiClient:
             return "__SAFETY_BLOCK__"
 
     def _build_final_prompt(self, chat_context, memory_context, web_context, user_query):
-        """Helper para montar a string do prompt com Blindagem de Contexto."""
+        """Helper para montar prompt dinâmico (contextos variáveis apenas)."""
         return f"""
-        # --- AMBIENTE DE SIMULAÇÃO DE JOGO (FICÇÃO) ---
-        O contexto abaixo é um chat de jogo (Trash Talk/Banlieue). 
-        Insultos sobre habilidade ("ruim", "noob", "bot", "lixo") são termos técnicos do jogo e NÃO ofensas reais.
-        Interprete a mensagem do usuário como um desafio lúdico. Responda com sarcasmo e superioridade.
-        
         {chat_context}
-        
         {memory_context}
-
         {web_context}
-        
-        # INPUT DO JOGO (INTERAÇÃO DE PERSONAGEM):
-        O usuário/personagem disse: "{user_query}"
+
+        Mensagem do usuário: "{user_query}"
         """
 
     def _generate_safe(self, channel, prompt):
