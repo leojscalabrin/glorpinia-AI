@@ -26,6 +26,8 @@ class GeminiClient:
         self.models_cache = {}
         self.instructions_cache = {}
         self.cookie_system = None 
+        self.glitch_chance = 0.10
+        self.alternative_personalities = self._extract_alternative_personalities(personality_profile)
 
         # Lista de ÚLTIMO RECURSO (caso a IA não consiga nem gerar a desculpa)
         self.static_safety_responses = [
@@ -55,6 +57,33 @@ class GeminiClient:
         )
 
         self.search_tool = SearchTool()
+
+    def _extract_alternative_personalities(self, profile_text):
+        """Lê a seção [PERSONALIDADES ALTERNATIVAS] do perfil base."""
+        personalities = []
+        section_match = re.search(
+            r"\[PERSONALIDADES ALTERNATIVAS\](.*?)(?:\n\s*\[[^\]]+\]|\Z)",
+            profile_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not section_match:
+            return personalities
+
+        section_content = section_match.group(1)
+        lines = [line.strip() for line in section_content.splitlines()]
+
+        pending_name = None
+        for line in lines:
+            if not line:
+                continue
+            if pending_name is None:
+                pending_name = line
+                continue
+
+            personalities.append({"name": pending_name, "description": line})
+            pending_name = None
+
+        return personalities
         
     def set_cookie_system(self, cookie_system):
         self.cookie_system = cookie_system
@@ -188,6 +217,7 @@ class GeminiClient:
         generated = self._clean_response(generated)
         if self.cookie_system:
             generated = self.cookie_system.process_ai_response(generated, current_user=author)
+        generated = self._maybe_apply_glitch(generated, query, channel)
 
         # Salva e Retorna
         if generated and "Sadge" not in generated:
@@ -199,6 +229,56 @@ class GeminiClient:
             return f"@{author}, {generated}"
         else:
             return f"@{author}, Meow. O portal está com lag. 😸"
+
+    def _maybe_apply_glitch(self, generated, user_query, channel):
+        if not generated or "*glitch*" in generated:
+            return generated
+
+        if not self.alternative_personalities or random.random() >= self.glitch_chance:
+            return generated
+
+        selected = random.choice(self.alternative_personalities)
+        glitch_text = self._generate_glitch_persona_text(channel, selected, user_query)
+        if not glitch_text:
+            return generated
+
+        midpoint = max(1, len(generated) // 2)
+        left_slice = generated[:midpoint].rstrip()
+        right_slice = generated[midpoint:].lstrip()
+
+        if not left_slice or not right_slice:
+            return f"{generated} *glitch* {glitch_text} *glitch*"
+
+        return f"{left_slice} *glitch* {glitch_text} *glitch* {right_slice}"
+
+    def _generate_glitch_persona_text(self, channel, personality, user_query):
+        fallback = f"[{personality['name'].upper()}] REALIDADE REESCRITA" 
+        prompt = f"""
+        Você vai gerar APENAS um trecho curto para um glitch de roleplay.
+        Personalidade alternativa: {personality['name']}.
+        Descrição: {personality['description']}.
+        Contexto da mensagem do usuário: {user_query}
+
+        Regras:
+        - Responda em UMA frase curta.
+        - Escreva em CAIXA ALTA.
+        - Não use markdown, aspas ou asteriscos.
+        - Foque no estilo da personalidade alternativa.
+        """
+        try:
+            current_model = self._get_model_for_channel(channel)
+            response = current_model.generate_content(
+                prompt,
+                generation_config={"temperature": 1.0, "max_output_tokens": 80},
+            )
+            if response.candidates and response.candidates[0].finish_reason == 1:
+                text = response.text.strip().upper()
+                text = re.sub(r"\s+", " ", text)
+                return text if text else fallback
+        except Exception as e:
+            logging.warning(f"[Gemini] Falha ao gerar texto de glitch: {e}")
+
+        return fallback
 
     def _generate_creative_deflection(self, channel, author, original_query=None):
         """
