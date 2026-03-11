@@ -27,7 +27,7 @@ class GeminiClient:
         self.instructions_cache = {}
         self.cookie_system = None 
         self.glitch_chance = 0.10
-        self.alternative_personalities = self._extract_alternative_personalities(personality_profile)
+        self.alternative_personalities = self._load_alternative_personalities()
 
         # Lista de ÚLTIMO RECURSO (caso a IA não consiga nem gerar a desculpa)
         self.static_safety_responses = [
@@ -58,33 +58,35 @@ class GeminiClient:
 
         self.search_tool = SearchTool()
 
-    def _extract_alternative_personalities(self, profile_text):
-        """Lê a seção [PERSONALIDADES ALTERNATIVAS] do perfil base."""
+    def _load_alternative_personalities(self):
+        """Carrega personalidades alternativas do arquivo glitches.txt."""
+        glitches_file = os.path.join(os.getcwd(), "glitches.txt")
         personalities = []
-        section_match = re.search(
-            r"\[PERSONALIDADES ALTERNATIVAS\](.*?)(?:\n\s*\[[^\]]+\]|\Z)",
-            profile_text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if not section_match:
+
+        if not os.path.exists(glitches_file):
+            logging.warning("[Gemini] glitches.txt não encontrado. Glitches de personalidade desativados.")
             return personalities
 
-        section_content = section_match.group(1)
-        lines = [line.strip() for line in section_content.splitlines()]
+        try:
+            with open(glitches_file, "r", encoding="utf-8") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line or line.startswith("#") or ":" not in line:
+                        continue
 
-        pending_name = None
-        for line in lines:
-            if not line:
-                continue
-            if pending_name is None:
-                pending_name = line
-                continue
+                    name, description = line.split(":", 1)
+                    name = name.strip()
+                    description = description.strip()
+                    if name and description:
+                        personalities.append({"name": name, "description": description})
+        except Exception as e:
+            logging.warning(f"[Gemini] Falha ao carregar glitches.txt: {e}")
 
-            personalities.append({"name": pending_name, "description": line})
-            pending_name = None
+        if not personalities:
+            logging.warning("[Gemini] Nenhuma personalidade alternativa válida em glitches.txt.")
 
         return personalities
-        
+
     def set_cookie_system(self, cookie_system):
         self.cookie_system = cookie_system
 
@@ -113,6 +115,7 @@ class GeminiClient:
 
         <runtime_rules>
         Você está em um chat da Twitch. Responda curto (até 2 frases), sem markdown, sem asteriscos e sem tags técnicas.
+        Não use emotes na resposta; o sistema adiciona emote depois.
         Se decidir movimentar cookies, use SOMENTE UM destes formatos no fim da resposta:
         [[COOKIE:GIVE:nick:quantidade]]
         [[COOKIE:TAKE:nick:quantidade]]

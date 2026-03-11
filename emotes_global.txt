@@ -1,0 +1,7 @@
+# Formato: emocao: emote1, emote2
+cute: peepoHappy, peepoLove, peepoGiggles, SoCute, catKISS, peepoClap
+angry: RAGEY, Madge, angrybird, Stare, FeelsWeirdMan, Nerdge, Susge, DinkDonk, NOPERS, Muted
+sad: Sadge, peepoSad, FeelsBadMan, monkaS, Aware, Clueless
+laugh: OMEGALUL, KEKW, LUL, pepeLaugh, xdd, Paiaso
+hype: Pog, PogChamp, POGGERS, POGCRAZY, LETSGO, AlienDance, catJAM, ratJAM, pepeJAM
+neutral: glorp, Kappa, EZ, MrDestructoid, 5Head, Pepega, Bedge, COPIUM, BOOBA, GAMBA, GIGACHAD, BASED, Cinema, SNIFFA, modCheck, Waiting

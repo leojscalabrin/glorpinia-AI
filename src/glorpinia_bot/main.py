@@ -16,6 +16,7 @@ from google.cloud import speech
 from .twitch_auth import TwitchAuth
 from .gemini_client import GeminiClient
 from .memory_manager import MemoryManager
+from .emote_manager import EmoteManager
 
 from .features.comment import Comment
 from .features.listen import Listen
@@ -57,6 +58,7 @@ class TwitchIRC:
             personality_profile=self.auth.personality_profile
         )
         self.memory_mgr = MemoryManager()
+        self.emote_manager = EmoteManager()
         
         self.live_status = {} # Dicionário para guardar { 'canal': True/False }
         
@@ -466,14 +468,19 @@ class TwitchIRC:
                         )
                         
                         if response_text:
-                            self.send_long_message(channel, response_text)
+                            cleaned_text = self.emote_manager.strip_trailing_emote(response_text)
+                            unique_text = self.emote_manager.ensure_unique_phrase(channel, cleaned_text)
+                            selected_emote = self.emote_manager.choose_emote(channel, unique_text)
+                            final_text = f"{unique_text} {selected_emote}".strip()
+
+                            self.send_long_message(channel, final_text)
                             
                             if self.training_logger:
                                 self.training_logger.log_interaction(
                                     channel, 
                                     author, 
                                     content,
-                                    response_text
+                                    final_text
                                 )
 
                 except Exception as e:
