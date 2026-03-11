@@ -133,11 +133,16 @@ class EmoteManager:
             return "cute"
         return "neutral"
 
-    def _candidate_pool(self, channel, emotion):
+    def _candidate_pool(self, channel, emotion, secondary_emotion=None):
         channel_map = self.channel_emote_map.get(channel.lower(), {})
         candidates = []
 
-        for key in (emotion, "neutral"):
+        emotions = [emotion]
+        if secondary_emotion and secondary_emotion not in (emotion, "neutral"):
+            emotions.append(secondary_emotion)
+        emotions.append("neutral")
+
+        for key in emotions:
             channel_emotes = channel_map.get(key, [])
             global_emotes = self.global_emote_map.get(key, [])
 
@@ -157,16 +162,22 @@ class EmoteManager:
 
         return unique or [self.DEFAULT_EMOTE]
 
-    def _resolve_emotion(self, text, mood=None):
+    def _resolve_emotions(self, text, mood=None):
         inferred = self.infer_emotion(text)
         mood_emotion = self.MOOD_TO_EMOTION.get((mood or "").lower())
-        if mood_emotion and inferred == "neutral":
-            return mood_emotion
-        return inferred
+
+        # O mood "neutral" nunca deve forçar a emoção da mensagem.
+        if mood_emotion == "neutral":
+            mood_emotion = None
+
+        if inferred == "neutral" and mood_emotion:
+            return mood_emotion, None
+
+        return inferred, mood_emotion
 
     def choose_emote(self, channel, text, mood=None):
-        emotion = self._resolve_emotion(text, mood=mood)
-        candidates = self._candidate_pool(channel, emotion)
+        emotion, secondary_emotion = self._resolve_emotions(text, mood=mood)
+        candidates = self._candidate_pool(channel, emotion, secondary_emotion=secondary_emotion)
 
         channel_hist = self.channel_emote_history[channel.lower()]
         blocked = set(channel_hist) | set(self.global_emote_history)
@@ -193,7 +204,7 @@ class EmoteManager:
             "[Emote] canal=%s mood=%s emotion=%s candidatos=%s escolhido=%s hist_canal=%s hist_global=%s",
             channel,
             mood,
-            emotion,
+            f"{emotion}|{secondary_emotion}" if secondary_emotion else emotion,
             candidates,
             chosen,
             list(channel_hist),
