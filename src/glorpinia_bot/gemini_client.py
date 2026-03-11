@@ -7,6 +7,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 from .features.search import SearchTool
+from .narrative.context_builder import build_context_prompt
 
 load_dotenv()
 
@@ -155,7 +156,7 @@ class GeminiClient:
         self.models_cache[channel_name] = new_model
         return new_model
 
-    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False):
+    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False, injection_context=None):
         """
         Gera uma resposta. 
         Se bloquear -> Tenta Retry sem busca.
@@ -189,8 +190,14 @@ class GeminiClient:
                     performed_search = True
         except: pass
 
+        rag_context = "\n\n".join([ctx for ctx in [chat_context_str, memory_context, web_context] if ctx.strip()])
+
         # Monta Prompt Principal
-        prompt = self._build_final_prompt(chat_context_str, memory_context, web_context, query)
+        prompt = self._build_final_prompt(
+            rag_context=rag_context,
+            user_query=query,
+            injection_context=injection_context,
+        )
         
         try:
             # 1. TENTATIVA NORMAL
@@ -199,7 +206,12 @@ class GeminiClient:
             # 2. RETRY (SEM BUSCA)
             if generated == "__SAFETY_BLOCK__" and performed_search:
                 logging.warning("[Gemini] Bloqueio com Web. Tentando sem busca...")
-                fallback_prompt = self._build_final_prompt(chat_context_str, memory_context, "", query)
+                fallback_rag_context = "\n\n".join([ctx for ctx in [chat_context_str, memory_context] if ctx.strip()])
+                fallback_prompt = self._build_final_prompt(
+                    rag_context=fallback_rag_context,
+                    user_query=query,
+                    injection_context=injection_context,
+                )
                 generated = self._generate_safe(channel, fallback_prompt)
 
             # 3. RETRY (DESVIO CRIATIVO CONTEXTUALIZADO)
@@ -319,15 +331,17 @@ class GeminiClient:
         except:
             return "__SAFETY_BLOCK__"
 
-    def _build_final_prompt(self, chat_context, memory_context, web_context, user_query):
-        """Helper para montar prompt dinâmico (contextos variáveis apenas)."""
-        return f"""
-        {chat_context}
-        {memory_context}
-        {web_context}
-
-        Mensagem do usuário: "{user_query}"
-        """
+    def _build_final_prompt(self, rag_context, user_query, injection_context=None):
+        """Monta prompt final via camada de injeção de contexto."""
+        injection_context = injection_context or {}
+        return build_context_prompt(
+            persona_profile=self.base_profile,
+            mood=injection_context.get("mood"),
+            drama_state=injection_context.get("drama_state"),
+            memory_loop=injection_context.get("memory_loop"),
+            rag_context=rag_context,
+            chat_message=user_query,
+        )
 
     def _generate_safe(self, channel, prompt):
         try:
