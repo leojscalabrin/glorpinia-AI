@@ -17,6 +17,7 @@ from .twitch_auth import TwitchAuth
 from .gemini_client import GeminiClient
 from .memory_manager import MemoryManager
 from .emote_manager import EmoteManager
+from .narrative.social_dynamics import SocialDynamicsEngine
 
 from .features.comment import Comment
 from .features.listen import Listen
@@ -59,6 +60,7 @@ class TwitchIRC:
         )
         self.memory_mgr = MemoryManager()
         self.emote_manager = EmoteManager()
+        self.social_dynamics = SocialDynamicsEngine()
         
         self.live_status = {} # Dicionário para guardar { 'canal': True/False }
         
@@ -251,6 +253,8 @@ class TwitchIRC:
                 self.send_message(channel, "Então to indo nessa pessoal peepoHey")
                 return
             
+            self.social_dynamics.observe_message(author, content)
+
             # Salvar no Histórico Recente (Memória de Curto Prazo)
             if channel not in self.recent_messages:
                 self.recent_messages[channel] = deque(maxlen=100)
@@ -459,12 +463,14 @@ class TwitchIRC:
                             enriched_content += f"\n\n[SISTEMA: Saldos atuais -> {' | '.join(unique_notes)}. Se o saldo for negativo, a pessoa é uma devedora/caloteira do Império.]"
                     
                     if self.gemini_client and self.memory_mgr:
+                        injection_context = self.social_dynamics.get_injection_payload()
                         response_text = self.gemini_client.get_response(
                             query=enriched_content,
                             channel=channel, 
                             author=author, 
                             memory_mgr=self.memory_mgr,
-                            recent_history=recent_history_list
+                            recent_history=recent_history_list,
+                            injection_context=injection_context
                         )
                         
                         if response_text:
