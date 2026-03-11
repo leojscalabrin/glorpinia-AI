@@ -198,6 +198,7 @@ class GeminiClient:
             user_query=query,
             injection_context=injection_context,
         )
+        logging.debug("[Gemini] context_injection channel=%s author=%s payload=%s", channel, author, injection_context or {})
         
         try:
             # 1. TENTATIVA NORMAL
@@ -249,10 +250,17 @@ class GeminiClient:
         if not generated or "*glitch*" in generated:
             return generated
 
-        if not self.alternative_personalities or random.random() >= self.glitch_chance:
+        if not self.alternative_personalities:
+            logging.debug("[Gemini] glitch_skip reason=no_alternative_personalities")
+            return generated
+
+        roll = random.random()
+        if roll >= self.glitch_chance:
+            logging.debug("[Gemini] glitch_skip roll=%.4f chance=%.4f", roll, self.glitch_chance)
             return generated
 
         selected = random.choice(self.alternative_personalities)
+        logging.debug("[Gemini] glitch_apply selected=%s", selected.get("name"))
         glitch_text = self._generate_glitch_persona_text(channel, selected, user_query)
         if not glitch_text:
             return generated
