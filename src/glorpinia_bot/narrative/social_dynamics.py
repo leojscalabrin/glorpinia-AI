@@ -1,5 +1,6 @@
 import random
 import re
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -48,6 +49,7 @@ class SocialDynamicsEngine:
 
     def observe_message(self, author: str, content: str):
         self.message_count += 1
+        logging.debug("[SocialDynamics] observe_message count=%s author=%s content=%s", self.message_count, author, content[:120])
         self.users_seen.add(author.lower())
 
         if self.message_count % 20 == 0:
@@ -68,18 +70,22 @@ class SocialDynamicsEngine:
             loop.last_used = self.message_count
             self._prune_loops()
 
-        return {
+        payload = {
             "mood": self.bot_state.get("mood", "neutral"),
             "drama_state": self.drama_state,
             "memory_loop": memory_loop,
         }
+        logging.debug("[SocialDynamics] injection_payload=%s", payload)
+        return payload
 
     def _roll_memory_loop(self):
         self.active_loop_for_message = None
         if not self.memory_loops:
             return
 
-        if random.random() > self.LOOP_PROBABILITY:
+        roll = random.random()
+        if roll > self.LOOP_PROBABILITY:
+            logging.debug("[SocialDynamics] memory_loop roll=%.4f > %.4f (skip)", roll, self.LOOP_PROBABILITY)
             return
 
         total_weight = sum(max(0.0, loop.weight) for loop in self.memory_loops)
@@ -92,6 +98,7 @@ class SocialDynamicsEngine:
             running += max(0.0, loop.weight)
             if pick <= running:
                 self.active_loop_for_message = loop
+                logging.debug("[SocialDynamics] memory_loop selected topic=%s weight=%.3f", loop.topic, loop.weight)
                 return
 
     def _roll_drama_events(self, author: str):
@@ -134,6 +141,7 @@ class SocialDynamicsEngine:
         if mood_event:
             self.bot_state["mood"] = mood_event[0]
             self.bot_state["duration"] = mood_event[1]
+            logging.debug("[SocialDynamics] mood_updated mood=%s duration=%s", mood_event[0], mood_event[1])
             return
 
         duration = self.bot_state.get("duration", 0)
@@ -142,6 +150,7 @@ class SocialDynamicsEngine:
         if self.bot_state.get("duration", 0) <= 0:
             self.bot_state["mood"] = "neutral"
             self.bot_state["duration"] = 0
+        logging.debug("[SocialDynamics] mood_state=%s", self.bot_state)
 
     def add_memory_loop(self, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke"):
         self.memory_loops.append(
