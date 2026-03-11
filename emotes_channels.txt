@@ -1,0 +1,4 @@
+# Opcional. Sobrescreve/complementa por canal.
+# Exemplo:
+# [nomecanal]
+# hype: POGGERS, LETSGO
