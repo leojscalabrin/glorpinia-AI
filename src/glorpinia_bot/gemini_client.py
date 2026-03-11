@@ -264,6 +264,7 @@ class GeminiClient:
         - Escreva em CAIXA ALTA.
         - Não use markdown, aspas ou asteriscos.
         - Foque no estilo da personalidade alternativa.
+        - Não use emotes no glitch
         """
         try:
             current_model = self._get_model_for_channel(channel)
