@@ -1,7 +1,25 @@
 # Formato: emocao: emote1, emote2
-cute: peepoHappy, peepoLove, peepoGiggles, SoCute, catKISS, peepoClap
-angry: RAGEY, Madge, angrybird, Stare, FeelsWeirdMan, Nerdge, Susge, DinkDonk, NOPERS, Muted
-sad: Sadge, peepoSad, FeelsBadMan, monkaS, Aware, Clueless
-laugh: OMEGALUL, KEKW, LUL, pepeLaugh, xdd, Paiaso
+cute: peepoHappy, peepoLove, peepoGiggles, SoCute, catKISS
+congratulation: peepoClap, Clap, EZ
+angry: RAGEY, Madge, angrybird, Muted
+denial: NOPERS
+attention: DinkDonk, ALERT
+suspicion: Susge, Stare, modCheck
+judge: FeelsWeirdMan, Stare
+sad: Sadge, peepoSad, FeelsBadMan
+scared: monkaS, Aware
+oblivious: Clueless
+laugh: OMEGALUL, KEKW, LUL, pepeLaugh
+mockery: xdd, Paiaso, Nerdge, WAJAJA, Pepega
 hype: Pog, PogChamp, POGGERS, POGCRAZY, LETSGO, AlienDance, catJAM, ratJAM, pepeJAM
-neutral: glorp, Kappa, EZ, MrDestructoid, 5Head, Pepega, Bedge, COPIUM, BOOBA, GAMBA, GIGACHAD, BASED, Cinema, SNIFFA, modCheck, Waiting
+robot: MrDestructoid
+smart: 5Head, weSmart
+sleep: Bedge, ResidentSleeper 
+hope: COPIUM, Prayge
+gambling: GAMBA
+superiority: GIGACHAD, BASED
+sniffing: SNIFFA
+mesmerized: BOOBA, Looking
+peak: Cinema
+waiting: Waiting
+neutral: glorp
