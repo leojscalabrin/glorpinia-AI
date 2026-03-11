@@ -30,7 +30,11 @@ from .features.analysis import AnalysisMode
 from .features.tarot import TarotReader
 from .features.rpg_roll import RPGRollFeature
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
+log_level_name = os.getenv("GLORPINIA_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level_name, logging.INFO),
+    format="%(asctime)s:%(levelname)s:%(name)s:%(message)s"
+)
 
 class TwitchIRC:
     def __init__(self):
@@ -88,6 +92,7 @@ class TwitchIRC:
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
         self.recent_messages = {channel: deque(maxlen=100) for channel in self.auth.channels}
+        self.last_bot_message_by_channel = {}
         
         # Cooldown timer para o trigger "oziell"
         self.last_oziell_time = 0
@@ -222,6 +227,23 @@ class TwitchIRC:
             else:
                 current_delay = split_delay_sec
 
+    def prepare_final_bot_message(self, channel, response_text, mood=None, source="chat"):
+        """Normaliza saída, evita repetição e escolhe emote conforme contexto + mood."""
+        cleaned_text = self.emote_manager.strip_trailing_emote(response_text or "")
+        unique_text = self.emote_manager.ensure_unique_phrase(channel, cleaned_text)
+        selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood)
+        final_text = f"{unique_text} {selected_emote}".strip()
+
+        last = self.last_bot_message_by_channel.get(channel)
+        if last and last == final_text:
+            unique_text = self.emote_manager.ensure_unique_phrase(channel, f"{unique_text} ")
+            selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood)
+            final_text = f"{unique_text} {selected_emote}".strip()
+
+        self.last_bot_message_by_channel[channel] = final_text
+        logging.debug("[Main] final_message source=%s channel=%s mood=%s text=%s", source, channel, mood, final_text)
+        return final_text
+
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
         if message.startswith("PING"):
@@ -264,6 +286,12 @@ class TwitchIRC:
                 "content": content,
                 "timestamp": time.time()
             })
+            logging.debug(
+                "[Main] recent_message_history channel=%s size=%s last_author=%s",
+                channel,
+                len(self.recent_messages[channel]),
+                author,
+            )
             
             # PROCESSA COMANDOS E TRIGGERS
 
@@ -474,11 +502,13 @@ class TwitchIRC:
                         )
                         
                         if response_text:
-                            cleaned_text = self.emote_manager.strip_trailing_emote(response_text)
-                            unique_text = self.emote_manager.ensure_unique_phrase(channel, cleaned_text)
-                            selected_emote = self.emote_manager.choose_emote(channel, unique_text)
-                            final_text = f"{unique_text} {selected_emote}".strip()
-
+                            current_mood = (injection_context or {}).get("mood")
+                            final_text = self.prepare_final_bot_message(
+                                channel=channel,
+                                response_text=response_text,
+                                mood=current_mood,
+                                source="mention",
+                            )
                             self.send_long_message(channel, final_text)
                             
                             if self.training_logger:

@@ -1,6 +1,7 @@
 import os
 import random
 import re
+import logging
 from collections import defaultdict, deque
 
 
@@ -8,6 +9,14 @@ class EmoteManager:
     """Gerencia emotes por contexto com anti-repetição global e por canal."""
 
     DEFAULT_EMOTE = "glorp"
+    MOOD_TO_EMOTION = {
+        "happy": "hype",
+        "angry": "angry",
+        "curious": "attention",
+        "chaotic": "laugh",
+        "tsundere": "mockery",
+        "neutral": "neutral",
+    }
 
     def __init__(self, base_path=None, history_size=8):
         self.base_path = base_path or os.getcwd()
@@ -124,13 +133,25 @@ class EmoteManager:
             return "cute"
         return "neutral"
 
-    def _candidate_pool(self, channel, emotion):
+    def _candidate_pool(self, channel, emotion, secondary_emotion=None):
         channel_map = self.channel_emote_map.get(channel.lower(), {})
         candidates = []
 
-        for key in (emotion, "neutral"):
-            candidates.extend(channel_map.get(key, []))
-            candidates.extend(self.global_emote_map.get(key, []))
+        emotions = [emotion]
+        if secondary_emotion and secondary_emotion not in (emotion, "neutral"):
+            emotions.append(secondary_emotion)
+        emotions.append("neutral")
+
+        for key in emotions:
+            channel_emotes = channel_map.get(key, [])
+            global_emotes = self.global_emote_map.get(key, [])
+
+            # Canal sempre tem prioridade quando houver a mesma emoção disponível.
+            if channel_emotes:
+                candidates.extend(channel_emotes)
+                candidates.extend([e for e in global_emotes if e not in channel_emotes])
+            else:
+                candidates.extend(global_emotes)
 
         unique = []
         seen = set()
@@ -141,9 +162,22 @@ class EmoteManager:
 
         return unique or [self.DEFAULT_EMOTE]
 
-    def choose_emote(self, channel, text):
-        emotion = self.infer_emotion(text)
-        candidates = self._candidate_pool(channel, emotion)
+    def _resolve_emotions(self, text, mood=None):
+        inferred = self.infer_emotion(text)
+        mood_emotion = self.MOOD_TO_EMOTION.get((mood or "").lower())
+
+        # O mood "neutral" nunca deve forçar a emoção da mensagem.
+        if mood_emotion == "neutral":
+            mood_emotion = None
+
+        if inferred == "neutral" and mood_emotion:
+            return mood_emotion, None
+
+        return inferred, mood_emotion
+
+    def choose_emote(self, channel, text, mood=None):
+        emotion, secondary_emotion = self._resolve_emotions(text, mood=mood)
+        candidates = self._candidate_pool(channel, emotion, secondary_emotion=secondary_emotion)
 
         channel_hist = self.channel_emote_history[channel.lower()]
         blocked = set(channel_hist) | set(self.global_emote_history)
@@ -166,6 +200,16 @@ class EmoteManager:
 
         self.global_emote_history.append(chosen)
         channel_hist.append(chosen)
+        logging.debug(
+            "[Emote] canal=%s mood=%s emotion=%s candidatos=%s escolhido=%s hist_canal=%s hist_global=%s",
+            channel,
+            mood,
+            f"{emotion}|{secondary_emotion}" if secondary_emotion else emotion,
+            candidates,
+            chosen,
+            list(channel_hist),
+            list(self.global_emote_history),
+        )
         return chosen
 
     def ensure_unique_phrase(self, channel, message):
@@ -181,6 +225,8 @@ class EmoteManager:
             ]
             message = f"{message.rstrip('.!?')} ({random.choice(variants)})"
             normalized = re.sub(r"\s+", " ", message.strip().lower())
+            logging.debug("[Emote] Mensagem repetida detectada em #%s, variante aplicada: %s", channel, message)
 
         hist.append(normalized)
+        logging.debug("[Emote] Histórico de frases #%s: %s", channel, list(hist))
         return message

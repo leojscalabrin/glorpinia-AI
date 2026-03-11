@@ -47,6 +47,7 @@ class Comment:
         # Chance fixa de 1%
         if random.random() < 0.01:
             logging.info(f"[Comment] Gatilho atingido por {author}!")
+            logging.debug("[Comment] roll acionado channel=%s author=%s", channel, author)
             
             # Atualiza o timer para evitar disparos duplos
             self.last_comment_time = time.time()
@@ -72,6 +73,7 @@ class Comment:
                 return
             
             context_str = "\n".join([f"{msg['author']}: {msg['content']}" for msg in recent_context])
+            logging.debug("[Comment] recent_context_count=%s", len(recent_context))
             
             # Extrai lista de usuários únicos ativos para passar ao prompt
             active_users = list(set([msg['author'] for msg in recent_context]))
@@ -106,21 +108,28 @@ class Comment:
                 f"NÃO use cookies em 'user', 'system' ou pessoas fora dessa lista."
             )
 
+            injection_context = self.bot.social_dynamics.get_injection_payload()
             comment = self.bot.gemini_client.get_response(
                 query=comment_query,
                 channel=channel,
                 author="system",
                 memory_mgr=memory_mgr,
-                skip_search=True
+                skip_search=True,
+                injection_context=injection_context,
             )
-            
+
             if 0 < len(comment) <= 350:
                 if self.bot.cookie_system:
-                    final_message = self.bot.cookie_system.process_ai_response(comment)
-                else:
-                    final_message = comment
+                    comment = self.bot.cookie_system.process_ai_response(comment)
+
+                final_message = self.bot.prepare_final_bot_message(
+                    channel=channel,
+                    response_text=comment,
+                    mood=(injection_context or {}).get("mood"),
+                    source="comment",
+                )
 
                 self.bot.send_message(channel, final_message)
-                logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:50]}...")
+                logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:80]}...")
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
