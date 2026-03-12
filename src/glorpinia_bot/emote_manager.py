@@ -8,7 +8,6 @@ from collections import defaultdict, deque
 class EmoteManager:
     """Gerencia emotes por contexto com anti-repetição global e por canal."""
 
-    DEFAULT_EMOTE = "glorp"
     def __init__(self, base_path=None, history_size=8):
         self.base_path = base_path or os.getcwd()
         self.history_size = history_size
@@ -38,8 +37,7 @@ class EmoteManager:
     def _load_emote_map(self, file_path):
         emote_map = defaultdict(list)
         if not os.path.exists(file_path):
-            emote_map["neutral"] = [self.DEFAULT_EMOTE]
-            return dict(emote_map)
+            return {}
 
         with open(file_path, "r", encoding="utf-8") as f:
             for raw in f:
@@ -53,9 +51,6 @@ class EmoteManager:
                 parsed = [e.strip() for e in emotes.split(",") if e.strip()]
                 if parsed:
                     emote_map[emotion].extend(parsed)
-
-        if not emote_map:
-            emote_map["neutral"] = [self.DEFAULT_EMOTE]
 
         return dict(emote_map)
 
@@ -129,7 +124,6 @@ class EmoteManager:
         for cmap in self.channel_emote_map.values():
             for values in cmap.values():
                 pool.update(values)
-        pool.add(self.DEFAULT_EMOTE)
         return pool
 
     def infer_emotion(self, text):
@@ -173,7 +167,7 @@ class EmoteManager:
                 seen.add(e)
                 unique.append(e)
 
-        return unique or [self.DEFAULT_EMOTE]
+        return unique
 
     def _resolve_emotions(self, text, mood=None):
         """
@@ -194,7 +188,11 @@ class EmoteManager:
         if not non_repeated:
             non_repeated = [e for e in candidates if not channel_hist or e != channel_hist[-1]]
         if not non_repeated:
-            non_repeated = [self.DEFAULT_EMOTE]
+            non_repeated = candidates[:]
+
+        if not non_repeated:
+            logging.debug("[Emote] Nenhum emote encontrado para canal=%s emotion=%s", channel, emotion)
+            return ""
 
         chosen = random.choice(non_repeated)
         if chosen in blocked:
@@ -204,7 +202,8 @@ class EmoteManager:
             elif candidates:
                 chosen = candidates[0]
             else:
-                chosen = self.DEFAULT_EMOTE
+                logging.debug("[Emote] Nenhuma alternativa de emote disponível para canal=%s", channel)
+                return ""
 
         last_channel_emote = channel_hist[-1] if channel_hist else None
         last_global_emote = self.global_emote_history[-1] if self.global_emote_history else None
