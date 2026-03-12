@@ -37,6 +37,9 @@ logging.basicConfig(
 )
 
 class TwitchIRC:
+    TOPIC_MIN_OCCURRENCES = 3
+    TOPIC_SCAN_WINDOW = 25
+
     def __init__(self):
         # Core Auth (sempre necessário)
         self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
@@ -291,6 +294,58 @@ class TwitchIRC:
 
         return social_summary, emote_summary, params_summary
 
+    def _extract_topic_candidate(self, content: str):
+        text = (content or "").lower().strip()
+        if not text:
+            return None
+
+        text = re.sub(r"https?://\S+", " ", text)
+        text = re.sub(r"[^\w\sáàãâéêíóôõúç]", " ", text)
+
+        stopwords = {
+            "de", "da", "do", "das", "dos", "em", "na", "no", "pra", "para", "que", "com",
+            "uma", "um", "as", "os", "eu", "tu", "ele", "ela", "isso", "isto", "aqui", "ali",
+            "tipo", "mano", "bot", "glorpinia", "glorp", "kkk", "kkkk", "k", "rs", "rss", "haha",
+            "não", "sim", "mais", "muito", "pouco", "como", "porque", "por", "se", "me", "te",
+        }
+
+        words = [w for w in text.split() if len(w) >= 4 and w not in stopwords and not w.startswith("@")] 
+        if not words:
+            return None
+        return " ".join(words[:4])
+
+    def _maybe_register_recurring_memory_loop(self, channel: str, author: str, content: str):
+        if channel not in self.recent_messages:
+            return
+
+        topic_candidate = self._extract_topic_candidate(content)
+        if not topic_candidate:
+            return
+
+        recent = list(self.recent_messages[channel])[-self.TOPIC_SCAN_WINDOW :]
+        occurrences = 0
+        authors = set()
+        for msg in recent:
+            msg_topic = self._extract_topic_candidate(msg.get("content", ""))
+            if msg_topic == topic_candidate:
+                occurrences += 1
+                author_name = (msg.get("author") or "").lower()
+                if author_name:
+                    authors.add(author_name)
+
+        if occurrences < self.TOPIC_MIN_OCCURRENCES:
+            return
+
+        users = sorted(authors | {author.lower()})
+        self.social_dynamics.add_memory_loop(topic=topic_candidate, users=users, weight=0.55, loop_type="recurring_topic")
+        logging.debug(
+            "[Main] recurring_topic loop_created channel=%s topic=%s occurrences=%s users=%s",
+            channel,
+            topic_candidate,
+            occurrences,
+            users,
+        )
+
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
         if message.startswith("PING"):
@@ -339,6 +394,7 @@ class TwitchIRC:
                 len(self.recent_messages[channel]),
                 author,
             )
+            self._maybe_register_recurring_memory_loop(channel, author, content)
             
             # PROCESSA COMANDOS E TRIGGERS
 
@@ -351,6 +407,7 @@ class TwitchIRC:
                 command_raw = parts[0][1:].lower()
 
                 if command_raw == "8ball":
+                    self.social_dynamics.add_memory_loop(topic="previsões duvidosas do 8ball", users=[author_lower], weight=0.45)
                     question = " ".join(parts[1:])
                     if not question:
                         self.send_message(channel, f"@{author}, faça uma pergunta! glorp")
@@ -471,6 +528,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "fortune" or command_raw == "tarot":
+                    self.social_dynamics.add_memory_loop(topic="tarot e previsões", users=[author_lower], weight=0.45)
                     target = None
                     if len(parts) > 1:
                         target = parts[1]
@@ -479,6 +537,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "roll" or command_raw == "d20":
+                    self.social_dynamics.add_memory_loop(topic="dados do caos", users=[author_lower], weight=0.45)
                     query = " ".join(parts[1:]) if len(parts) > 1 else ""
 
                     self.rpg_feature.trigger_roll(channel, author, query)
