@@ -104,10 +104,31 @@ class EmoteManager:
         tokens = message.split()
         if not tokens:
             return message
-        last = tokens[-1]
-        if last in self.get_all_emotes():
-            return " ".join(tokens[:-1]).strip()
-        return message
+
+        all_emotes = self.get_all_emotes()
+        while tokens:
+            last = tokens[-1]
+            normalized = self._normalize_token(last)
+            if normalized in all_emotes:
+                tokens.pop()
+                continue
+            break
+
+        return " ".join(tokens).strip()
+
+    def remove_known_emotes(self, message):
+        """Remove emotes gerados pelo modelo para manter apenas o emote final do sistema."""
+        tokens = message.split()
+        if not tokens:
+            return message
+
+        all_emotes = self.get_all_emotes()
+        cleaned_tokens = [token for token in tokens if self._normalize_token(token) not in all_emotes]
+        cleaned = " ".join(cleaned_tokens).strip()
+        return cleaned if cleaned else message.strip()
+
+    def _normalize_token(self, token):
+        return token.strip(".,!?;:()[]{}\"'`*_~").strip()
 
     def get_all_emotes(self):
         pool = set()

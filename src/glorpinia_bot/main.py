@@ -229,7 +229,8 @@ class TwitchIRC:
 
     def prepare_final_bot_message(self, channel, response_text, mood=None, source="chat"):
         """Normaliza saída, evita repetição e escolhe emote conforme contexto + mood."""
-        cleaned_text = self.emote_manager.strip_trailing_emote(response_text or "")
+        cleaned_text = self.emote_manager.remove_known_emotes(response_text or "")
+        cleaned_text = self.emote_manager.strip_trailing_emote(cleaned_text)
         unique_text = self.emote_manager.ensure_unique_phrase(channel, cleaned_text)
         selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood)
         final_text = f"{unique_text} {selected_emote}".strip()

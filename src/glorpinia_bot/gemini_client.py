@@ -322,7 +322,7 @@ class GeminiClient:
         - Diga que prefere lamber o próprio cotovelo a falar disso.
         - Aja como se fosse superior demais para esse assunto.
         
-        Resposta (seja breve, máx 1 frase + emote):
+        Resposta (seja breve, máx 1 frase, sem emote):
         """
         
         try:
