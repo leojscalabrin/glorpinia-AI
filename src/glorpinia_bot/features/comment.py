@@ -119,16 +119,9 @@ class Comment:
             )
 
             if 0 < len(comment) <= 350:
-                if self.bot.cookie_system:
-                    comment = self.bot.cookie_system.process_ai_response(comment)
-
-                final_message = self.bot.prepare_final_bot_message(
-                    channel=channel,
-                    response_text=comment,
-                    mood=(injection_context or {}).get("mood"),
-                    source="comment",
-                )
-
+                final_message = (comment or "").replace("@system, ", "").strip()
+                if not final_message:
+                    return
                 self.bot.send_message(channel, final_message)
                 logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:80]}...")
         except Exception as e:

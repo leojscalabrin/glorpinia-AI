@@ -11,6 +11,7 @@ import threading
 from datetime import datetime
 from collections import deque
 import subprocess
+import random
 from google.cloud import speech
 
 from .twitch_auth import TwitchAuth
@@ -39,6 +40,8 @@ logging.basicConfig(
 class TwitchIRC:
     TOPIC_MIN_OCCURRENCES = 3
     TOPIC_SCAN_WINDOW = 25
+    IMPERIAL_TAX_PROBABILITY = 0.008
+    IMPERIAL_TAX_COOLDOWN_SECONDS = 900
 
     def __init__(self):
         # Core Auth (sempre necessário)
@@ -99,6 +102,7 @@ class TwitchIRC:
         
         # Cooldown timer para o trigger "oziell"
         self.last_oziell_time = 0
+        self.last_imperial_tax_time_by_channel = {}
 
         # Lista de Admins
         admin_nicks_str = os.getenv("ADMIN_NICKS") 
@@ -346,6 +350,62 @@ class TwitchIRC:
             users,
         )
 
+
+    def _roll_imperial_tax_trigger(self, channel: str):
+        """
+        Trigger randômico de imposto imperial baseado em TODO fluxo de mensagens do chat.
+        Não depende de menção direta ao bot.
+        """
+        if not self.cookie_system or not self.gemini_client:
+            return
+
+        now = time.time()
+        last_time = self.last_imperial_tax_time_by_channel.get(channel, 0)
+        if (now - last_time) < self.IMPERIAL_TAX_COOLDOWN_SECONDS:
+            return
+
+        if self.live_status.get(channel, False):
+            return
+
+        if random.random() > self.IMPERIAL_TAX_PROBABILITY:
+            return
+
+        top_debtors = self.cookie_system.get_debt_leaderboard(1)
+        if not top_debtors:
+            return
+
+        target_user, debt_value = top_debtors[0]
+        target_user = target_user.lower()
+        if target_user in {self.auth.bot_nick.lower(), "system", "user", "usuario"}:
+            return
+
+        tax_amount = min(20, max(5, abs(int(debt_value)) // 5 or 5))
+        self.cookie_system.remove_cookies(target_user, tax_amount)
+
+        try:
+            injection_context = self.social_dynamics.get_injection_payload()
+            prompt = (
+                f"A corte imperial executou um imposto surpresa em @{target_user} de {tax_amount} cookies "
+                f"(saldo devedor atual: {debt_value}). Faça um anúncio curto, dramático e divertido em 1 frase."
+            )
+            tax_message = self.gemini_client.get_response(
+                query=prompt,
+                channel=channel,
+                author="system",
+                memory_mgr=self.memory_mgr,
+                skip_search=True,
+                injection_context=injection_context,
+                allow_cookie_actions=False,
+            )
+            clean = (tax_message or "").replace("@system, ", "").strip()
+            if clean:
+                self.send_message(channel, clean)
+        except Exception as exc:
+            logging.error("[Main] Falha no trigger de imposto imperial: %s", exc)
+            self.send_message(channel, f"Imposto imperial aplicado em @{target_user}: -{tax_amount}🍪")
+
+        self.last_imperial_tax_time_by_channel[channel] = now
+
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
         if message.startswith("PING"):
@@ -377,7 +437,7 @@ class TwitchIRC:
                 self.send_message(channel, "Então to indo nessa pessoal peepoHey")
                 return
             
-            self.social_dynamics.observe_message(author, content)
+            self.social_dynamics.observe_message(author, content, bot_nick=self.auth.bot_nick)
 
             # Salvar no Histórico Recente (Memória de Curto Prazo)
             if channel not in self.recent_messages:
@@ -395,7 +455,8 @@ class TwitchIRC:
                 author,
             )
             self._maybe_register_recurring_memory_loop(channel, author, content)
-            
+            self._roll_imperial_tax_trigger(channel)
+
             # PROCESSA COMANDOS E TRIGGERS
 
             if content_lower == 'glorp':
@@ -605,7 +666,8 @@ class TwitchIRC:
                             author=author, 
                             memory_mgr=self.memory_mgr,
                             recent_history=recent_history_list,
-                            injection_context=injection_context
+                            injection_context=injection_context,
+                            allow_cookie_actions=True,
                         )
                         
                         if response_text:
