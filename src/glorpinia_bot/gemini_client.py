@@ -175,7 +175,8 @@ class GeminiClient:
         memory_context = ""
         if memory_mgr:
             try:
-                retrieved = memory_mgr.search_memory(channel, clean_query)
+                memory_mgr.load_user_memory(channel, author)
+                retrieved = memory_mgr.search_memory(channel, author, clean_query)
                 if retrieved: memory_context = f"**HISTÓRICO RECENTE:**\n{retrieved}"
             except: pass
 
