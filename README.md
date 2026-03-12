@@ -33,16 +33,18 @@ Obtain tokens from:
 ### Features
 -Gemini-Powered CHAT: Responds to @bot_nick mentions using a defined personality (glorpinia_profile.txt) and conversation history (RAG).
 
--Proactive COMMENTARY: Periodically comments on the last 2 minutes of chat conversation (Default: Off).
+-Proactive COMMENTARY: Periodically comments on the last 2 minutes of chat conversation (Default: On).
 
 -Audio LISTEN (Stub): A non-functional stub for listening to stream audio. Requires implementation of an STT service to work (Default: Off).
 
 #### Admin Commands
 Admin commands are restricted to users listed in the ADMIN_NICKS environment variable.
 
-!glorp <feature> <on|off>: Toggles features. Features: chat, listen, comment.
-!glorp check: Checks the status (On/Off) of all modules.
-!glorp commands: Lists available commands.
+*chat <on|off>: Toggles chat responses (admin only).
+*listen <on|off>: Toggles listen module (admin only).
+*comment <on|off>: Toggles proactive commentary (admin only).
+*check: Checks the status (On/Off) of all modules.
+*commands: Lists available commands.
 
 ### Local Execution
 
