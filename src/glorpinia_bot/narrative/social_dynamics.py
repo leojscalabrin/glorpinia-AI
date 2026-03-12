@@ -159,6 +159,40 @@ class SocialDynamicsEngine:
         self.memory_loops = self.memory_loops[-self.MAX_LOOPS :]
         self._prune_loops()
 
+    def get_debug_snapshot(self) -> Dict[str, object]:
+        active_loop = None
+        if self.active_loop_for_message:
+            active_loop = {
+                "topic": self.active_loop_for_message.topic,
+                "type": self.active_loop_for_message.type,
+                "weight": round(self.active_loop_for_message.weight, 3),
+            }
+
+        return {
+            "message_count": self.message_count,
+            "users_seen": sorted(self.users_seen),
+            "mood": self.bot_state.get("mood", "neutral"),
+            "mood_duration": self.bot_state.get("duration", 0),
+            "drama_state": dict(self.drama_state),
+            "active_memory_loop": active_loop,
+            "memory_loops": [
+                {
+                    "topic": loop.topic,
+                    "users": loop.users,
+                    "weight": round(loop.weight, 3),
+                    "last_used": loop.last_used,
+                    "type": loop.type,
+                }
+                for loop in self.memory_loops
+            ],
+            "random_roll_parameters": {
+                "favorite_probability": self.FAVORITE_PROBABILITY,
+                "enemy_probability": self.ENEMY_PROBABILITY,
+                "suspect_probability": self.SUSPECT_PROBABILITY,
+                "memory_loop_probability": self.LOOP_PROBABILITY,
+            },
+        }
+
     def _prune_loops(self):
         self.memory_loops = [loop for loop in self.memory_loops if loop.weight >= self.MIN_LOOP_WEIGHT]
         if len(self.memory_loops) > self.MAX_LOOPS:

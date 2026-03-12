@@ -242,8 +242,54 @@ class TwitchIRC:
             final_text = f"{unique_text} {selected_emote}".strip()
 
         self.last_bot_message_by_channel[channel] = final_text
+        emote_debug = self.emote_manager.get_debug_state(channel)
+        logging.debug(
+            "[Main] emote_debug source=%s channel=%s last_channel=%s last_global=%s selected=%s",
+            source,
+            channel,
+            emote_debug.get("last_channel_emote"),
+            emote_debug.get("last_global_emote"),
+            emote_debug.get("last_selected_channel"),
+        )
         logging.debug("[Main] final_message source=%s channel=%s mood=%s text=%s", source, channel, mood, final_text)
         return final_text
+
+    def _format_admin_debug_message(self, channel):
+        social_debug = self.social_dynamics.get_debug_snapshot()
+        emote_debug = self.emote_manager.get_debug_state(channel)
+
+        drama_state = social_debug.get("drama_state", {})
+        rivals = drama_state.get("rivalries") or []
+        users_seen = social_debug.get("users_seen", [])
+        random_params = social_debug.get("random_roll_parameters", {})
+
+        def _fmt(name, value):
+            return f"{name}: {value if value else '-'}"
+
+        social_summary = (
+            f"Mood: {social_debug.get('mood', 'neutral')}({social_debug.get('mood_duration', 0)}) | "
+            f"{_fmt('Fav', drama_state.get('favorite_of_the_day'))} | "
+            f"{_fmt('Enemy', drama_state.get('enemy_of_the_day'))} | "
+            f"{_fmt('Suspect', drama_state.get('suspect'))} | "
+            f"Rivais: {', '.join(rivals) if rivals else '-'} | "
+            f"Users: {len(users_seen)}"
+        )
+
+        emote_summary = (
+            f"Emote último(canal/global): {emote_debug.get('last_channel_emote') or '-'} / "
+            f"{emote_debug.get('last_global_emote') or '-'} | "
+            f"Emote escolhido(msg): {emote_debug.get('last_selected_channel') or '-'}"
+        )
+
+        params_summary = (
+            "Rolls drama => "
+            f"fav:{random_params.get('favorite_probability', 0):.3f}, "
+            f"enemy:{random_params.get('enemy_probability', 0):.3f}, "
+            f"suspect:{random_params.get('suspect_probability', 0):.3f}, "
+            f"loop:{random_params.get('memory_loop_probability', 0):.3f}"
+        )
+
+        return social_summary, emote_summary, params_summary
 
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
@@ -406,6 +452,7 @@ class TwitchIRC:
                         "listen": "(Admin) Toggle listen. Ex: *listen on", 
                         "comment": "(Admin) Toggle comment. Ex: *comment on", 
                         "scan": "(Admin) Scan manual.",
+                        "debug": "(Admin) Mostra mood atual, drama state do dia e debug de emotes.",
                         "addcookie": "(Admin) Add cookies. Ex: *addcookie nick 100", 
                         "removecookie": "(Admin) Remove cookies. Ex: *removecookie nick 100",
                         "analysis": "Análise de um assunto, dúvidas ou resumo do chat. Ex: *analysis [pergunta específica]",
@@ -438,7 +485,7 @@ class TwitchIRC:
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)
-                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check"]
+                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "debug"]
                 
                 if command_raw in admin_cmds:
                     if author.lower() in self.admin_nicks:
@@ -562,10 +609,16 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, slots, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], check, scan")
+                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, slots, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], check, scan, debug")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)
+                return
+            elif command_name == "debug":
+                social_summary, emote_summary, params_summary = self._format_admin_debug_message(channel)
+                self.send_long_message(channel, f"[DEBUG] {social_summary}")
+                self.send_long_message(channel, f"[DEBUG] {emote_summary}")
+                self.send_long_message(channel, f"[DEBUG] {params_summary}")
                 return
         
         # Comandos com 3 argumentos (*addcookie nick 10) -> len 3
