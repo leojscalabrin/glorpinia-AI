@@ -25,6 +25,7 @@ class EmoteManager:
         self.global_emote_history = deque(maxlen=history_size)
         self.channel_emote_history = defaultdict(lambda: deque(maxlen=history_size))
         self.channel_phrase_history = defaultdict(lambda: deque(maxlen=history_size))
+        self.last_selected_emote_by_channel = {}
 
         self.global_emote_map = self._load_emote_map(os.path.join(self.base_path, "emotes_global.txt"))
         self.channel_emote_map = self._load_channel_maps(os.path.join(self.base_path, "emotes_channels.txt"))
@@ -198,19 +199,37 @@ class EmoteManager:
             else:
                 chosen = self.DEFAULT_EMOTE
 
+        last_channel_emote = channel_hist[-1] if channel_hist else None
+        last_global_emote = self.global_emote_history[-1] if self.global_emote_history else None
+
         self.global_emote_history.append(chosen)
         channel_hist.append(chosen)
+        self.last_selected_emote_by_channel[channel.lower()] = chosen
+
         logging.debug(
-            "[Emote] canal=%s mood=%s emotion=%s candidatos=%s escolhido=%s hist_canal=%s hist_global=%s",
+            "[Emote] canal=%s mood=%s emotion=%s ultimo_canal=%s ultimo_global=%s candidatos=%s escolhido=%s hist_canal=%s hist_global=%s",
             channel,
             mood,
             f"{emotion}|{secondary_emotion}" if secondary_emotion else emotion,
+            last_channel_emote,
+            last_global_emote,
             candidates,
             chosen,
             list(channel_hist),
             list(self.global_emote_history),
         )
         return chosen
+
+    def get_debug_state(self, channel):
+        normalized_channel = channel.lower()
+        channel_hist = list(self.channel_emote_history[normalized_channel])
+        return {
+            "last_selected_channel": self.last_selected_emote_by_channel.get(normalized_channel),
+            "last_channel_emote": channel_hist[-1] if channel_hist else None,
+            "last_global_emote": self.global_emote_history[-1] if self.global_emote_history else None,
+            "channel_history": channel_hist,
+            "global_history": list(self.global_emote_history),
+        }
 
     def ensure_unique_phrase(self, channel, message):
         normalized = re.sub(r"\s+", " ", message.strip().lower())
