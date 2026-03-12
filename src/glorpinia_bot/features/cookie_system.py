@@ -242,8 +242,10 @@ class CookieSystem:
         if not text: return ""
 
         pattern = r"\[{1,2}\s*COOKIE\s*:\s*(GIVE|TAKE)\s*:\s*@?([A-Za-z0-9_]+)\s*:\s*(\d+)\s*\]{1,2}"
-        matches = re.findall(pattern, text, flags=re.IGNORECASE)
-        
+        trailing_block_match = re.search(rf"((?:\s*{pattern})+)\s*$", text, flags=re.IGNORECASE)
+        trailing_block = trailing_block_match.group(1) if trailing_block_match else ""
+        matches = re.findall(pattern, trailing_block, flags=re.IGNORECASE)
+
         feedback_parts = []
         MAX_TRANSACTION = 999
 
@@ -273,7 +275,7 @@ class CookieSystem:
             except Exception as e:
                 logging.error(f"[AI-BANK] Erro ao processar transação: {e}")
 
-        clean_text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+        clean_text = re.sub(rf"\s*{pattern}\s*$", "", text, flags=re.IGNORECASE).strip()
         
         clean_text = re.sub(r'(DAR|TIRAR|GIVE|TAKE|RECOMPENSA|PUNIÇÃO|AÇÃO|COMANDO|VALOR):\s*$', '', clean_text, flags=re.IGNORECASE).strip()
 

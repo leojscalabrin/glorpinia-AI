@@ -54,7 +54,7 @@ class SocialDynamicsEngine:
 
         self.bot_state = {"mood": "neutral", "duration": 0}
 
-    def observe_message(self, author: str, content: str):
+    def observe_message(self, author: str, content: str, bot_nick: Optional[str] = None):
         self.message_count += 1
         logging.debug("[SocialDynamics] observe_message count=%s author=%s content=%s", self.message_count, author, content[:120])
         self.users_seen.add(author.lower())
@@ -66,7 +66,7 @@ class SocialDynamicsEngine:
         self._prune_loops()
         self._roll_memory_loop()
         self._roll_drama_events(author)
-        self._update_mood(content)
+        self._update_mood(author=author, content=content, bot_nick=bot_nick)
 
     def get_injection_payload(self) -> Dict[str, object]:
         memory_loop = None
@@ -136,20 +136,13 @@ class SocialDynamicsEngine:
                 self.drama_state["rivalries"].append(rivalry)
                 self.drama_state["rivalries"] = self.drama_state["rivalries"][-5:]
 
-    def _update_mood(self, content: str):
-        text = content.lower()
+    def _update_mood(self, author: str, content: str, bot_nick: Optional[str] = None):
+        text = (content or "").lower().strip()
+        lowered_author = (author or "").lower()
+        bot_aliases = {"glorpinia", "glorp", (bot_nick or "").lower().strip()}
+        bot_aliases.discard("")
 
-        mood_event = None
-        if any(token in text for token in ["glorpinia linda", "boa bot", "te amo", "braba"]):
-            mood_event = ("happy", 6)
-        elif any(token in text for token in ["burra", "lixo", "idiota", "bot ruim"]):
-            mood_event = ("angry", 4)
-        elif "?" in text and any(token in text for token in ["por que", "como", "explica", "teoria"]):
-            mood_event = ("curious", 5)
-        elif re.search(r"\bcaos|anarquia|glitch\b", text):
-            mood_event = ("chaotic", 3)
-        elif re.search(r"\btsundere\b", text):
-            mood_event = ("tsundere", 4)
+        mood_event = self._infer_contextual_mood_event(text=text, author=lowered_author, bot_aliases=bot_aliases)
 
         if mood_event:
             self.bot_state["mood"] = mood_event[0]
@@ -164,6 +157,39 @@ class SocialDynamicsEngine:
             self.bot_state["mood"] = "neutral"
             self.bot_state["duration"] = 0
         logging.debug("[SocialDynamics] mood_state=%s", self.bot_state)
+
+    def _infer_contextual_mood_event(self, text: str, author: str, bot_aliases: set):
+        if not text:
+            return None
+
+        rude_tokens = {
+            "burra", "burro", "idiota", "lixo", "inutil", "otaria", "otário", "ridicula", "ridículo", "bot ruim", "calada", "cala boca"
+        }
+        praise_tokens = {
+            "boa", "mandou bem", "linda", "fofa", "genia", "gênia", "braba", "te amo", "arrasou"
+        }
+        question_tokens = {"por que", "porque", "como", "explica", "teoria", "qual", "quando"}
+
+        mentions_bot = any(alias and (f"@{alias}" in text or alias in text) for alias in bot_aliases)
+        second_person = any(token in text for token in ["vc", "você", "tu", "teu", "tua", "sua", "seu", "te "])
+        direct_to_bot = mentions_bot or second_person
+
+        if direct_to_bot and any(token in text for token in rude_tokens):
+            return ("angry", 5)
+
+        if direct_to_bot and any(token in text for token in praise_tokens):
+            return ("happy", 6)
+
+        if mentions_bot and "?" in text and any(token in text for token in question_tokens):
+            return ("curious", 5)
+
+        if re.search(r"\b(caos|anarquia|glitch)\b", text):
+            return ("chaotic", 3)
+
+        if re.search(r"\btsundere\b", text):
+            return ("tsundere", 4)
+
+        return None
 
     def add_memory_loop(self, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke"):
         normalized_topic = (topic or "").strip()

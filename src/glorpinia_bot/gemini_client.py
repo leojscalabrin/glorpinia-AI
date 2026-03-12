@@ -156,7 +156,7 @@ class GeminiClient:
         self.models_cache[channel_name] = new_model
         return new_model
 
-    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False, injection_context=None):
+    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False, injection_context=None, allow_cookie_actions=False):
         """
         Gera uma resposta. 
         Se bloquear -> Tenta Retry sem busca.
@@ -230,11 +230,11 @@ class GeminiClient:
             logging.error(f"[ERROR] Falha crítica: {e}")
             generated = "O portal está instável. Sadge"
 
-        # Limpeza e Cookies
+        # Limpeza e pós-processamento
         generated = self._clean_response(generated)
-        if self.cookie_system:
-            generated = self.cookie_system.process_ai_response(generated, current_user=author)
         generated = self._maybe_apply_glitch(generated, query, channel)
+        if allow_cookie_actions and self.cookie_system:
+            generated = self.cookie_system.process_ai_response(generated, current_user=author)
 
         # Salva e Retorna
         if generated and "Sadge" not in generated:

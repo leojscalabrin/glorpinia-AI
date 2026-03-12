@@ -9,15 +9,6 @@ class EmoteManager:
     """Gerencia emotes por contexto com anti-repetição global e por canal."""
 
     DEFAULT_EMOTE = "glorp"
-    MOOD_TO_EMOTION = {
-        "happy": "hype",
-        "angry": "angry",
-        "curious": "attention",
-        "chaotic": "laugh",
-        "tsundere": "mockery",
-        "neutral": "neutral",
-    }
-
     def __init__(self, base_path=None, history_size=8):
         self.base_path = base_path or os.getcwd()
         self.history_size = history_size
@@ -185,17 +176,12 @@ class EmoteManager:
         return unique or [self.DEFAULT_EMOTE]
 
     def _resolve_emotions(self, text, mood=None):
+        """
+        Resolve emoção exclusivamente pelo contexto textual da mensagem.
+        O parâmetro `mood` é mantido apenas por compatibilidade de assinatura.
+        """
         inferred = self.infer_emotion(text)
-        mood_emotion = self.MOOD_TO_EMOTION.get((mood or "").lower())
-
-        # O mood "neutral" nunca deve forçar a emoção da mensagem.
-        if mood_emotion == "neutral":
-            mood_emotion = None
-
-        if inferred == "neutral" and mood_emotion:
-            return mood_emotion, None
-
-        return inferred, mood_emotion
+        return inferred, None
 
     def choose_emote(self, channel, text, mood=None):
         emotion, secondary_emotion = self._resolve_emotions(text, mood=mood)
