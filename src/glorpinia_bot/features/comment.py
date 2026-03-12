@@ -4,6 +4,11 @@ import logging
 import random
 
 class Comment:
+    DRAMA_PARAM_MENTION_PROBABILITY = 0.35
+    COMMENT_IMPERIAL_TAX_PROBABILITY = 0.18
+    COMMENT_IMPERIAL_TAX_MIN = 5
+    COMMENT_IMPERIAL_TAX_MAX = 18
+
     def __init__(self, bot):
         """
         Inicializa a feature de comentários periódicos.
@@ -99,6 +104,9 @@ class Comment:
             # Formata a lista de usuários para o prompt
             users_str = ", ".join(active_users)
 
+            drama_param_hint = self._build_drama_param_hint()
+            tax_context = self._maybe_apply_comment_imperial_tax(channel, active_users)
+
             comment_query = (
                 f"O chat está falando sobre: '{topic}'. "
                 f"Faça um comentário curto (1-2 frases), divertido e com sua personalidade sobre esse assunto. "
@@ -107,6 +115,16 @@ class Comment:
                 f"os ÚNICOS usuários válidos presentes agora são: [{users_str}]. "
                 f"NÃO use cookies em 'user', 'system' ou pessoas fora dessa lista."
             )
+
+            if drama_param_hint:
+                comment_query += f"\n\n{drama_param_hint}"
+
+            if tax_context:
+                comment_query += (
+                    "\n\n"
+                    f"Imposto imperial já executado antes desta resposta: {tax_context}. "
+                    "Mencione o imposto no seu comentário, de forma curta e teatral."
+                )
 
             injection_context = self.bot.social_dynamics.get_injection_payload()
             comment = self.bot.gemini_client.get_response(
@@ -126,3 +144,58 @@ class Comment:
                 logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:80]}...")
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
+
+    def _build_drama_param_hint(self):
+        if random.random() >= self.DRAMA_PARAM_MENTION_PROBABILITY:
+            return None
+
+        random_params = self.bot.social_dynamics.get_debug_snapshot().get("random_roll_parameters", {})
+        if not random_params:
+            return None
+
+        param_label_map = {
+            "favorite_probability": "favorite_probability",
+            "enemy_probability": "enemy_probability",
+            "suspect_probability": "suspect_probability",
+            "memory_loop_probability": "memory_loop_probability",
+        }
+        valid_keys = [key for key in param_label_map if key in random_params]
+        if not valid_keys:
+            return None
+
+        chosen_key = random.choice(valid_keys)
+        chosen_value = random_params.get(chosen_key, 0)
+        return (
+            "Com baixa probabilidade, encaixe UMA menção breve ao Drama Engine citando exatamente "
+            f"o parâmetro `{param_label_map[chosen_key]}` (valor atual: {chosen_value:.3f})."
+        )
+
+    def _maybe_apply_comment_imperial_tax(self, channel: str, active_users: list):
+        if random.random() >= self.COMMENT_IMPERIAL_TAX_PROBABILITY:
+            return None
+
+        if not self.bot.cookie_system:
+            return None
+
+        eligible_users = []
+        for user in active_users:
+            user_lower = (user or "").strip().lower()
+            if not user_lower:
+                continue
+            if user_lower in {"system", "user", "usuario", self.bot.auth.bot_nick.lower()}:
+                continue
+            eligible_users.append(user_lower)
+
+        if not eligible_users:
+            return None
+
+        target_user = random.choice(eligible_users)
+        tax_amount = random.randint(self.COMMENT_IMPERIAL_TAX_MIN, self.COMMENT_IMPERIAL_TAX_MAX)
+        self.bot.cookie_system.remove_cookies(target_user, tax_amount)
+        logging.info(
+            "[Comment] imposto imperial via comment_trigger channel=%s target=%s amount=%s",
+            channel,
+            target_user,
+            tax_amount,
+        )
+        return f"@{target_user} perdeu {tax_amount} cookies"
