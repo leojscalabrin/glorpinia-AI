@@ -1,6 +1,8 @@
 import random
 import re
 import logging
+import json
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -22,21 +24,26 @@ class SocialDynamicsEngine:
 
     MAX_LOOPS = 8
     MIN_LOOP_WEIGHT = 0.2
+    LOOP_TTL_MESSAGES = 600
+    DEFAULT_STORAGE_PATH = Path("glorpinia_memory_loops.json")
 
-    def __init__(self):
+    def __init__(self, storage_path: Optional[Path] = None):
         self.message_count = 0
         self.users_seen = set()
         self.active_loop_for_message: Optional[MemoryLoop] = None
+        self.storage_path = Path(storage_path) if storage_path else self.DEFAULT_STORAGE_PATH
 
         self.memory_loops: List[MemoryLoop] = [
             MemoryLoop(
                 topic="moon apostando cookies",
                 users=["moongrade"],
                 weight=0.8,
-                last_used=0,
+                last_used=self.message_count,
                 type="running_joke",
             )
         ]
+        self._load_memory_loops()
+        self._prune_loops(save=False)
 
         self.drama_state: Dict[str, Optional[str]] = {
             "favorite_of_the_day": None,
@@ -68,6 +75,7 @@ class SocialDynamicsEngine:
             memory_loop = {"topic": loop.topic, "type": loop.type}
             loop.weight *= 0.9
             loop.last_used = self.message_count
+            self._persist_loops()
             self._prune_loops()
 
         payload = {
@@ -98,7 +106,12 @@ class SocialDynamicsEngine:
             running += max(0.0, loop.weight)
             if pick <= running:
                 self.active_loop_for_message = loop
-                logging.debug("[SocialDynamics] memory_loop selected topic=%s weight=%.3f", loop.topic, loop.weight)
+                logging.debug(
+                    "[SocialDynamics] memory_loop selected topic=%s weight=%.3f last_used=%s",
+                    loop.topic,
+                    loop.weight,
+                    loop.last_used,
+                )
                 return
 
     def _roll_drama_events(self, author: str):
@@ -153,9 +166,37 @@ class SocialDynamicsEngine:
         logging.debug("[SocialDynamics] mood_state=%s", self.bot_state)
 
     def add_memory_loop(self, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke"):
+        normalized_topic = (topic or "").strip()
+        if not normalized_topic:
+            return
+
+        for loop in self.memory_loops:
+            if loop.topic.lower() == normalized_topic.lower():
+                merged_users = sorted(set(loop.users + (users or [])))
+                loop.users = merged_users
+                loop.weight = max(loop.weight, weight)
+                loop.last_used = self.message_count
+                logging.debug(
+                    "[SocialDynamics] memory_loop refreshed topic=%s users=%s weight=%.3f",
+                    loop.topic,
+                    loop.users,
+                    loop.weight,
+                )
+                self._persist_loops()
+                self._prune_loops()
+                return
+
         self.memory_loops.append(
-            MemoryLoop(topic=topic, users=users or [], weight=weight, last_used=self.message_count, type=loop_type)
+            MemoryLoop(topic=normalized_topic, users=users or [], weight=weight, last_used=self.message_count, type=loop_type)
         )
+        logging.debug(
+            "[SocialDynamics] memory_loop created topic=%s users=%s weight=%.3f type=%s",
+            normalized_topic,
+            users or [],
+            weight,
+            loop_type,
+        )
+        self._persist_loops()
         self.memory_loops = self.memory_loops[-self.MAX_LOOPS :]
         self._prune_loops()
 
@@ -193,7 +234,77 @@ class SocialDynamicsEngine:
             },
         }
 
-    def _prune_loops(self):
-        self.memory_loops = [loop for loop in self.memory_loops if loop.weight >= self.MIN_LOOP_WEIGHT]
+    def _prune_loops(self, save: bool = True):
+        before = len(self.memory_loops)
+        retained_loops: List[MemoryLoop] = []
+        for loop in self.memory_loops:
+            is_stale = self.message_count - loop.last_used > self.LOOP_TTL_MESSAGES
+            has_min_weight = loop.weight >= self.MIN_LOOP_WEIGHT
+            if is_stale:
+                logging.debug(
+                    "[SocialDynamics] memory_loop expired topic=%s reason=ttl age=%s ttl=%s",
+                    loop.topic,
+                    self.message_count - loop.last_used,
+                    self.LOOP_TTL_MESSAGES,
+                )
+                continue
+            if not has_min_weight:
+                logging.debug(
+                    "[SocialDynamics] memory_loop expired topic=%s reason=weight weight=%.3f min=%.3f",
+                    loop.topic,
+                    loop.weight,
+                    self.MIN_LOOP_WEIGHT,
+                )
+                continue
+            retained_loops.append(loop)
+
+        self.memory_loops = retained_loops
         if len(self.memory_loops) > self.MAX_LOOPS:
             self.memory_loops = sorted(self.memory_loops, key=lambda l: l.weight, reverse=True)[: self.MAX_LOOPS]
+
+        changed = len(self.memory_loops) != before
+        if changed and save:
+            self._persist_loops()
+
+    def _load_memory_loops(self):
+        if not self.storage_path.exists():
+            self._persist_loops()
+            return
+        try:
+            raw = json.loads(self.storage_path.read_text(encoding="utf-8"))
+            loaded_loops = []
+            for item in raw:
+                topic = (item.get("topic") or "").strip()
+                if not topic:
+                    continue
+                loaded_loops.append(
+                    MemoryLoop(
+                        topic=topic,
+                        users=[str(user).lower() for user in item.get("users", []) if user],
+                        weight=float(item.get("weight", 0.5)),
+                        last_used=int(item.get("last_used", 0)),
+                        type=item.get("type", "running_joke"),
+                    )
+                )
+            if loaded_loops:
+                self.memory_loops = loaded_loops[-self.MAX_LOOPS :]
+            logging.debug("[SocialDynamics] memory_loops loaded path=%s count=%s", self.storage_path, len(self.memory_loops))
+        except Exception as exc:
+            logging.error("[SocialDynamics] failed loading memory loops path=%s error=%s", self.storage_path, exc)
+
+    def _persist_loops(self):
+        serialized = [
+            {
+                "topic": loop.topic,
+                "users": loop.users,
+                "weight": loop.weight,
+                "last_used": loop.last_used,
+                "type": loop.type,
+            }
+            for loop in self.memory_loops
+        ]
+        try:
+            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            self.storage_path.write_text(json.dumps(serialized, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logging.error("[SocialDynamics] failed persisting memory loops path=%s error=%s", self.storage_path, exc)
