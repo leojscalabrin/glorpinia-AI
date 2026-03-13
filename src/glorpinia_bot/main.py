@@ -246,18 +246,18 @@ class TwitchIRC:
             else:
                 current_delay = split_delay_sec
 
-    def prepare_final_bot_message(self, channel, response_text, mood=None, source="chat"):
+    def prepare_final_bot_message(self, channel, response_text, mood=None, source="chat", context_text=None):
         """Normaliza saída, evita repetição e escolhe emote conforme contexto + mood."""
         cleaned_text = self.emote_manager.remove_known_emotes(response_text or "")
         cleaned_text = self.emote_manager.strip_trailing_emote(cleaned_text)
         unique_text = self.emote_manager.ensure_unique_phrase(channel, cleaned_text)
-        selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood)
+        selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood, context_text=context_text)
         final_text = f"{unique_text} {selected_emote}".strip()
 
         last = self.last_bot_message_by_channel.get(channel)
         if last and last == final_text:
             unique_text = self.emote_manager.ensure_unique_phrase(channel, f"{unique_text} ")
-            selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood)
+            selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood, context_text=context_text)
             final_text = f"{unique_text} {selected_emote}".strip()
 
         self.last_bot_message_by_channel[channel] = final_text
@@ -270,7 +270,14 @@ class TwitchIRC:
             emote_debug.get("last_global_emote"),
             emote_debug.get("last_selected_channel"),
         )
-        logging.debug("[Main] final_message source=%s channel=%s mood=%s text=%s", source, channel, mood, final_text)
+        logging.debug(
+            "[Main] final_message source=%s channel=%s mood=%s emotion=%s text=%s",
+            source,
+            channel,
+            mood,
+            emote_debug.get("last_resolved_emotion"),
+            final_text,
+        )
         return final_text
 
     def _format_admin_debug_message(self, channel):
@@ -682,6 +689,7 @@ class TwitchIRC:
                                 response_text=response_text,
                                 mood=current_mood,
                                 source="mention",
+                                context_text=content,
                             )
                             self.send_long_message(channel, final_text)
                             
