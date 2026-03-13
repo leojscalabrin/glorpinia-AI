@@ -157,8 +157,19 @@ class TwitchIRC:
             full_msg = f"PRIVMSG #{channel} :{message}\r\n"
             self.ws.send(full_msg)
             print(f"[BOT] {channel}: {message}")
+            self._register_recent_message(channel, self.auth.bot_nick, message)
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
+
+    def _register_recent_message(self, channel, author, content):
+        if channel not in self.recent_messages:
+            self.recent_messages[channel] = deque(maxlen=100)
+
+        self.recent_messages[channel].append({
+            "author": author,
+            "content": content,
+            "timestamp": time.time()
+        })
     
     def _send_message_part(self, channel, part, delay):
         """[HELPER] Espera (em um thread) e envia uma parte da mensagem."""
@@ -169,6 +180,7 @@ class TwitchIRC:
                 full_msg = f"PRIVMSG #{channel} :{part}\r\n"
                 self.ws.send(full_msg)
                 print(f"[BOT-PART] {channel}: {part}")
+                self._register_recent_message(channel, self.auth.bot_nick, part)
             else:
                 print(f"[ERROR] WebSocket desconectado ao tentar enviar parte: {part}")
         except Exception as e:
@@ -440,14 +452,7 @@ class TwitchIRC:
             self.social_dynamics.observe_message(author, content, bot_nick=self.auth.bot_nick)
 
             # Salvar no Histórico Recente (Memória de Curto Prazo)
-            if channel not in self.recent_messages:
-                self.recent_messages[channel] = deque(maxlen=100)
-            
-            self.recent_messages[channel].append({
-                "author": author,
-                "content": content,
-                "timestamp": time.time()
-            })
+            self._register_recent_message(channel, author, content)
             logging.debug(
                 "[Main] recent_message_history channel=%s size=%s last_author=%s",
                 channel,
