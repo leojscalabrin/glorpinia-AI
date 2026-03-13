@@ -6,6 +6,11 @@ import logging
 import re
 
 class CookieSystem:
+    COOKIE_COMMAND_PATTERN = re.compile(
+        r"(?:\[{1,2}\s*)?COOKIE\s*:\s*(GIVE|TAKE)\s*:\s*@?([A-Za-z0-9_]+)\s*:\s*(\d+)(?:\s*\]{1,2})?",
+        flags=re.IGNORECASE,
+    )
+
     def __init__(self, bot):
         """
         Inicializa o sistema de cookies (moeda).
@@ -243,11 +248,7 @@ class CookieSystem:
 
         # Captura comandos válidos de cookie em qualquer ponto da resposta.
         # Isso evita vazamento quando a IA coloca texto depois da tag (ex: "[[COOKIE:TAKE:foo:10]] DinkDonk").
-        command_pattern = re.compile(
-            r"\[{1,2}\s*COOKIE\s*:\s*(GIVE|TAKE)\s*:\s*@?([A-Za-z0-9_]+)\s*:\s*(\d+)\s*\]{1,2}",
-            flags=re.IGNORECASE,
-        )
-        matches = command_pattern.findall(text)
+        matches = self.COOKIE_COMMAND_PATTERN.findall(text)
 
         feedback_parts = []
         MAX_TRANSACTION = 999
@@ -279,7 +280,7 @@ class CookieSystem:
                 logging.error(f"[AI-BANK] Erro ao processar transação: {e}")
 
         # Remove todas as tags de comando, mesmo quando aparecem no meio da mensagem.
-        clean_text = command_pattern.sub("", text).strip()
+        clean_text = self.strip_cookie_commands(text)
         
         clean_text = re.sub(r'(DAR|TIRAR|GIVE|TAKE|RECOMPENSA|PUNIÇÃO|AÇÃO|COMANDO|VALOR):\s*$', '', clean_text, flags=re.IGNORECASE).strip()
 
@@ -290,4 +291,17 @@ class CookieSystem:
         if feedback_parts:
             clean_text += " " + " ".join(feedback_parts)
         
+        return clean_text
+
+    def strip_cookie_commands(self, text: str) -> str:
+        """Remove tags/linhas de comando de cookie, inclusive formatos crus e variações malformadas."""
+        if not text:
+            return ""
+
+        clean_text = self.COOKIE_COMMAND_PATTERN.sub("", text).strip()
+        clean_text = re.sub(r"\b\[?\[?COOKIE\s*:\s*(GIVE|TAKE)\s*:?\s*$", "", clean_text, flags=re.IGNORECASE).strip()
+        clean_text = re.sub(r"\b(DAR|TIRAR)\s+COOKIES\b", "", clean_text, flags=re.IGNORECASE).strip()
+        clean_text = re.sub(r"`{1,3}\s*COOKIE[^`]*`{1,3}", "", clean_text, flags=re.IGNORECASE).strip()
+        clean_text = clean_text.replace("`", "").strip()
+        clean_text = re.sub(r"\s+", " ", clean_text).strip()
         return clean_text

@@ -132,16 +132,33 @@ class EmoteManager:
         t = (text or "").lower()
         score = defaultdict(int)
 
+        # Mapeamento por CONTEXTO de emote (emoção + ação/situação de chat).
         rule_map = {
-            "laugh": [r"\b(kkk+|haha+|kappa|ri\w+|piada|meme|zuera)\b"],
-            "sad": [r"\b(triste|sad|pena|depress|que ruim|droga|f|luto)\b"],
-            "angry": [r"\b(raiva|ódio|odio|irrit|burro|rid[íi]culo|calado|palha[çc]ada)\b"],
-            "hype": [r"\b(bora|vamo|boa+|top|insano|brabo|caralho|letsgo|pog)\b"],
-            "cute": [r"\b(fof[oa]|amo|lind[oa]|obg|valeu|querid|meu bem)\b"],
-            "suspicion": [r"\b(sus|suspeit|estranho|modcheck|investiga)\b"],
-            "scared": [r"\b(medo|assust|tenso|socorro|monka)\b"],
-            "gambling": [r"\b(gamba|aposta|odd|cassino|slot|roleta)\b"],
-            "smart": [r"\b(teoria|evid[êe]ncia|l[óo]gica|an[áa]lise|5head)\b"],
+            "laugh": [r"\b(kkk+|haha+|ri\w+|piada|meme|zuera|engra[çc])\b"],
+            "sad": [r"\b(triste|sad|pena|depress|que ruim|droga|luto|chor)\b"],
+            "angry": [r"\b(raiva|[óo]dio|irrit|burro|rid[íi]culo|palha[çc]ada|tilt|nervos[oa])\b"],
+            "hype": [r"\b(bora|vamo|boa+|insano|brabo|letsgo|hype|comemora)\b"],
+            "cute": [r"\b(fof[oa]|lind[oa]|querid|meu bem|awn|nhom)\b"],
+            "suspicion": [r"\b(sus|suspeit|estranho|investiga|desconfi)\b"],
+            "scared": [r"\b(medo|assust|tenso|socorro|pavor|cagac[oã])\b"],
+            "gambling": [r"\b(gamba|aposta|odd|cassino|slot|roleta|bet)\b"],
+            "smart": [r"\b(teoria|evid[êe]ncia|l[óo]gica|an[áa]lise|estrat[ée]gia)\b"],
+            "greeting": [r"\b(oi+|ol[áa]|salve|bom dia|boa tarde|boa noite|eae|hey)\b"],
+            "farewell": [r"\b(fui|tchau|flw|até mais|vou nessa|partiu|indo nessa)\b"],
+            "arrival": [r"\b(cheguei|acabei de chegar|to on|entrei|voltei)\b"],
+            "attention": [r"\b(olha|aten[çc][aã]o|escuta|psiu|ei)\b"],
+            "checking": [r"\b(modcheck|confere|checando|cad[eê]|onde t[aá])\b"],
+            "waiting": [r"\b(espera|aguarda|esperando|j[áa] volto|fila)\b"],
+            "running": [r"\b(corre|correndo|run|rush|vaza)\b"],
+            "thinking": [r"\b(hmm|pensando|deixa eu ver|talvez|ser[aá])\b"],
+            "sleep": [r"\b(sono|dormir|mimir|boa noite|cansad[oa])\b"],
+            "music": [r"\b(m[úu]sica|som|playlist|dj|batida)\b"],
+            "clap": [r"\b(aplaus|palmas|brabo|mandou bem)\b"],
+            "fight": [r"\b(briga|x1|treta|porrada|duelo)\b"],
+            "eating": [r"\b(comendo|comi|lanche|janta|almo[çc]o|fome)\b"],
+            "shy": [r"\b(vergonha|t[ií]mid|sem gra[çc]a)\b"],
+            "shock": [r"\b(chocado|nossa|caraca|mentira|n[aã]o creio)\b"],
+            "relief": [r"\b(ufa|ainda bem|al[ií]vio|deu bom)\b"],
         }
 
         for emotion, patterns in rule_map.items():

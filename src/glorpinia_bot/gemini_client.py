@@ -125,7 +125,8 @@ class GeminiClient:
         Se decidir movimentar cookies, use SOMENTE UM destes formatos no fim da resposta:
         [[COOKIE:GIVE:nick:quantidade]]
         [[COOKIE:TAKE:nick:quantidade]]
-        Nunca explique o comando, apenas emita a tag se for necessário.
+        A tag de cookie deve ser o ÚLTIMO conteúdo da resposta, sem texto depois.
+        Nunca explique o comando, nunca use blocos de código, e nunca escreva variações cruas como COOKIE:GIVE fora da tag.
         </runtime_rules>
         """
 

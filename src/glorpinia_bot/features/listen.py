@@ -229,7 +229,10 @@ class Listen:
             
             if 0 < len(comment) <= 200:
                 sanitized_comment = (comment or "").replace("@system, ", "")
-                sanitized_comment = re.sub(r"\[\[COOKIE:[^\]]*\]\]", "", sanitized_comment, flags=re.IGNORECASE).strip()
+                if self.bot.cookie_system:
+                    sanitized_comment = self.bot.cookie_system.strip_cookie_commands(sanitized_comment)
+                else:
+                    sanitized_comment = re.sub(r"\[\[COOKIE:[^\]]*\]\]", "", sanitized_comment, flags=re.IGNORECASE).strip()
                 if not sanitized_comment:
                     return
 

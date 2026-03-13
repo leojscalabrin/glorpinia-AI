@@ -114,7 +114,8 @@ class Comment:
                 f"Use estritamente os Emotes da sua lista (não invente emotes).\n\n"
                 f"Se quiser usar o sistema de Cookies para punir ou premiar alguém por uma opinião no contexto, "
                 f"os ÚNICOS usuários válidos presentes agora são: [{users_str}]. "
-                f"NÃO use cookies em 'user', 'system' ou pessoas fora dessa lista."
+                f"NÃO use cookies em 'user', 'system' ou pessoas fora dessa lista. "
+                f"Se usar cookie, emita somente a tag [[COOKIE:...]] no final, sem explicar o comando."
             )
 
             if drama_roleplay_hint:
@@ -140,7 +141,10 @@ class Comment:
 
             if 0 < len(comment) <= 350:
                 final_message = (comment or "").replace("@system, ", "")
-                final_message = re.sub(r"\[\[COOKIE:[^\]]*\]\]", "", final_message, flags=re.IGNORECASE).strip()
+                if self.bot.cookie_system:
+                    final_message = self.bot.cookie_system.strip_cookie_commands(final_message)
+                else:
+                    final_message = re.sub(r"\[\[COOKIE:[^\]]*\]\]", "", final_message, flags=re.IGNORECASE).strip()
                 if not final_message:
                     return
                 self.bot.send_message(channel, final_message)
