@@ -105,7 +105,7 @@ class Comment:
             # Formata a lista de usuários para o prompt
             users_str = ", ".join(active_users)
 
-            drama_roleplay_hint = self._build_drama_roleplay_hint()
+            drama_roleplay_hint = self._build_drama_roleplay_hint(channel)
             tax_context = self._maybe_apply_comment_imperial_tax(channel, active_users)
 
             comment_query = (
@@ -127,7 +127,7 @@ class Comment:
                     "Mencione o imposto no seu comentário, de forma curta e teatral."
                 )
 
-            injection_context = self.bot.social_dynamics.get_injection_payload()
+            injection_context = self.bot.social_dynamics.get_injection_payload(channel)
             comment = self.bot.gemini_client.get_response(
                 query=comment_query,
                 channel=channel,
@@ -148,11 +148,11 @@ class Comment:
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
 
-    def _build_drama_roleplay_hint(self):
+    def _build_drama_roleplay_hint(self, channel: str):
         if random.random() >= self.DRAMA_ROLEPLAY_MENTION_PROBABILITY:
             return None
 
-        drama_state = self.bot.social_dynamics.get_debug_snapshot().get("drama_state", {})
+        drama_state = self.bot.social_dynamics.get_debug_snapshot(channel).get("drama_state", {})
         if not drama_state:
             return None
 

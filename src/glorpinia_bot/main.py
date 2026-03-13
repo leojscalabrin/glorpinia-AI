@@ -281,7 +281,7 @@ class TwitchIRC:
         return final_text
 
     def _format_admin_debug_message(self, channel):
-        social_debug = self.social_dynamics.get_debug_snapshot()
+        social_debug = self.social_dynamics.get_debug_snapshot(channel)
         emote_debug = self.emote_manager.get_debug_state(channel)
 
         drama_state = social_debug.get("drama_state", {})
@@ -360,7 +360,7 @@ class TwitchIRC:
             return
 
         users = sorted(authors | {author.lower()})
-        self.social_dynamics.add_memory_loop(topic=topic_candidate, users=users, weight=0.55, loop_type="recurring_topic")
+        self.social_dynamics.add_memory_loop(channel=channel, topic=topic_candidate, users=users, weight=0.55, loop_type="recurring_topic")
         logging.debug(
             "[Main] recurring_topic loop_created channel=%s topic=%s occurrences=%s users=%s",
             channel,
@@ -402,7 +402,7 @@ class TwitchIRC:
         self.cookie_system.remove_cookies(target_user, tax_amount)
 
         try:
-            injection_context = self.social_dynamics.get_injection_payload()
+            injection_context = self.social_dynamics.get_injection_payload(channel)
             prompt = (
                 f"A corte imperial executou um imposto surpresa em @{target_user} de {tax_amount} cookies "
                 f"(saldo devedor atual: {debt_value}). Faça um anúncio curto, dramático e divertido em 1 frase."
@@ -456,7 +456,7 @@ class TwitchIRC:
                 self.send_message(channel, "Então to indo nessa pessoal peepoHey")
                 return
             
-            self.social_dynamics.observe_message(author, content, bot_nick=self.auth.bot_nick)
+            self.social_dynamics.observe_message(channel, author, content, bot_nick=self.auth.bot_nick)
 
             # Salvar no Histórico Recente (Memória de Curto Prazo)
             self._register_recent_message(channel, author, content)
@@ -480,7 +480,7 @@ class TwitchIRC:
                 command_raw = parts[0][1:].lower()
 
                 if command_raw == "8ball":
-                    self.social_dynamics.add_memory_loop(topic="previsões duvidosas do 8ball", users=[author_lower], weight=0.45)
+                    self.social_dynamics.add_memory_loop(channel=channel, topic="previsões duvidosas do 8ball", users=[author_lower], weight=0.45)
                     question = " ".join(parts[1:])
                     if not question:
                         self.send_message(channel, f"@{author}, faça uma pergunta! glorp")
@@ -601,7 +601,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "fortune" or command_raw == "tarot":
-                    self.social_dynamics.add_memory_loop(topic="tarot e previsões", users=[author_lower], weight=0.45)
+                    self.social_dynamics.add_memory_loop(channel=channel, topic="tarot e previsões", users=[author_lower], weight=0.45)
                     target = None
                     if len(parts) > 1:
                         target = parts[1]
@@ -610,7 +610,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "roll" or command_raw == "d20":
-                    self.social_dynamics.add_memory_loop(topic="dados do caos", users=[author_lower], weight=0.45)
+                    self.social_dynamics.add_memory_loop(channel=channel, topic="dados do caos", users=[author_lower], weight=0.45)
                     query = " ".join(parts[1:]) if len(parts) > 1 else ""
 
                     self.rpg_feature.trigger_roll(channel, author, query)
@@ -671,7 +671,7 @@ class TwitchIRC:
                             enriched_content += f"\n\n[SISTEMA: Saldos atuais -> {' | '.join(unique_notes)}. Se o saldo for negativo, a pessoa é uma devedora/caloteira do Império.]"
                     
                     if self.gemini_client and self.memory_mgr:
-                        injection_context = self.social_dynamics.get_injection_payload()
+                        injection_context = self.social_dynamics.get_injection_payload(channel)
                         response_text = self.gemini_client.get_response(
                             query=enriched_content,
                             channel=channel, 
@@ -868,6 +868,7 @@ class TwitchIRC:
                         # Detecta transições
                         if is_live and not was_live:
                             print(f"[Monitor] {channel} entrou AO VIVO!")
+                            self.social_dynamics.reset_drama_state(channel, reason="new_stream")
                             self._trigger_welcome_message(channel)
                         elif not is_live and was_live:
                             print(f"[Monitor] {channel} ficou OFFLINE!")
