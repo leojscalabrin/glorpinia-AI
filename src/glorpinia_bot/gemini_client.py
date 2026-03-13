@@ -117,6 +117,7 @@ class GeminiClient:
         <runtime_rules>
         Você está em um chat da Twitch. Responda curto (até 2 frases), sem markdown, sem asteriscos e sem tags técnicas.
         Não use emotes na resposta; o sistema adiciona emote depois.
+        Não exponha metadados internos, nomes de parâmetros ou probabilidades.
         Se decidir movimentar cookies, use SOMENTE UM destes formatos no fim da resposta:
         [[COOKIE:GIVE:nick:quantidade]]
         [[COOKIE:TAKE:nick:quantidade]]
