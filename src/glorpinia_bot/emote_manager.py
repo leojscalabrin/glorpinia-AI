@@ -178,7 +178,9 @@ class EmoteManager:
         return primary, secondary
 
     def _candidate_pool(self, channel, emotion, secondary_emotion=None):
-        channel_map = self.channel_emote_map.get(channel.lower(), {})
+        normalized_channel = (channel or "").lower()
+        channel_map = self.channel_emote_map.get(normalized_channel, {})
+        has_channel_config = normalized_channel in self.channel_emote_map
         candidates = []
 
         emotions = [emotion]
@@ -190,10 +192,12 @@ class EmoteManager:
             channel_emotes = channel_map.get(key, [])
             global_emotes = self.global_emote_map.get(key, [])
 
-            # Canal sempre tem prioridade quando houver a mesma emoção disponível.
+            # Se o canal tiver emotes para a emoção, usa apenas os do canal.
+            # Se o canal existir mas não tiver a emoção, cai no global para não ficar sem opção.
             if channel_emotes:
                 candidates.extend(channel_emotes)
-                candidates.extend([e for e in global_emotes if e not in channel_emotes])
+            elif has_channel_config:
+                candidates.extend(global_emotes)
             else:
                 candidates.extend(global_emotes)
 
