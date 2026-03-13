@@ -5,6 +5,7 @@ import os
 import io
 import logging
 import sys
+import re
 from google.cloud import speech
 
 class Listen:
@@ -222,11 +223,17 @@ class Listen:
                 channel=channel,
                 author="system",
                 memory_mgr=memory_mgr,
-                skip_search=True
+                skip_search=True,
+                allow_cookie_actions=True
             )
             
             if 0 < len(comment) <= 200:
-                formatted_comment = f"@{channel}, {comment}"
+                sanitized_comment = (comment or "").replace("@system, ", "")
+                sanitized_comment = re.sub(r"\[\[COOKIE:[^\]]*\]\]", "", sanitized_comment, flags=re.IGNORECASE).strip()
+                if not sanitized_comment:
+                    return
+
+                formatted_comment = f"@{channel}, {sanitized_comment}"
                 self.bot.send_long_message(channel, formatted_comment)
                 logging.info(f"[Listen] Comentario enviado em {channel}.")
                 

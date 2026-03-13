@@ -2,6 +2,7 @@ import time
 import threading
 import logging
 import random
+import re
 
 class Comment:
     DRAMA_PARAM_MENTION_PROBABILITY = 0.35
@@ -133,11 +134,13 @@ class Comment:
                 author="system",
                 memory_mgr=memory_mgr,
                 skip_search=True,
+                allow_cookie_actions=True,
                 injection_context=injection_context,
             )
 
             if 0 < len(comment) <= 350:
-                final_message = (comment or "").replace("@system, ", "").strip()
+                final_message = (comment or "").replace("@system, ", "")
+                final_message = re.sub(r"\[\[COOKIE:[^\]]*\]\]", "", final_message, flags=re.IGNORECASE).strip()
                 if not final_message:
                     return
                 self.bot.send_message(channel, final_message)
