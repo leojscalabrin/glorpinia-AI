@@ -157,8 +157,19 @@ class TwitchIRC:
             full_msg = f"PRIVMSG #{channel} :{message}\r\n"
             self.ws.send(full_msg)
             print(f"[BOT] {channel}: {message}")
+            self._register_recent_message(channel, self.auth.bot_nick, message)
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
+
+    def _register_recent_message(self, channel, author, content):
+        if channel not in self.recent_messages:
+            self.recent_messages[channel] = deque(maxlen=100)
+
+        self.recent_messages[channel].append({
+            "author": author,
+            "content": content,
+            "timestamp": time.time()
+        })
     
     def _send_message_part(self, channel, part, delay):
         """[HELPER] Espera (em um thread) e envia uma parte da mensagem."""
@@ -169,6 +180,7 @@ class TwitchIRC:
                 full_msg = f"PRIVMSG #{channel} :{part}\r\n"
                 self.ws.send(full_msg)
                 print(f"[BOT-PART] {channel}: {part}")
+                self._register_recent_message(channel, self.auth.bot_nick, part)
             else:
                 print(f"[ERROR] WebSocket desconectado ao tentar enviar parte: {part}")
         except Exception as e:
@@ -234,18 +246,18 @@ class TwitchIRC:
             else:
                 current_delay = split_delay_sec
 
-    def prepare_final_bot_message(self, channel, response_text, mood=None, source="chat"):
+    def prepare_final_bot_message(self, channel, response_text, mood=None, source="chat", context_text=None):
         """Normaliza saída, evita repetição e escolhe emote conforme contexto + mood."""
         cleaned_text = self.emote_manager.remove_known_emotes(response_text or "")
         cleaned_text = self.emote_manager.strip_trailing_emote(cleaned_text)
         unique_text = self.emote_manager.ensure_unique_phrase(channel, cleaned_text)
-        selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood)
+        selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood, context_text=context_text)
         final_text = f"{unique_text} {selected_emote}".strip()
 
         last = self.last_bot_message_by_channel.get(channel)
         if last and last == final_text:
             unique_text = self.emote_manager.ensure_unique_phrase(channel, f"{unique_text} ")
-            selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood)
+            selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood, context_text=context_text)
             final_text = f"{unique_text} {selected_emote}".strip()
 
         self.last_bot_message_by_channel[channel] = final_text
@@ -258,11 +270,18 @@ class TwitchIRC:
             emote_debug.get("last_global_emote"),
             emote_debug.get("last_selected_channel"),
         )
-        logging.debug("[Main] final_message source=%s channel=%s mood=%s text=%s", source, channel, mood, final_text)
+        logging.debug(
+            "[Main] final_message source=%s channel=%s mood=%s emotion=%s text=%s",
+            source,
+            channel,
+            mood,
+            emote_debug.get("last_resolved_emotion"),
+            final_text,
+        )
         return final_text
 
     def _format_admin_debug_message(self, channel):
-        social_debug = self.social_dynamics.get_debug_snapshot()
+        social_debug = self.social_dynamics.get_debug_snapshot(channel)
         emote_debug = self.emote_manager.get_debug_state(channel)
 
         drama_state = social_debug.get("drama_state", {})
@@ -341,7 +360,7 @@ class TwitchIRC:
             return
 
         users = sorted(authors | {author.lower()})
-        self.social_dynamics.add_memory_loop(topic=topic_candidate, users=users, weight=0.55, loop_type="recurring_topic")
+        self.social_dynamics.add_memory_loop(channel=channel, topic=topic_candidate, users=users, weight=0.55, loop_type="recurring_topic")
         logging.debug(
             "[Main] recurring_topic loop_created channel=%s topic=%s occurrences=%s users=%s",
             channel,
@@ -383,7 +402,7 @@ class TwitchIRC:
         self.cookie_system.remove_cookies(target_user, tax_amount)
 
         try:
-            injection_context = self.social_dynamics.get_injection_payload()
+            injection_context = self.social_dynamics.get_injection_payload(channel)
             prompt = (
                 f"A corte imperial executou um imposto surpresa em @{target_user} de {tax_amount} cookies "
                 f"(saldo devedor atual: {debt_value}). Faça um anúncio curto, dramático e divertido em 1 frase."
@@ -437,17 +456,10 @@ class TwitchIRC:
                 self.send_message(channel, "Então to indo nessa pessoal peepoHey")
                 return
             
-            self.social_dynamics.observe_message(author, content, bot_nick=self.auth.bot_nick)
+            self.social_dynamics.observe_message(channel, author, content, bot_nick=self.auth.bot_nick)
 
             # Salvar no Histórico Recente (Memória de Curto Prazo)
-            if channel not in self.recent_messages:
-                self.recent_messages[channel] = deque(maxlen=100)
-            
-            self.recent_messages[channel].append({
-                "author": author,
-                "content": content,
-                "timestamp": time.time()
-            })
+            self._register_recent_message(channel, author, content)
             logging.debug(
                 "[Main] recent_message_history channel=%s size=%s last_author=%s",
                 channel,
@@ -468,7 +480,7 @@ class TwitchIRC:
                 command_raw = parts[0][1:].lower()
 
                 if command_raw == "8ball":
-                    self.social_dynamics.add_memory_loop(topic="previsões duvidosas do 8ball", users=[author_lower], weight=0.45)
+                    self.social_dynamics.add_memory_loop(channel=channel, topic="previsões duvidosas do 8ball", users=[author_lower], weight=0.45)
                     question = " ".join(parts[1:])
                     if not question:
                         self.send_message(channel, f"@{author}, faça uma pergunta! glorp")
@@ -589,7 +601,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "fortune" or command_raw == "tarot":
-                    self.social_dynamics.add_memory_loop(topic="tarot e previsões", users=[author_lower], weight=0.45)
+                    self.social_dynamics.add_memory_loop(channel=channel, topic="tarot e previsões", users=[author_lower], weight=0.45)
                     target = None
                     if len(parts) > 1:
                         target = parts[1]
@@ -598,7 +610,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "roll" or command_raw == "d20":
-                    self.social_dynamics.add_memory_loop(topic="dados do caos", users=[author_lower], weight=0.45)
+                    self.social_dynamics.add_memory_loop(channel=channel, topic="dados do caos", users=[author_lower], weight=0.45)
                     query = " ".join(parts[1:]) if len(parts) > 1 else ""
 
                     self.rpg_feature.trigger_roll(channel, author, query)
@@ -659,7 +671,7 @@ class TwitchIRC:
                             enriched_content += f"\n\n[SISTEMA: Saldos atuais -> {' | '.join(unique_notes)}. Se o saldo for negativo, a pessoa é uma devedora/caloteira do Império.]"
                     
                     if self.gemini_client and self.memory_mgr:
-                        injection_context = self.social_dynamics.get_injection_payload()
+                        injection_context = self.social_dynamics.get_injection_payload(channel)
                         response_text = self.gemini_client.get_response(
                             query=enriched_content,
                             channel=channel, 
@@ -677,6 +689,7 @@ class TwitchIRC:
                                 response_text=response_text,
                                 mood=current_mood,
                                 source="mention",
+                                context_text=content,
                             )
                             self.send_long_message(channel, final_text)
                             
@@ -855,6 +868,7 @@ class TwitchIRC:
                         # Detecta transições
                         if is_live and not was_live:
                             print(f"[Monitor] {channel} entrou AO VIVO!")
+                            self.social_dynamics.reset_drama_state(channel, reason="new_stream")
                             self._trigger_welcome_message(channel)
                         elif not is_live and was_live:
                             print(f"[Monitor] {channel} ficou OFFLINE!")

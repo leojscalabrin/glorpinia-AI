@@ -15,7 +15,9 @@ class EmoteManager:
         self.global_emote_history = deque(maxlen=history_size)
         self.channel_emote_history = defaultdict(lambda: deque(maxlen=history_size))
         self.channel_phrase_history = defaultdict(lambda: deque(maxlen=history_size))
+        self.channel_emotion_history = defaultdict(lambda: deque(maxlen=history_size))
         self.last_selected_emote_by_channel = {}
+        self.last_resolved_emotion_by_channel = {}
 
         self.global_emote_map = self._load_emote_map(os.path.join(self.base_path, "emotes_global.txt"))
         self.channel_emote_map = self._load_channel_maps(os.path.join(self.base_path, "emotes_channels.txt"))
@@ -127,18 +129,36 @@ class EmoteManager:
         return pool
 
     def infer_emotion(self, text):
-        t = text.lower()
-        if any(k in t for k in ["kkk", "haha", "rs", "engra", "zuera", "piada"]):
-            return "laugh"
-        if any(k in t for k in ["triste", "pena", "medo", "droga", "poxa", "que ruim"]):
-            return "sad"
-        if any(k in t for k in ["raiva", "ódio", "irrit", "burro", "ridículo", "calado"]):
-            return "angry"
-        if any(k in t for k in ["bora", "vamo", "boa", "top", "insano", "brabo"]):
-            return "hype"
-        if any(k in t for k in ["fofo", "amo", "lindo", "obg", "valeu", "querid"]):
-            return "cute"
-        return "neutral"
+        t = (text or "").lower()
+        score = defaultdict(int)
+
+        rule_map = {
+            "laugh": [r"\b(kkk+|haha+|kappa|ri\w+|piada|meme|zuera)\b"],
+            "sad": [r"\b(triste|sad|pena|depress|que ruim|droga|f|luto)\b"],
+            "angry": [r"\b(raiva|ódio|odio|irrit|burro|rid[íi]culo|calado|palha[çc]ada)\b"],
+            "hype": [r"\b(bora|vamo|boa+|top|insano|brabo|caralho|letsgo|pog)\b"],
+            "cute": [r"\b(fof[oa]|amo|lind[oa]|obg|valeu|querid|meu bem)\b"],
+            "suspicion": [r"\b(sus|suspeit|estranho|modcheck|investiga)\b"],
+            "scared": [r"\b(medo|assust|tenso|socorro|monka)\b"],
+            "gambling": [r"\b(gamba|aposta|odd|cassino|slot|roleta)\b"],
+            "smart": [r"\b(teoria|evid[êe]ncia|l[óo]gica|an[áa]lise|5head)\b"],
+        }
+
+        for emotion, patterns in rule_map.items():
+            for pattern in patterns:
+                if re.search(pattern, t):
+                    score[emotion] += 2
+
+        if "?" in t:
+            score["attention"] += 1
+
+        if not score:
+            return "neutral", None
+
+        ranked = sorted(score.items(), key=lambda item: item[1], reverse=True)
+        primary = ranked[0][0]
+        secondary = ranked[1][0] if len(ranked) > 1 and ranked[1][1] == ranked[0][1] else None
+        return primary, secondary
 
     def _candidate_pool(self, channel, emotion, secondary_emotion=None):
         channel_map = self.channel_emote_map.get(channel.lower(), {})
@@ -174,11 +194,55 @@ class EmoteManager:
         Resolve emoção exclusivamente pelo contexto textual da mensagem.
         O parâmetro `mood` é mantido apenas por compatibilidade de assinatura.
         """
-        inferred = self.infer_emotion(text)
-        return inferred, None
+        inferred_primary, inferred_secondary = self.infer_emotion(text)
 
-    def choose_emote(self, channel, text, mood=None):
-        emotion, secondary_emotion = self._resolve_emotions(text, mood=mood)
+        mood_map = {
+            "happy": "cute",
+            "angry": "angry",
+            "curious": "attention",
+            "chaotic": "hype",
+            "tsundere": "mockery",
+            "neutral": "neutral",
+        }
+        mood_emotion = mood_map.get((mood or "").lower())
+
+        if inferred_primary == "neutral" and mood_emotion:
+            logging.debug(
+                "[Emote] emotion_resolve source=mood_fallback mood=%s inferred=%s resolved=%s",
+                mood,
+                inferred_primary,
+                mood_emotion,
+            )
+            return mood_emotion, None
+
+        if mood_emotion and mood_emotion not in {inferred_primary, "neutral"}:
+            logging.debug(
+                "[Emote] emotion_resolve source=text_plus_mood mood=%s inferred=%s secondary=%s",
+                mood,
+                inferred_primary,
+                mood_emotion,
+            )
+            return inferred_primary, mood_emotion
+
+        logging.debug(
+            "[Emote] emotion_resolve source=text_only mood=%s inferred_primary=%s inferred_secondary=%s",
+            mood,
+            inferred_primary,
+            inferred_secondary,
+        )
+        return inferred_primary, inferred_secondary
+
+    def choose_emote(self, channel, text, mood=None, context_text=None):
+        analysis_text = " ".join([p for p in [context_text, text] if p])
+        emotion, secondary_emotion = self._resolve_emotions(analysis_text, mood=mood)
+        logging.debug(
+            "[Emote][Realtime] canal=%s emocao_escolhida=%s emocao_secundaria=%s mood=%s texto_analise=%s",
+            channel,
+            emotion,
+            secondary_emotion,
+            mood,
+            (analysis_text or "")[:180],
+        )
         candidates = self._candidate_pool(channel, emotion, secondary_emotion=secondary_emotion)
 
         channel_hist = self.channel_emote_history[channel.lower()]
@@ -210,7 +274,13 @@ class EmoteManager:
 
         self.global_emote_history.append(chosen)
         channel_hist.append(chosen)
+        self.channel_emotion_history[channel.lower()].append(emotion)
         self.last_selected_emote_by_channel[channel.lower()] = chosen
+        self.last_resolved_emotion_by_channel[channel.lower()] = {
+            "primary": emotion,
+            "secondary": secondary_emotion,
+            "mood": mood,
+        }
 
         logging.debug(
             "[Emote] canal=%s mood=%s emotion=%s ultimo_canal=%s ultimo_global=%s candidatos=%s escolhido=%s hist_canal=%s hist_global=%s",
@@ -231,8 +301,10 @@ class EmoteManager:
         channel_hist = list(self.channel_emote_history[normalized_channel])
         return {
             "last_selected_channel": self.last_selected_emote_by_channel.get(normalized_channel),
+            "last_resolved_emotion": self.last_resolved_emotion_by_channel.get(normalized_channel),
             "last_channel_emote": channel_hist[-1] if channel_hist else None,
             "last_global_emote": self.global_emote_history[-1] if self.global_emote_history else None,
+            "emotion_history": list(self.channel_emotion_history[normalized_channel]),
             "channel_history": channel_hist,
             "global_history": list(self.global_emote_history),
         }

@@ -2,9 +2,10 @@ import time
 import threading
 import logging
 import random
+import re
 
 class Comment:
-    DRAMA_PARAM_MENTION_PROBABILITY = 0.35
+    DRAMA_ROLEPLAY_MENTION_PROBABILITY = 0.35
     COMMENT_IMPERIAL_TAX_PROBABILITY = 0.18
     COMMENT_IMPERIAL_TAX_MIN = 5
     COMMENT_IMPERIAL_TAX_MAX = 18
@@ -104,7 +105,7 @@ class Comment:
             # Formata a lista de usuários para o prompt
             users_str = ", ".join(active_users)
 
-            drama_param_hint = self._build_drama_param_hint()
+            drama_roleplay_hint = self._build_drama_roleplay_hint(channel)
             tax_context = self._maybe_apply_comment_imperial_tax(channel, active_users)
 
             comment_query = (
@@ -116,8 +117,8 @@ class Comment:
                 f"NÃO use cookies em 'user', 'system' ou pessoas fora dessa lista."
             )
 
-            if drama_param_hint:
-                comment_query += f"\n\n{drama_param_hint}"
+            if drama_roleplay_hint:
+                comment_query += f"\n\n{drama_roleplay_hint}"
 
             if tax_context:
                 comment_query += (
@@ -126,18 +127,20 @@ class Comment:
                     "Mencione o imposto no seu comentário, de forma curta e teatral."
                 )
 
-            injection_context = self.bot.social_dynamics.get_injection_payload()
+            injection_context = self.bot.social_dynamics.get_injection_payload(channel)
             comment = self.bot.gemini_client.get_response(
                 query=comment_query,
                 channel=channel,
                 author="system",
                 memory_mgr=memory_mgr,
                 skip_search=True,
+                allow_cookie_actions=True,
                 injection_context=injection_context,
             )
 
             if 0 < len(comment) <= 350:
-                final_message = (comment or "").replace("@system, ", "").strip()
+                final_message = (comment or "").replace("@system, ", "")
+                final_message = re.sub(r"\[\[COOKIE:[^\]]*\]\]", "", final_message, flags=re.IGNORECASE).strip()
                 if not final_message:
                     return
                 self.bot.send_message(channel, final_message)
@@ -145,30 +148,45 @@ class Comment:
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
 
-    def _build_drama_param_hint(self):
-        if random.random() >= self.DRAMA_PARAM_MENTION_PROBABILITY:
+    def _build_drama_roleplay_hint(self, channel: str):
+        if random.random() >= self.DRAMA_ROLEPLAY_MENTION_PROBABILITY:
             return None
 
-        random_params = self.bot.social_dynamics.get_debug_snapshot().get("random_roll_parameters", {})
-        if not random_params:
+        drama_state = self.bot.social_dynamics.get_debug_snapshot(channel).get("drama_state", {})
+        if not drama_state:
             return None
 
-        param_label_map = {
-            "favorite_probability": "favorite_probability",
-            "enemy_probability": "enemy_probability",
-            "suspect_probability": "suspect_probability",
-            "memory_loop_probability": "memory_loop_probability",
-        }
-        valid_keys = [key for key in param_label_map if key in random_params]
-        if not valid_keys:
+        candidates = []
+        favorite = (drama_state.get("favorite_of_the_day") or "").strip()
+        enemy = (drama_state.get("enemy_of_the_day") or "").strip()
+        suspect = (drama_state.get("suspect") or "").strip()
+        rivalries = [r for r in drama_state.get("rivalries", []) if isinstance(r, str) and r.strip()]
+
+        if favorite:
+            candidates.append(
+                f"Se fizer sentido no assunto, mencione de forma curta e teatral que @{favorite} virou seu queridinho do momento."
+            )
+        if enemy:
+            candidates.append(
+                f"Se combinar com o contexto, faça uma provocação breve dizendo que @{enemy} está na sua lista de desafetos hoje."
+            )
+        if suspect:
+            candidates.append(
+                f"Se houver gancho no papo, solte uma suspeita dramática em 1 frase sobre @{suspect}."
+            )
+        if rivalries:
+            rivalry = random.choice(rivalries)
+            if " vs " in rivalry:
+                left, right = [part.strip() for part in rivalry.split(" vs ", 1)]
+                if left and right:
+                    candidates.append(
+                        f"Se encaixar, provoque uma rivalidade curtinha entre @{left} e @{right} em tom de fofoca imperial."
+                    )
+
+        if not candidates:
             return None
 
-        chosen_key = random.choice(valid_keys)
-        chosen_value = random_params.get(chosen_key, 0)
-        return (
-            "Com baixa probabilidade, encaixe UMA menção breve ao Drama Engine citando exatamente "
-            f"o parâmetro `{param_label_map[chosen_key]}` (valor atual: {chosen_value:.3f})."
-        )
+        return random.choice(candidates)
 
     def _maybe_apply_comment_imperial_tax(self, channel: str, active_users: list):
         if random.random() >= self.COMMENT_IMPERIAL_TAX_PROBABILITY:
