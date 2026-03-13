@@ -1,4 +1,127 @@
-# Opcional. Sobrescreve/complementa por canal.
-# Exemplo:
-# [nomecanal]
-# hype: POGGERS, LETSGO
+[thomezord]
+angry: Angy, Madge, peepoMad, thomeSmash, angrybird, Frick, RAGEYY, Smadge
+anime: thomeAyaya, ayayaJAM
+approval: Massa, nise, yesyes
+arrival: catArrive, gachiRoll, gachiAwake
+attention: alaO, DinkDonk
+bald: baldKek, Baldge
+business: Corpa, abelhoBusiness, pepeMoney, SadgeBusiness, thomeVibecode
+checking: modCheck, thomeCheck, where
+clap: thomeClap, peepoClap
+clown: thomeJoker, Paiaso, thomeRola
+cringe: DansChamp, Erm, DIESOFCRINGE, KEKsuffer, PepeCringe, thomeDecepcao
+congratulation: peepoLiminha, POGCRAZY
+cute: HUGGIES, peepoPoint, peepoLove, peepoHug, peepoShy, catLove, peepoFlower, SoCute, UwU, peepoGiggles
+dancing: pepeDD, pugPls, catDanceBooty, dansi, HulkPls, thomeWide, twerkies, WidestJigglin
+denial: NoThanks, NOPERS, nono, paia
+dumb: DankReading, Dentge, DonkG
+eating: PepePopcorn, Bussin, crunch, thomeMastiga2, peepoFAT, PogTasty
+elegant: baseg, buscoSexo, OFFLINECHAT
+evil: Peepoevil, devious, elmoFire, Evilge, Plotge
+euphoria: thomeAhegao, gooned, kok
+fabulous: thomeFabulosa, Imaginanumateta, QUEEN
+farewell: peepoBye, peepoLeave
+fight: PepeGun, PepeFight, PepegaGun, ELPERMASSACRE, PepegaSword
+gambling: GAMBA, gambabert
+gay: 
+greeting: peepoHey, MLADY, thomeWave, Handshake, Handshakege, MMEOWDY
+happy: peepoHappy, thomeFeliz, Gladge, happi, keking
+hiding: ppLurk, thomeLurk
+hope: donkPraise, thomeHope
+hype: HandsUp, LETSGO, OOOO, POGGERS
+judge: HUHH, MadgeClap, thomeRly, arnoldHalt, ClassicO, Concerned, huh, Judging, uuh
+kiss: catKISS, KissoThome, thomeKiss, mwah
+laugh: KEKW, pepeLaugh, kekdrunk, om, QUECO, wideLaughHard
+magic: catWizard, Leviosa
+mesmerized: lookUp, Looking, lookUpSmile
+mockery: peepoFinger, pepeLoser, pepeLook, thomeMimimi, AHAHA, hihi, Fiddy, xdd, WAJAJA
+music: ratJam, pepoJS, thomeJam, juh, Listening
+neutral: FeelsOkayMan, Okayge, Shruge, aga, Shrug, thomeFat
+oblivious: Comfi, Clueless, herpderp
+overwhelmed: WAYTOODANK, SCHIZO
+panic: AAAA, monkaStop, thomePanik
+peak: Cinema, HYPERS
+praying: Prayge, thomePray
+rage: normiesOUT, RAGEY, thomeExplosion, glorpNotL, UltraMad
+relaxing: thomeBeach
+relief: Saved, EZ
+running: peepoRun, pepeRun, SCATTER
+sad: peepoHuggers, Pepehand, peepoSad, sadCat, Sadge, SadgeCry
+scared: Aware, COOKED, peepohide
+seduce: thomeMilos, ComeHereBoy, Flirt, GachiWink, FLEX
+shock: AYOOO, Monkeshocked, Omaigaa, WHAt
+shy: thomeShy, FlushedCat
+sleep: Bedge, thomeMimir
+smart: PepoG, thomeSmart, weSmart, EUSABO
+sneaky: Sneak, thomePeek
+sniffing: SNIFFA, shibaSniffa
+stare: WeirdChamp, WeirdPaper, Stare
+spinning: borpaSpin, frogSpin, monkeySpin, peepoSpin
+superiority: EZ, Sippin, BASED, GIGACHAD
+suspicion: Susge, thomeSus, catSus, sus, Sure, SUSSY
+tired: Deadge, pepeW, thomeDerretido
+thinking: monkaHmm, Thonk, Hmm, Thinkge
+waiting: FeelsLateMan, PauseChamp, peepoSit
+[fabinho7x]
+angry: angrybird, angrybirds, angy, Madge, PISSED, Smadge
+anime: AYAYA, AYAYAWeird, AYAYAwhat, DinkDonk
+approval: Massa, nise
+arrival: AreYouWinningSon, ARRIVE, ASSEMBLE, peepoArriveSalami
+attention: ALERT, Aloo, Dinkdonk, Oiala, wakeup
+bald: Baldge, baldio, BomDia, Maicabeca, maicareca
+business: BIGMONEY, CorpaArrive, Corpa
+checking: modCheck
+clap: Clap, clappi
+clown: Paiaso, PepeClown
+cringe: WEIRD, Awkward, DIESOFCRINGE, KEKsuffer, PepeCringe
+congratulation: Clap, clappi
+cute: peepoHug, peepoLove, peepoPat, peepoShy, peepoGiggles, SoCute
+dancing: AlienPls, BoneZone, VIBE, ankhaPls, BUSSERS, Jigglin
+denial: Nono, Ew, NoThanks, NOPERS, paia, peepoPoliceStop
+dumb: dankEat, DankPuzzle, peepoPuzzle
+eating: Crunch, burgir, faboChurras, pastel, peepoFAT, Tastyge
+elegant: baseg, buscoSexo, OFFLINECHAT
+evil: ELMOFIRE, Evilge
+euphoria: kok, gachiBASS
+fabulous
+farewell: peepoExit, bye, Byege, faboLeave
+fight: PeepoFinger, canalha, catPunchU, fight, nom, peepoFight
+gambling: GAMBA, peepoNoMoney, pepegaCredit
+greeting: Hiii, MEOWDY, oi
+happy: peepoHappy, faboSmile, Gladge, Hehe, keking, snide
+hiding: lurkk, AYAYALurk
+hope: COPIUM
+hype: OOOO, faboYippee, PogU, Pog
+judge: catHuh, HUHH, WTFF, HUH
+kiss: catKISS, meandyou
+laugh: LULW, KEKW, OMEGALUL, PepeLaugh, dogekek, pepeLaugh
+magic: FaboAlquimia, wizardcatArrive, wizard
+mesmerized: plinK, BOOBA, Looking, lookUp, lookDown, lookUpSmile
+mockery: pepePoint, atumalaca, DoesntKnow, ElNoSabe, WAJAJA, xdd, PepeL
+music: CATJAM, faboHips, faboJam, listening, Listening, ratJam
+neutral: glorp, FeelsDonkMan, FeelsOkayMan, PeepoGlad, peepoShrug, awoo, BabyYodaSip, waa
+oblivious: Clueless
+overwhelmed: TheVoices, WAYTOODANK
+panic: AAAA, EEEE
+peak: Caralho, Cinema
+praying: Prayge, donkPraise
+rage: glorpSmash, ReallyFuckingMad
+relaxing: peepoSitGamer, BabyYodaSip
+relief: cooked, peepoSitGamer, RIPBOZO, Saved
+running: peepoRun, peepoRoll
+sad: Sadeg, peepoSad, PepeHands, SadCatW, FeelsWeakMan, peepoCry, peepoSadLeave, Sadge, SadCat
+scared: DESPAIR, monkaChrist, Aware, faboSusto
+seduce: SEXO, Bota, faboCuie, faboMilos, FLEX
+shock: AINTNOWAY, pikashuS, D:, monkeShocked, NOWAYING 
+shy: isforme, peepoShy
+sleep: Bedge, faboBed
+smart: NERD, actually, EUSABO, Nerdge, Smart
+sneaky: Sneak, lurkk
+sniffing: SNIFFA
+stare: WeirdEyes, Stare
+spinning: faboRoll, faboSpin
+superiority: WICKED, BASED, GIGACHAD
+suspicion: CAUGHT, Susge, SusgeClap, SUSSY, Sure
+tired: Deadge, EstoyCansadoJefe, faboRIP, Pain, pepeW, faboDeadge
+thinking: PepoG, pepoHmm, PepoThink, DonkG, faboWTF, PepoG, scrajj
+waiting: Latege, PauseChamp, peepoSit, Waiting, WaitingForStream

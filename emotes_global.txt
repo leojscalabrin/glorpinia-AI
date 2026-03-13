@@ -1,25 +1,63 @@
-# Formato: emocao: emote1, emote2
-cute: peepoHappy, peepoLove, peepoGiggles, SoCute, catKISS
-congratulation: peepoClap, Clap, EZ
-angry: RAGEY, Madge, angrybird, Muted
-denial: NOPERS
-attention: DinkDonk, ALERT
-suspicion: Susge, Stare, modCheck
-judge: FeelsWeirdMan, Stare
-sad: Sadge, peepoSad, FeelsBadMan
-scared: monkaS, Aware
-oblivious: Clueless
-laugh: OMEGALUL, KEKW, LUL, pepeLaugh
-mockery: xdd, Paiaso, Nerdge, WAJAJA, Pepega
-hype: Pog, PogChamp, POGGERS, POGCRAZY, LETSGO, AlienDance, catJAM, ratJAM, pepeJAM
-robot: MrDestructoid
-smart: 5Head, weSmart
-sleep: Bedge, ResidentSleeper 
-hope: COPIUM, Prayge
-gambling: GAMBA
-superiority: GIGACHAD, BASED
-sniffing: SNIFFA
-mesmerized: BOOBA, Looking
-peak: Cinema
-waiting: Waiting
-neutral: glorp
+angry: 
+anime: AYAYA
+approval: BillyApprove
+arrival: 
+attention: 
+bald: 
+business: 
+checking: 
+clap: Clap
+clown: 
+cringe: FeelsWeirdMan
+congratulation: 
+cute: 
+dancing: AlienDance, peepoPls
+denial: 
+dumb: FeelsDankMan
+eating: 
+elegant: 
+evil: 
+euphoria: gachiGASM
+fabulous: 
+farewell: 
+fight: 
+gambling: 
+gay: Gayge
+greeting: 
+happy: FeelsOkayMan
+hiding: 
+hope: 
+hype: gachiBASS, PogChamp
+judge: FeelsWeirdMan
+kiss: 
+laugh: 
+magic: 
+mesmerized: 
+mockery: Kappa, Jebaited
+music: PartyParrot
+neutral: glorp, ApuApustaja
+oblivious: 
+overwhelmed: WAYTOODANK
+panic: 
+peak: 7Cinema, FeelsStrongMan
+praying: 
+rage: 
+relaxing: 
+relief: 
+running: 
+sad: BibleThump, peepoSad
+scared: monkaS
+seduce: 
+shock: 
+shy: 
+sleep: 
+smart: 
+sneaky: 
+sniffing: 
+stare: FeelsWeirdMan, Stare
+spinning: 
+superiority: EZ
+suspicion: 
+tired: 
+thinking: 
+waiting: 
