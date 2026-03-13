@@ -3,6 +3,7 @@ import re
 import logging
 import random
 import hashlib
+import time
 import google.generativeai as genai
 from dotenv import load_dotenv
 
@@ -22,6 +23,9 @@ class GeminiClient:
     Cliente para interagir com o modelo Gemini, com suporte a 
     múltiplos perfis (Lores de Canal), memória RAG e busca na web.
     """
+    RECENT_HISTORY_WINDOW_SECONDS = 120
+    RECENT_HISTORY_FALLBACK_COUNT = 15
+
     def __init__(self, personality_profile):
         self.base_profile = personality_profile
         self.models_cache = {}
@@ -169,7 +173,14 @@ class GeminiClient:
         # --- Contextos (Chat, Memória, Web) ---
         chat_context_str = ""
         if recent_history:
-            msgs = recent_history[-15:] 
+            now = time.time()
+            msgs = [
+                m for m in recent_history
+                if now - m.get("timestamp", 0) <= self.RECENT_HISTORY_WINDOW_SECONDS
+            ]
+            if not msgs:
+                msgs = recent_history[-self.RECENT_HISTORY_FALLBACK_COUNT:]
+            msgs = sorted(msgs, key=lambda m: m.get("timestamp", 0))
             formatted_msgs = [f"- {m['author']}: {m['content']}" for m in msgs]
             chat_context_str = "**MENSAGENS RECENTES DO CHAT (Contexto Imediato):**\n" + "\n".join(formatted_msgs)
             
