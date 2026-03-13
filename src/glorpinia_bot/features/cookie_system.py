@@ -241,10 +241,13 @@ class CookieSystem:
         """
         if not text: return ""
 
-        pattern = r"\[{1,2}\s*COOKIE\s*:\s*(GIVE|TAKE)\s*:\s*@?([A-Za-z0-9_]+)\s*:\s*(\d+)\s*\]{1,2}"
-        trailing_block_match = re.search(rf"((?:\s*{pattern})+)\s*$", text, flags=re.IGNORECASE)
-        trailing_block = trailing_block_match.group(1) if trailing_block_match else ""
-        matches = re.findall(pattern, trailing_block, flags=re.IGNORECASE)
+        # Captura comandos válidos de cookie em qualquer ponto da resposta.
+        # Isso evita vazamento quando a IA coloca texto depois da tag (ex: "[[COOKIE:TAKE:foo:10]] DinkDonk").
+        command_pattern = re.compile(
+            r"\[{1,2}\s*COOKIE\s*:\s*(GIVE|TAKE)\s*:\s*@?([A-Za-z0-9_]+)\s*:\s*(\d+)\s*\]{1,2}",
+            flags=re.IGNORECASE,
+        )
+        matches = command_pattern.findall(text)
 
         feedback_parts = []
         MAX_TRANSACTION = 999
@@ -275,7 +278,8 @@ class CookieSystem:
             except Exception as e:
                 logging.error(f"[AI-BANK] Erro ao processar transação: {e}")
 
-        clean_text = re.sub(rf"\s*{pattern}\s*$", "", text, flags=re.IGNORECASE).strip()
+        # Remove todas as tags de comando, mesmo quando aparecem no meio da mensagem.
+        clean_text = command_pattern.sub("", text).strip()
         
         clean_text = re.sub(r'(DAR|TIRAR|GIVE|TAKE|RECOMPENSA|PUNIÇÃO|AÇÃO|COMANDO|VALOR):\s*$', '', clean_text, flags=re.IGNORECASE).strip()
 
