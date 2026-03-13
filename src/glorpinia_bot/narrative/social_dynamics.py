@@ -4,6 +4,7 @@ import logging
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 
@@ -16,6 +17,24 @@ class MemoryLoop:
     type: str = "running_joke"
 
 
+@dataclass
+class ChannelSocialState:
+    message_count: int = 0
+    users_seen: set = field(default_factory=set)
+    active_loop_for_message: Optional[MemoryLoop] = None
+    memory_loops: List[MemoryLoop] = field(default_factory=list)
+    drama_state: Dict[str, Optional[str]] = field(
+        default_factory=lambda: {
+            "favorite_of_the_day": None,
+            "enemy_of_the_day": None,
+            "suspect": None,
+            "rivalries": [],
+        }
+    )
+    bot_state: Dict[str, object] = field(default_factory=lambda: {"mood": "neutral", "duration": 0})
+    drama_reset_at: datetime = field(default_factory=datetime.utcnow)
+
+
 class SocialDynamicsEngine:
     LOOP_PROBABILITY = 0.04
     FAVORITE_PROBABILITY = 0.02
@@ -25,70 +44,97 @@ class SocialDynamicsEngine:
     MAX_LOOPS = 8
     MIN_LOOP_WEIGHT = 0.2
     LOOP_TTL_MESSAGES = 600
+    DRAMA_RESET_INTERVAL = timedelta(hours=24)
     DEFAULT_STORAGE_PATH = Path("glorpinia_memory_loops.json")
 
     def __init__(self, storage_path: Optional[Path] = None):
-        self.message_count = 0
-        self.users_seen = set()
-        self.active_loop_for_message: Optional[MemoryLoop] = None
         self.storage_path = Path(storage_path) if storage_path else self.DEFAULT_STORAGE_PATH
+        self.channel_states: Dict[str, ChannelSocialState] = {}
 
-        self.memory_loops: List[MemoryLoop] = [
+    def _normalize_channel(self, channel: Optional[str]) -> str:
+        if not channel:
+            return "global"
+        return str(channel).strip().lower().replace("#", "") or "global"
+
+    def _default_memory_loops(self) -> List[MemoryLoop]:
+        return [
             MemoryLoop(
                 topic="moon apostando cookies",
                 users=["moongrade"],
                 weight=0.8,
-                last_used=self.message_count,
+                last_used=0,
                 type="running_joke",
             )
         ]
-        self._load_memory_loops()
-        self._prune_loops(save=False)
 
-        self.drama_state: Dict[str, Optional[str]] = {
+    def _get_channel_state(self, channel: Optional[str]) -> ChannelSocialState:
+        channel_key = self._normalize_channel(channel)
+        if channel_key in self.channel_states:
+            return self.channel_states[channel_key]
+
+        state = ChannelSocialState(memory_loops=self._default_memory_loops())
+        self._load_memory_loops(channel_key, state)
+        self._prune_loops(state, channel=channel_key, save=False)
+        self.channel_states[channel_key] = state
+        return state
+
+    def observe_message(self, channel: str, author: str, content: str, bot_nick: Optional[str] = None):
+        state = self._get_channel_state(channel)
+        self._maybe_reset_drama_for_interval(state, channel)
+
+        state.message_count += 1
+        logging.debug("[SocialDynamics] observe_message channel=%s count=%s author=%s content=%s", channel, state.message_count, author, content[:120])
+        state.users_seen.add(author.lower())
+
+        if state.message_count % 20 == 0:
+            for loop in state.memory_loops:
+                loop.weight *= 0.97
+
+        self._prune_loops(state, channel=channel)
+        self._roll_memory_loop(state)
+        self._roll_drama_events(state, author)
+        self._update_mood(state, author=author, content=content, bot_nick=bot_nick)
+
+    def reset_drama_state(self, channel: str, reason: str = "manual"):
+        state = self._get_channel_state(channel)
+        state.drama_state = {
             "favorite_of_the_day": None,
             "enemy_of_the_day": None,
             "suspect": None,
             "rivalries": [],
         }
+        state.users_seen = set()
+        state.bot_state = {"mood": "neutral", "duration": 0}
+        state.drama_reset_at = datetime.utcnow()
+        logging.info("[SocialDynamics] drama_state reset channel=%s reason=%s", channel, reason)
 
-        self.bot_state = {"mood": "neutral", "duration": 0}
+    def _maybe_reset_drama_for_interval(self, state: ChannelSocialState, channel: str):
+        now = datetime.utcnow()
+        if (now - state.drama_reset_at) >= self.DRAMA_RESET_INTERVAL:
+            self.reset_drama_state(channel, reason="24h_interval")
 
-    def observe_message(self, author: str, content: str, bot_nick: Optional[str] = None):
-        self.message_count += 1
-        logging.debug("[SocialDynamics] observe_message count=%s author=%s content=%s", self.message_count, author, content[:120])
-        self.users_seen.add(author.lower())
-
-        if self.message_count % 20 == 0:
-            for loop in self.memory_loops:
-                loop.weight *= 0.97
-
-        self._prune_loops()
-        self._roll_memory_loop()
-        self._roll_drama_events(author)
-        self._update_mood(author=author, content=content, bot_nick=bot_nick)
-
-    def get_injection_payload(self) -> Dict[str, object]:
+    def get_injection_payload(self, channel: str) -> Dict[str, object]:
+        state = self._get_channel_state(channel)
         memory_loop = None
-        if self.active_loop_for_message:
-            loop = self.active_loop_for_message
+        if state.active_loop_for_message:
+            loop = state.active_loop_for_message
             memory_loop = {"topic": loop.topic, "type": loop.type}
             loop.weight *= 0.9
-            loop.last_used = self.message_count
-            self._persist_loops()
-            self._prune_loops()
+            loop.last_used = state.message_count
+            self._persist_loops(channel, state)
+            self._prune_loops(state, channel=channel)
 
         payload = {
-            "mood": self.bot_state.get("mood", "neutral"),
-            "drama_state": self.drama_state,
+            "mood": state.bot_state.get("mood", "neutral"),
+            "drama_state": state.drama_state,
             "memory_loop": memory_loop,
         }
-        logging.debug("[SocialDynamics] injection_payload=%s", payload)
+        logging.debug("[SocialDynamics] injection_payload channel=%s payload=%s", channel, payload)
         return payload
 
-    def _roll_memory_loop(self):
-        self.active_loop_for_message = None
-        if not self.memory_loops:
+    def _roll_memory_loop(self, state: ChannelSocialState):
+        state.active_loop_for_message = None
+        if not state.memory_loops:
             return
 
         roll = random.random()
@@ -96,16 +142,16 @@ class SocialDynamicsEngine:
             logging.debug("[SocialDynamics] memory_loop roll=%.4f > %.4f (skip)", roll, self.LOOP_PROBABILITY)
             return
 
-        total_weight = sum(max(0.0, loop.weight) for loop in self.memory_loops)
+        total_weight = sum(max(0.0, loop.weight) for loop in state.memory_loops)
         if total_weight <= 0:
             return
 
         pick = random.uniform(0, total_weight)
         running = 0.0
-        for loop in self.memory_loops:
+        for loop in state.memory_loops:
             running += max(0.0, loop.weight)
             if pick <= running:
-                self.active_loop_for_message = loop
+                state.active_loop_for_message = loop
                 logging.debug(
                     "[SocialDynamics] memory_loop selected topic=%s weight=%.3f last_used=%s",
                     loop.topic,
@@ -114,29 +160,29 @@ class SocialDynamicsEngine:
                 )
                 return
 
-    def _roll_drama_events(self, author: str):
-        candidates = list(self.users_seen)
+    def _roll_drama_events(self, state: ChannelSocialState, author: str):
+        candidates = list(state.users_seen)
         if not candidates:
             return
 
         if random.random() < self.FAVORITE_PROBABILITY:
-            self.drama_state["favorite_of_the_day"] = random.choice(candidates)
+            state.drama_state["favorite_of_the_day"] = random.choice(candidates)
 
         if random.random() < self.ENEMY_PROBABILITY:
-            self.drama_state["enemy_of_the_day"] = random.choice(candidates)
+            state.drama_state["enemy_of_the_day"] = random.choice(candidates)
 
         if random.random() < self.SUSPECT_PROBABILITY:
-            self.drama_state["suspect"] = random.choice(candidates)
+            state.drama_state["suspect"] = random.choice(candidates)
 
-        enemy = self.drama_state.get("enemy_of_the_day")
-        favorite = self.drama_state.get("favorite_of_the_day")
+        enemy = state.drama_state.get("enemy_of_the_day")
+        favorite = state.drama_state.get("favorite_of_the_day")
         if enemy and favorite and enemy != favorite:
             rivalry = f"{favorite} vs {enemy}"
-            if rivalry not in self.drama_state["rivalries"]:
-                self.drama_state["rivalries"].append(rivalry)
-                self.drama_state["rivalries"] = self.drama_state["rivalries"][-5:]
+            if rivalry not in state.drama_state["rivalries"]:
+                state.drama_state["rivalries"].append(rivalry)
+                state.drama_state["rivalries"] = state.drama_state["rivalries"][-5:]
 
-    def _update_mood(self, author: str, content: str, bot_nick: Optional[str] = None):
+    def _update_mood(self, state: ChannelSocialState, author: str, content: str, bot_nick: Optional[str] = None):
         text = (content or "").lower().strip()
         lowered_author = (author or "").lower()
         bot_aliases = {"glorpinia", "glorp", (bot_nick or "").lower().strip()}
@@ -145,18 +191,18 @@ class SocialDynamicsEngine:
         mood_event = self._infer_contextual_mood_event(text=text, author=lowered_author, bot_aliases=bot_aliases)
 
         if mood_event:
-            self.bot_state["mood"] = mood_event[0]
-            self.bot_state["duration"] = mood_event[1]
+            state.bot_state["mood"] = mood_event[0]
+            state.bot_state["duration"] = mood_event[1]
             logging.debug("[SocialDynamics] mood_updated mood=%s duration=%s", mood_event[0], mood_event[1])
             return
 
-        duration = self.bot_state.get("duration", 0)
+        duration = state.bot_state.get("duration", 0)
         if duration > 0:
-            self.bot_state["duration"] = duration - 1
-        if self.bot_state.get("duration", 0) <= 0:
-            self.bot_state["mood"] = "neutral"
-            self.bot_state["duration"] = 0
-        logging.debug("[SocialDynamics] mood_state=%s", self.bot_state)
+            state.bot_state["duration"] = duration - 1
+        if state.bot_state.get("duration", 0) <= 0:
+            state.bot_state["mood"] = "neutral"
+            state.bot_state["duration"] = 0
+        logging.debug("[SocialDynamics] mood_state=%s", state.bot_state)
 
     def _infer_contextual_mood_event(self, text: str, author: str, bot_aliases: set):
         if not text:
@@ -191,29 +237,30 @@ class SocialDynamicsEngine:
 
         return None
 
-    def add_memory_loop(self, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke"):
+    def add_memory_loop(self, channel: str, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke"):
+        state = self._get_channel_state(channel)
         normalized_topic = (topic or "").strip()
         if not normalized_topic:
             return
 
-        for loop in self.memory_loops:
+        for loop in state.memory_loops:
             if loop.topic.lower() == normalized_topic.lower():
                 merged_users = sorted(set(loop.users + (users or [])))
                 loop.users = merged_users
                 loop.weight = max(loop.weight, weight)
-                loop.last_used = self.message_count
+                loop.last_used = state.message_count
                 logging.debug(
                     "[SocialDynamics] memory_loop refreshed topic=%s users=%s weight=%.3f",
                     loop.topic,
                     loop.users,
                     loop.weight,
                 )
-                self._persist_loops()
-                self._prune_loops()
+                self._persist_loops(channel, state)
+                self._prune_loops(state, channel=channel)
                 return
 
-        self.memory_loops.append(
-            MemoryLoop(topic=normalized_topic, users=users or [], weight=weight, last_used=self.message_count, type=loop_type)
+        state.memory_loops.append(
+            MemoryLoop(topic=normalized_topic, users=users or [], weight=weight, last_used=state.message_count, type=loop_type)
         )
         logging.debug(
             "[SocialDynamics] memory_loop created topic=%s users=%s weight=%.3f type=%s",
@@ -222,25 +269,26 @@ class SocialDynamicsEngine:
             weight,
             loop_type,
         )
-        self._persist_loops()
-        self.memory_loops = self.memory_loops[-self.MAX_LOOPS :]
-        self._prune_loops()
+        self._persist_loops(channel, state)
+        state.memory_loops = state.memory_loops[-self.MAX_LOOPS :]
+        self._prune_loops(state, channel=channel)
 
-    def get_debug_snapshot(self) -> Dict[str, object]:
+    def get_debug_snapshot(self, channel: str) -> Dict[str, object]:
+        state = self._get_channel_state(channel)
         active_loop = None
-        if self.active_loop_for_message:
+        if state.active_loop_for_message:
             active_loop = {
-                "topic": self.active_loop_for_message.topic,
-                "type": self.active_loop_for_message.type,
-                "weight": round(self.active_loop_for_message.weight, 3),
+                "topic": state.active_loop_for_message.topic,
+                "type": state.active_loop_for_message.type,
+                "weight": round(state.active_loop_for_message.weight, 3),
             }
 
         return {
-            "message_count": self.message_count,
-            "users_seen": sorted(self.users_seen),
-            "mood": self.bot_state.get("mood", "neutral"),
-            "mood_duration": self.bot_state.get("duration", 0),
-            "drama_state": dict(self.drama_state),
+            "message_count": state.message_count,
+            "users_seen": sorted(state.users_seen),
+            "mood": state.bot_state.get("mood", "neutral"),
+            "mood_duration": state.bot_state.get("duration", 0),
+            "drama_state": dict(state.drama_state),
             "active_memory_loop": active_loop,
             "memory_loops": [
                 {
@@ -250,7 +298,7 @@ class SocialDynamicsEngine:
                     "last_used": loop.last_used,
                     "type": loop.type,
                 }
-                for loop in self.memory_loops
+                for loop in state.memory_loops
             ],
             "random_roll_parameters": {
                 "favorite_probability": self.FAVORITE_PROBABILITY,
@@ -260,17 +308,17 @@ class SocialDynamicsEngine:
             },
         }
 
-    def _prune_loops(self, save: bool = True):
-        before = len(self.memory_loops)
+    def _prune_loops(self, state: ChannelSocialState, channel: str, save: bool = True):
+        before = len(state.memory_loops)
         retained_loops: List[MemoryLoop] = []
-        for loop in self.memory_loops:
-            is_stale = self.message_count - loop.last_used > self.LOOP_TTL_MESSAGES
+        for loop in state.memory_loops:
+            is_stale = state.message_count - loop.last_used > self.LOOP_TTL_MESSAGES
             has_min_weight = loop.weight >= self.MIN_LOOP_WEIGHT
             if is_stale:
                 logging.debug(
                     "[SocialDynamics] memory_loop expired topic=%s reason=ttl age=%s ttl=%s",
                     loop.topic,
-                    self.message_count - loop.last_used,
+                    state.message_count - loop.last_used,
                     self.LOOP_TTL_MESSAGES,
                 )
                 continue
@@ -284,20 +332,27 @@ class SocialDynamicsEngine:
                 continue
             retained_loops.append(loop)
 
-        self.memory_loops = retained_loops
-        if len(self.memory_loops) > self.MAX_LOOPS:
-            self.memory_loops = sorted(self.memory_loops, key=lambda l: l.weight, reverse=True)[: self.MAX_LOOPS]
+        state.memory_loops = retained_loops
+        if len(state.memory_loops) > self.MAX_LOOPS:
+            state.memory_loops = sorted(state.memory_loops, key=lambda l: l.weight, reverse=True)[: self.MAX_LOOPS]
 
-        changed = len(self.memory_loops) != before
+        changed = len(state.memory_loops) != before
         if changed and save:
-            self._persist_loops()
+            self._persist_loops(channel, state)
 
-    def _load_memory_loops(self):
-        if not self.storage_path.exists():
-            self._persist_loops()
+    def _storage_path_for_channel(self, channel: str) -> Path:
+        channel_key = self._normalize_channel(channel)
+        stem = self.storage_path.stem
+        suffix = self.storage_path.suffix or ".json"
+        return self.storage_path.with_name(f"{stem}_{channel_key}{suffix}")
+
+    def _load_memory_loops(self, channel: str, state: ChannelSocialState):
+        channel_path = self._storage_path_for_channel(channel)
+        if not channel_path.exists():
+            self._persist_loops(channel, state)
             return
         try:
-            raw = json.loads(self.storage_path.read_text(encoding="utf-8"))
+            raw = json.loads(channel_path.read_text(encoding="utf-8"))
             loaded_loops = []
             for item in raw:
                 topic = (item.get("topic") or "").strip()
@@ -313,12 +368,12 @@ class SocialDynamicsEngine:
                     )
                 )
             if loaded_loops:
-                self.memory_loops = loaded_loops[-self.MAX_LOOPS :]
-            logging.debug("[SocialDynamics] memory_loops loaded path=%s count=%s", self.storage_path, len(self.memory_loops))
+                state.memory_loops = loaded_loops[-self.MAX_LOOPS :]
+            logging.debug("[SocialDynamics] memory_loops loaded path=%s count=%s", channel_path, len(state.memory_loops))
         except Exception as exc:
-            logging.error("[SocialDynamics] failed loading memory loops path=%s error=%s", self.storage_path, exc)
+            logging.error("[SocialDynamics] failed loading memory loops path=%s error=%s", channel_path, exc)
 
-    def _persist_loops(self):
+    def _persist_loops(self, channel: str, state: ChannelSocialState):
         serialized = [
             {
                 "topic": loop.topic,
@@ -327,10 +382,11 @@ class SocialDynamicsEngine:
                 "last_used": loop.last_used,
                 "type": loop.type,
             }
-            for loop in self.memory_loops
+            for loop in state.memory_loops
         ]
         try:
-            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-            self.storage_path.write_text(json.dumps(serialized, ensure_ascii=False, indent=2), encoding="utf-8")
+            channel_path = self._storage_path_for_channel(channel)
+            channel_path.parent.mkdir(parents=True, exist_ok=True)
+            channel_path.write_text(json.dumps(serialized, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as exc:
-            logging.error("[SocialDynamics] failed persisting memory loops path=%s error=%s", self.storage_path, exc)
+            logging.error("[SocialDynamics] failed persisting memory loops channel=%s error=%s", channel, exc)

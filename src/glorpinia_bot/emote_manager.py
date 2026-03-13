@@ -207,16 +207,42 @@ class EmoteManager:
         mood_emotion = mood_map.get((mood or "").lower())
 
         if inferred_primary == "neutral" and mood_emotion:
+            logging.debug(
+                "[Emote] emotion_resolve source=mood_fallback mood=%s inferred=%s resolved=%s",
+                mood,
+                inferred_primary,
+                mood_emotion,
+            )
             return mood_emotion, None
 
         if mood_emotion and mood_emotion not in {inferred_primary, "neutral"}:
+            logging.debug(
+                "[Emote] emotion_resolve source=text_plus_mood mood=%s inferred=%s secondary=%s",
+                mood,
+                inferred_primary,
+                mood_emotion,
+            )
             return inferred_primary, mood_emotion
 
+        logging.debug(
+            "[Emote] emotion_resolve source=text_only mood=%s inferred_primary=%s inferred_secondary=%s",
+            mood,
+            inferred_primary,
+            inferred_secondary,
+        )
         return inferred_primary, inferred_secondary
 
     def choose_emote(self, channel, text, mood=None, context_text=None):
         analysis_text = " ".join([p for p in [context_text, text] if p])
         emotion, secondary_emotion = self._resolve_emotions(analysis_text, mood=mood)
+        logging.debug(
+            "[Emote][Realtime] canal=%s emocao_escolhida=%s emocao_secundaria=%s mood=%s texto_analise=%s",
+            channel,
+            emotion,
+            secondary_emotion,
+            mood,
+            (analysis_text or "")[:180],
+        )
         candidates = self._candidate_pool(channel, emotion, secondary_emotion=secondary_emotion)
 
         channel_hist = self.channel_emote_history[channel.lower()]
