@@ -246,8 +246,12 @@ class GeminiClient:
         # Limpeza e pós-processamento
         generated = self._clean_response(generated)
         generated = self._maybe_apply_glitch(generated, query, channel)
-        if allow_cookie_actions and self.cookie_system:
-            generated = self.cookie_system.process_ai_response(generated, current_user=author)
+        if self.cookie_system:
+            if allow_cookie_actions:
+                generated = self.cookie_system.process_ai_response(generated, current_user=author)
+            else:
+                # Nunca deixa o comando cru vazar para o chat quando a ação de cookie não está habilitada.
+                generated = self.cookie_system.strip_cookie_commands(generated)
 
         # Salva e Retorna
         if generated and "Sadge" not in generated:
