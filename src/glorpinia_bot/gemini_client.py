@@ -247,10 +247,11 @@ class GeminiClient:
         generated = self._clean_response(generated)
         generated = self._maybe_apply_glitch(generated, query, channel)
         if self.cookie_system:
-            if allow_cookie_actions:
+            has_cookie_command = bool(self.cookie_system.COOKIE_COMMAND_PATTERN.search(generated or ""))
+            if allow_cookie_actions or has_cookie_command:
+                # Sempre converte tags de cookie em texto humano para nunca vazar comando cru no chat.
                 generated = self.cookie_system.process_ai_response(generated, current_user=author)
             else:
-                # Nunca deixa o comando cru vazar para o chat quando a ação de cookie não está habilitada.
                 generated = self.cookie_system.strip_cookie_commands(generated)
 
         # Salva e Retorna
