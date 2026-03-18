@@ -147,7 +147,13 @@ class Comment:
                     final_message = re.sub(r"\[\[COOKIE:[^\]]*\]\]", "", final_message, flags=re.IGNORECASE).strip()
                 if not final_message:
                     return
-                self.bot.send_message(channel, final_message)
+                formatted_message = self.bot.prepare_final_bot_message(
+                    channel,
+                    final_message,
+                    source="comment",
+                    context_text=f"{topic} {context_str}",
+                )
+                self.bot.send_message(channel, formatted_message)
                 logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:80]}...")
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
