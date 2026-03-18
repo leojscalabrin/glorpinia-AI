@@ -187,13 +187,25 @@ class Listen:
         Gatilho manual (!glorp scan).
         """
         try:
-            self.bot.send_message(channel, f"glorp 📡 Fala que eu te escuto, @{channel}...")
+            intro_message = self.bot.prepare_final_bot_message(
+                channel,
+                f"📡 Fala que eu te escuto, @{channel}...",
+                source="scan",
+                context_text="scan manual listen",
+            )
+            self.bot.send_message(channel, intro_message)
             
             transcription = self._transcribe_stream(channel, duration=15)
             
             if not transcription or len(transcription) < 10:
                 logging.info(f"[Listen] Transcricao manual vazia.")
-                self.bot.send_message(channel, f"@{channel}, não consegui ouvir nada. angrybird")
+                empty_message = self.bot.prepare_final_bot_message(
+                    channel,
+                    f"@{channel}, não consegui ouvir nada.",
+                    source="scan",
+                    context_text="scan manual vazio sem audio",
+                )
+                self.bot.send_message(channel, empty_message)
                 return
 
             t = threading.Thread(target=self._generate_comment_thread, 
@@ -203,7 +215,13 @@ class Listen:
 
         except Exception as e:
             logging.error(f"[Listen] Falha ao gerar comentario de audio manual: {e}")
-            self.bot.send_message(channel, f"@{channel}, o portal está instável. Sadge")
+            error_message = self.bot.prepare_final_bot_message(
+                channel,
+                f"@{channel}, o portal está instável.",
+                source="scan",
+                context_text="scan manual erro portal instavel",
+            )
+            self.bot.send_message(channel, error_message)
 
     def _generate_comment_thread(self, transcription: str, channel: str, memory_mgr):
         """
@@ -236,7 +254,12 @@ class Listen:
                 if not sanitized_comment:
                     return
 
-                formatted_comment = f"@{channel}, {sanitized_comment}"
+                formatted_comment = self.bot.prepare_final_bot_message(
+                    channel,
+                    f"@{channel}, {sanitized_comment}",
+                    source="listen",
+                    context_text=f"{topic} {transcription}",
+                )
                 self.bot.send_long_message(channel, formatted_comment)
                 logging.info(f"[Listen] Comentario enviado em {channel}.")
                 
