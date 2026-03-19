@@ -855,14 +855,31 @@ class TwitchIRC:
                 
                 # Limpeza: remove a menção ao @system que o bot adiciona automaticamente
                 welcome_msg = response.replace("@system, ", "").strip()
-                
+                welcome_msg = self.prepare_final_bot_message(
+                    channel,
+                    welcome_msg,
+                    source="stream_welcome",
+                    context_text="inicio de stream welcome boa stream esperando chegar",
+                )
                 self.send_message(channel, welcome_msg)
             else:
-                self.send_message(channel, f"LETSGO A LIVE COMEÇOU! Boa stream @{channel}! glorp")
+                fallback_message = self.prepare_final_bot_message(
+                    channel,
+                    f"LETSGO A LIVE COMEÇOU! Boa stream @{channel}!",
+                    source="stream_welcome",
+                    context_text="inicio de stream welcome boa stream",
+                )
+                self.send_message(channel, fallback_message)
 
         except Exception as e:
             print(f"[ERROR] Falha ao gerar welcome message: {e}")
-            self.send_message(channel, f"LETSGO A LIVE COMEÇOU! Boa stream @{channel}!")
+            fallback_message = self.prepare_final_bot_message(
+                channel,
+                f"LETSGO A LIVE COMEÇOU! Boa stream @{channel}!",
+                source="stream_welcome",
+                context_text="inicio de stream welcome erro fallback",
+            )
+            self.send_message(channel, fallback_message)
     
     def _trigger_goodbye_message(self, channel):
         """
@@ -880,14 +897,31 @@ class TwitchIRC:
                 response = self.gemini_client.get_response(prompt, channel, "system")
                 
                 goodbye_msg = response.replace("@system, ", "").strip()
-                
+                goodbye_msg = self.prepare_final_bot_message(
+                    channel,
+                    goodbye_msg,
+                    source="stream_goodbye",
+                    context_text="fim de stream despedida sono paz nave dormir",
+                )
                 self.send_message(channel, goodbye_msg)
             else:
-                self.send_message(channel, f"A live acabou! Até a próxima, humanos! peepoLeave")
+                fallback_message = self.prepare_final_bot_message(
+                    channel,
+                    "A live acabou! Até a próxima, humanos!",
+                    source="stream_goodbye",
+                    context_text="fim de stream despedida ate a proxima",
+                )
+                self.send_message(channel, fallback_message)
 
         except Exception as e:
             print(f"[ERROR] Falha ao gerar goodbye message: {e}")
-            self.send_message(channel, f"Fim da transmissão! A mimir Bedge")
+            fallback_message = self.prepare_final_bot_message(
+                channel,
+                "Fim da transmissão! A mimir",
+                source="stream_goodbye",
+                context_text="fim de stream despedida mimir",
+            )
+            self.send_message(channel, fallback_message)
 
 if __name__ == "__main__":
     bot = TwitchIRC()
