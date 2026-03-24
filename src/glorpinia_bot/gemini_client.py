@@ -162,7 +162,7 @@ class GeminiClient:
         self.models_cache[channel_name] = new_model
         return new_model
 
-    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False, injection_context=None, allow_cookie_actions=False):
+    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False, injection_context=None, mention_context=None, allow_cookie_actions=False):
         """
         Gera uma resposta. 
         Se bloquear -> Tenta Retry sem busca.
@@ -211,6 +211,7 @@ class GeminiClient:
             rag_context=rag_context,
             user_query=query,
             injection_context=injection_context,
+            mention_context=mention_context,
         )
         logging.debug("[Gemini] context_injection channel=%s author=%s payload=%s", channel, author, injection_context or {})
         
@@ -226,6 +227,7 @@ class GeminiClient:
                     rag_context=fallback_rag_context,
                     user_query=query,
                     injection_context=injection_context,
+                    mention_context=mention_context,
                 )
                 generated = self._generate_safe(channel, fallback_prompt)
 
@@ -358,7 +360,7 @@ class GeminiClient:
         except:
             return "__SAFETY_BLOCK__"
 
-    def _build_final_prompt(self, rag_context, user_query, injection_context=None):
+    def _build_final_prompt(self, rag_context, user_query, injection_context=None, mention_context=None):
         """Monta prompt final via camada de injeção de contexto."""
         injection_context = injection_context or {}
         return build_context_prompt(
@@ -368,6 +370,7 @@ class GeminiClient:
             memory_loop=injection_context.get("memory_loop"),
             rag_context=rag_context,
             chat_message=user_query,
+            mention_context=mention_context,
         )
 
     def _generate_safe(self, channel, prompt):
