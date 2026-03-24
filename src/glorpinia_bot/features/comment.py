@@ -17,7 +17,7 @@ class Comment:
         """
         print("[Feature] Comment Initialized.")
         self.bot = bot
-        self.enabled = True
+        self.enabled = False
         
         self.last_comment_time = 0
         self.COOLDOWN_SECONDS = 1200
