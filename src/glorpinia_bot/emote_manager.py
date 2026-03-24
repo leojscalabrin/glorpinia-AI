@@ -116,6 +116,40 @@ class EmoteManager:
         cleaned = " ".join(cleaned_tokens).strip()
         return cleaned if cleaned else message.strip()
 
+    def strip_trailing_emotion_label(self, message):
+        """
+        Remove rótulo textual de emoção no fim da mensagem.
+        Exemplos:
+          - "... código alterado! Suspicion" -> "... código alterado!"
+          - "... código alterado! Suspicion Kappa" -> "... código alterado! Kappa"
+        """
+        tokens = (message or "").split()
+        if not tokens:
+            return message
+
+        emotion_labels = self._get_known_emotion_labels()
+        if not emotion_labels:
+            return message
+
+        last_token = tokens[-1]
+        last_normalized = self._normalize_token(last_token).lower()
+        if last_normalized in emotion_labels:
+            logging.debug("[Emote] trailing_emotion_label_removed mode=label_only label=%s", last_normalized)
+            return " ".join(tokens[:-1]).strip()
+
+        if len(tokens) >= 2:
+            penultimate_normalized = self._normalize_token(tokens[-2]).lower()
+            final_emote_normalized = self._normalize_token(tokens[-1])
+            all_emotes = self.get_all_emotes()
+            if penultimate_normalized in emotion_labels and final_emote_normalized in all_emotes:
+                logging.debug(
+                    "[Emote] trailing_emotion_label_removed mode=label_plus_emote label=%s",
+                    penultimate_normalized,
+                )
+                return " ".join(tokens[:-2] + [tokens[-1]]).strip()
+
+        return message
+
     def _normalize_token(self, token):
         return token.strip(".,!?;:()[]{}\"'`*_~").strip()
 
@@ -127,6 +161,12 @@ class EmoteManager:
             for values in cmap.values():
                 pool.update(values)
         return pool
+
+    def _get_known_emotion_labels(self):
+        labels = set(self.global_emote_map.keys())
+        for cmap in self.channel_emote_map.values():
+            labels.update(cmap.keys())
+        return labels
 
     def infer_emotion(self, text):
         t = (text or "").lower()
