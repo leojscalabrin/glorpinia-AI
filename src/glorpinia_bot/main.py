@@ -532,7 +532,7 @@ class TwitchIRC:
                         "listen": "(Admin) Toggle listen. Ex: *listen on", 
                         "comment": "(Admin) Toggle comment. Ex: *comment on", 
                         "scan": "(Admin) Scan manual.",
-                        "debug": "(Admin) Mostra mood atual, drama state do dia e debug de emotes.",
+                        "debug": "(Admin) Mostra resumo social atual (mood e drama state).",
                         "addcookie": "(Admin) Add cookies. Ex: *addcookie nick 100", 
                         "removecookie": "(Admin) Remove cookies. Ex: *removecookie nick 100",
                         "analysis": "Análise de um assunto, dúvidas ou resumo do chat. Ex: *analysis [pergunta específica]",
@@ -699,10 +699,8 @@ class TwitchIRC:
                 self.listen_feature.trigger_manual_scan(channel)
                 return
             elif command_name == "debug":
-                social_summary, emote_summary, params_summary = self._format_admin_debug_message(channel)
+                social_summary, *_ = self._format_admin_debug_message(channel)
                 self.send_long_message(channel, f"[DEBUG] {social_summary}")
-                self.send_long_message(channel, f"[DEBUG] {emote_summary}")
-                self.send_long_message(channel, f"[DEBUG] {params_summary}")
                 return
         
         # Comandos com 3 argumentos (*addcookie nick 10) -> len 3
