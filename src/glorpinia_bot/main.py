@@ -72,6 +72,7 @@ class TwitchIRC:
         self.social_dynamics = SocialDynamicsEngine()
         
         self.live_status = {} # Dicionário para guardar { 'canal': True/False }
+        self.live_status_initialized = set()  # Canais já observados ao menos uma vez pelo monitor
         
         # Define como True antes de iniciar a thread
         self.running = True 
@@ -868,6 +869,10 @@ class TwitchIRC:
         """Handler para quando a conexao WebSocket é fechada."""
         print(f"[INFO] Conexao WebSocket fechada. Codigo: {close_status_code}, Msg: {close_msg}")
 
+    def _is_bot_online(self):
+        """Retorna True se o bot estiver com WebSocket conectado à Twitch."""
+        return bool(self.ws and self.ws.sock and self.ws.sock.connected)
+
     def _monitor_live_status(self):
         """
         Thread secundário que verifica a cada 60s se os canais estão online.
@@ -890,12 +895,23 @@ class TwitchIRC:
                         data = response.json()
                         is_live = len(data.get("data", [])) > 0
                         
+                        if channel not in self.live_status_initialized:
+                            self.live_status[channel] = is_live
+                            self.live_status_initialized.add(channel)
+                            print(f"[Monitor] Estado inicial de #{channel}: {'AO VIVO' if is_live else 'OFFLINE'} (sem trigger).")
+                            continue
+
                         was_live = self.live_status.get(channel, False)
-                        
+
                         # Atualiza estado
                         self.live_status[channel] = is_live
-                        
-                        # Detecta transições
+
+                        # Detecta transições apenas com bot online para evitar trigger após reset
+                        if not self._is_bot_online():
+                            if is_live != was_live:
+                                print(f"[Monitor] Mudança de status em #{channel} ignorada (bot offline).")
+                            continue
+
                         if is_live and not was_live:
                             print(f"[Monitor] {channel} entrou AO VIVO!")
                             self.social_dynamics.reset_drama_state(channel, reason="new_stream")
