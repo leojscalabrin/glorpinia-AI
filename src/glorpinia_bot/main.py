@@ -621,6 +621,20 @@ class TwitchIRC:
                             enriched_content += f"\n\n[SISTEMA: Saldos atuais -> {' | '.join(unique_notes)}. Se o saldo for negativo, a pessoa é uma devedora/caloteira do Império.]"
                     
                     if self.gemini_client and self.memory_mgr:
+                        explicit_mentions = []
+                        for token in content.split():
+                            if not token.startswith("@"):
+                                continue
+                            nick = re.sub(r"[^a-zA-Z0-9_]", "", token.replace("@", "")).lower().strip()
+                            if not nick or nick == self.auth.bot_nick.lower() or nick in explicit_mentions:
+                                continue
+                            explicit_mentions.append(nick)
+
+                        mention_context = {
+                            "trigger_author": author.lower(),
+                            "trigger_message": content.strip(),
+                            "explicit_mentions": explicit_mentions,
+                        }
                         injection_context = self.social_dynamics.get_injection_payload(channel)
                         response_text = self.gemini_client.get_response(
                             query=enriched_content,
@@ -629,6 +643,7 @@ class TwitchIRC:
                             memory_mgr=self.memory_mgr,
                             recent_history=recent_history_list,
                             injection_context=injection_context,
+                            mention_context=mention_context,
                             allow_cookie_actions=True,
                         )
                         
