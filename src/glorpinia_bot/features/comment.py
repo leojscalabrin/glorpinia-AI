@@ -17,20 +17,19 @@ class Comment:
         """
         print("[Feature] Comment Initialized.")
         self.bot = bot
-        self.enabled = False
-        
-        self.last_comment_time = 0
+        self.enabled_by_channel = {}
+        self.last_comment_time_by_channel = {}
         self.COOLDOWN_SECONDS = 1200
 
-    def set_enabled(self, state: bool):
-        """Ativa ou desativa esta feature."""
-        self.enabled = state
+    def set_enabled(self, channel: str, state: bool):
+        """Ativa ou desativa esta feature em um canal específico."""
+        self.enabled_by_channel[channel] = state
         if not state:
-            logging.info("[Comment] Desativado.")
+            logging.info("[Comment] Desativado no canal %s.", channel)
 
-    def get_status(self):
-        """Retorna o status formatado para o comando *check."""
-        status = "ATIVADO" if self.enabled else "DESATIVADO"
+    def get_status(self, channel: str):
+        """Retorna o status formatado para o comando *check por canal."""
+        status = "ATIVADO" if self.enabled_by_channel.get(channel, False) else "DESATIVADO"
         return f"{status}"
 
     def stop_thread(self):
@@ -42,12 +41,13 @@ class Comment:
         Chamado a CADA MENSAGEM. Rola um dado para ver se o bot comenta.
         Se acionado, o autor da mensagem ganha 10 cookies.
         """
-        if not self.enabled:
+        if not self.enabled_by_channel.get(channel, False):
             return
 
         # VERIFICAÇÃO DE COOLDOWN
         # Se ainda não passou 20 minutos desde o último comentário, ignora.
-        if (time.time() - self.last_comment_time) < self.COOLDOWN_SECONDS:
+        last_comment_time = self.last_comment_time_by_channel.get(channel, 0)
+        if (time.time() - last_comment_time) < self.COOLDOWN_SECONDS:
             return 
         
         # Chance fixa de 1%
@@ -56,7 +56,7 @@ class Comment:
             logging.debug("[Comment] roll acionado channel=%s author=%s", channel, author)
             
             # Atualiza o timer para evitar disparos duplos
-            self.last_comment_time = time.time()
+            self.last_comment_time_by_channel[channel] = time.time()
             
             # Premiação (Cookies)
             if self.bot.cookie_system:

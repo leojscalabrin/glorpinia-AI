@@ -16,21 +16,23 @@ class Listen:
         print("[Feature] Listen Initialized.")
         self.bot = bot
         self.speech_client = speech_client
-        self.enabled = False
-        self.last_audio_comment_time = 0
+        self.enabled_by_channel = {}
+        self.last_audio_comment_time_by_channel = {}
         self.loop_sleep_interval = 10
         self.timer_running = True
         
         self.thread = threading.Thread(target=self._periodic_thread, daemon=True)
         self.thread.start()
 
-    def set_enabled(self, state: bool):
-        """Ativa ou desativa o timer PERIÓDICO."""
-        self.enabled = state
+    def set_enabled(self, channel: str, state: bool):
+        """Ativa ou desativa o timer PERIÓDICO em um canal específico."""
+        self.enabled_by_channel[channel] = state
+        if state and channel not in self.last_audio_comment_time_by_channel:
+            self.last_audio_comment_time_by_channel[channel] = time.time()
 
-    def get_status(self):
-        """Retorna o status formatado para o comando !glorp check."""
-        return "ATIVADO" if self.enabled else "DESATIVADO"
+    def get_status(self, channel: str):
+        """Retorna o status formatado para o comando !glorp check no canal."""
+        return "ATIVADO" if self.enabled_by_channel.get(channel, False) else "DESATIVADO"
 
     def stop_thread(self):
         """Sinaliza para o thread parar (usado no shutdown)."""
@@ -49,21 +51,20 @@ class Listen:
         """
         Thread em background: A cada 30 min, transcreve audio e comenta.
         """
-        self.last_audio_comment_time = time.time()
-        
         while self.timer_running:
             time.sleep(self.loop_sleep_interval)
 
-            if not self.enabled:
-                continue
-
             now = time.time()
-            if now - self.last_audio_comment_time < 1800:  # 30 min
-                continue
-            
-            self.last_audio_comment_time = now
 
             for channel in self.bot.auth.channels:
+                if not self.enabled_by_channel.get(channel, False):
+                    continue
+
+                last_audio_comment_time = self.last_audio_comment_time_by_channel.get(channel, now)
+                if now - last_audio_comment_time < 1800:  # 30 min
+                    continue
+
+                self.last_audio_comment_time_by_channel[channel] = now
                 logging.info(f"[Listen] Iniciando ciclo de escuta periódica para {channel}...")
                 
                 transcription = self._transcribe_stream(channel, duration=15) 
