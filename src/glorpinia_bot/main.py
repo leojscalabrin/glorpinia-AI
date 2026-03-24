@@ -244,8 +244,18 @@ class TwitchIRC:
 
     def prepare_final_bot_message(self, channel, response_text, mood=None, source="chat", context_text=None):
         """Normaliza saída, evita repetição e escolhe emote conforme contexto + mood."""
-        cleaned_text = self.emote_manager.remove_known_emotes(response_text or "")
+        original_text = (response_text or "").strip()
+        cleaned_text = self.emote_manager.remove_known_emotes(original_text)
         cleaned_text = self.emote_manager.strip_trailing_emote(cleaned_text)
+        cleaned_text = self.emote_manager.strip_trailing_emotion_label(cleaned_text)
+
+        if not cleaned_text.strip():
+            fallback_text = self.emote_manager.strip_trailing_emotion_label(
+                self.emote_manager.strip_trailing_emote(original_text)
+            ).strip()
+            cleaned_text = fallback_text or original_text or "..."
+            logging.debug("[Main] cleaned_text_empty channel=%s source=%s fallback_applied=true", channel, source)
+
         unique_text = self.emote_manager.ensure_unique_phrase(channel, cleaned_text)
         selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood, context_text=context_text)
         final_text = f"{unique_text} {selected_emote}".strip()
