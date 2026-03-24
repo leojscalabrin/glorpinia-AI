@@ -6,6 +6,7 @@ import logging
 import signal
 import sys
 import re
+import json
 import requests
 import threading
 from datetime import datetime
@@ -39,13 +40,14 @@ logging.basicConfig(
 class TwitchIRC:
     TOPIC_MIN_OCCURRENCES = 3
     TOPIC_SCAN_WINDOW = 25
+    FEATURE_STATE_FILE = "channel_feature_states.json"
 
     def __init__(self):
         # Core Auth (sempre necessário)
         self.auth = TwitchAuth()  # Carrega env, tokens, profile, channels
         
-        # Configurações de Estado
-        self.chat_enabled = True  # Para respostas a menções
+        # Configurações de Estado por canal
+        self.channel_feature_states = self._load_channel_feature_states()
         
         self.IGNORED_NICKS = {
             "system", "usuario", "user", "usuário", "você", "eu", "everyone", "here", "chat",
@@ -91,6 +93,7 @@ class TwitchIRC:
         self.analysis_feature = AnalysisMode(self)
         self.tarot_feature = TarotReader(self)
         self.rpg_feature = RPGRollFeature(self)
+        self._apply_channel_feature_states()
 
         # Cache e Utilitários
         self.processed_message_ids = deque(maxlen=500)
@@ -113,6 +116,68 @@ class TwitchIRC:
         
         signal.signal(signal.SIGINT, self.handle_exit)
         signal.signal(signal.SIGTERM, self.handle_exit)
+
+    def _default_feature_states(self):
+        return {
+            "chat": True,
+            "listen": False,
+            "comment": False,
+        }
+
+    def _load_channel_feature_states(self):
+        default_states = self._default_feature_states()
+        states = {channel: dict(default_states) for channel in self.auth.channels}
+
+        if not os.path.exists(self.FEATURE_STATE_FILE):
+            return states
+
+        try:
+            with open(self.FEATURE_STATE_FILE, "r", encoding="utf-8") as f:
+                loaded_states = json.load(f)
+
+            if not isinstance(loaded_states, dict):
+                logging.warning("[Features] Arquivo de estado inválido. Usando padrões.")
+                return states
+
+            for channel, raw_state in loaded_states.items():
+                if not isinstance(raw_state, dict):
+                    continue
+                normalized = dict(default_states)
+                for feature_name in default_states:
+                    normalized[feature_name] = bool(raw_state.get(feature_name, default_states[feature_name]))
+                states[channel] = normalized
+        except Exception as e:
+            logging.error(f"[Features] Falha ao carregar estados por canal: {e}")
+
+        for channel in self.auth.channels:
+            states.setdefault(channel, dict(default_states))
+
+        return states
+
+    def _save_channel_feature_states(self):
+        try:
+            with open(self.FEATURE_STATE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.channel_feature_states, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"[Features] Falha ao salvar estados por canal: {e}")
+
+    def _apply_channel_feature_states(self):
+        for channel, state in self.channel_feature_states.items():
+            if self.listen_feature:
+                self.listen_feature.set_enabled(channel, bool(state.get("listen", False)))
+            if self.comment_feature:
+                self.comment_feature.set_enabled(channel, bool(state.get("comment", False)))
+
+    def is_feature_enabled(self, channel, feature_name):
+        channel_state = self.channel_feature_states.get(channel, {})
+        default_state = self._default_feature_states().get(feature_name, False)
+        return bool(channel_state.get(feature_name, default_state))
+
+    def set_feature_state(self, channel, feature_name, state):
+        if channel not in self.channel_feature_states:
+            self.channel_feature_states[channel] = self._default_feature_states()
+        self.channel_feature_states[channel][feature_name] = bool(state)
+        self._save_channel_feature_states()
 
 
     def handle_exit(self, signum, frame):
@@ -591,7 +656,7 @@ class TwitchIRC:
                 return
             
             # MENÇÕES DIRETAS À IA
-            if self.chat_enabled and self.auth.bot_nick.lower() in content_lower:
+            if self.is_feature_enabled(channel, "chat") and self.auth.bot_nick.lower() in content_lower:
                 print(f"[DEBUG] Bot mencionado por {author}. Gerando resposta...")
                 
                 if self.cookie_system:
@@ -702,9 +767,9 @@ class TwitchIRC:
         # Comandos sem argumento (*check) -> len 1
         if len(parts) == 1:
             if command_name == "check":
-                c_st = "ON" if self.chat_enabled else "OFF"
-                l_st = self.listen_feature.get_status() if self.listen_feature else "?"
-                cm_st = self.comment_feature.get_status() if self.comment_feature else "?"
+                c_st = "ON" if self.is_feature_enabled(channel, "chat") else "OFF"
+                l_st = self.listen_feature.get_status(channel) if self.listen_feature else "?"
+                cm_st = self.comment_feature.get_status(channel) if self.comment_feature else "?"
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
@@ -740,15 +805,17 @@ class TwitchIRC:
             state = (parts[1].lower() == "on")
             
             if command_name == "chat":
-                self.chat_enabled = state
+                self.set_feature_state(channel, "chat", state)
                 self.send_message(channel, f"peepoChat Chat {'ATIVADO' if state else 'DESATIVADO'}.")
                 return
             elif command_name == "listen" and self.listen_feature:
-                self.listen_feature.set_enabled(state)
+                self.listen_feature.set_enabled(channel, state)
+                self.set_feature_state(channel, "listen", state)
                 self.send_message(channel, f"glorp 📡 Listen {'ATIVADO' if state else 'DESATIVADO'}.")
                 return
             elif command_name == "comment" and self.comment_feature:
-                self.comment_feature.set_enabled(state)
+                self.comment_feature.set_enabled(channel, state)
+                self.set_feature_state(channel, "comment", state)
                 self.send_message(channel, f"peepoTalk Comment {'ATIVADO' if state else 'DESATIVADO'}.")
                 return
 
