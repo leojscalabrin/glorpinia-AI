@@ -150,6 +150,22 @@ class EmoteManager:
 
         return message
 
+    def normalize_emote_spacing(self, message):
+        """Garante que emotes não fiquem colados com pontuação (ex.: BALD! -> BALD !)."""
+        if not message:
+            return message
+
+        normalized = message
+        emote_pool = set(self.get_all_emotes())
+        emote_pool.update({"BALD"})
+
+        for emote in sorted(emote_pool, key=len, reverse=True):
+            escaped = re.escape(emote)
+            pattern = rf"(?<!\w)({escaped})([!?.,;:]+)(?!\w)"
+            normalized = re.sub(pattern, r"\1 \2", normalized, flags=re.IGNORECASE)
+
+        return re.sub(r"\s{2,}", " ", normalized).strip()
+
     def _normalize_token(self, token):
         return token.strip(".,!?;:()[]{}\"'`*_~").strip()
 
