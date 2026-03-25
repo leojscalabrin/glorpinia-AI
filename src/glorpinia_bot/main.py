@@ -216,6 +216,7 @@ class TwitchIRC:
 
     def send_message(self, channel, message):
         """Envia mensagem via WebSocket."""
+        message = self.emote_manager.normalize_emote_spacing(message)
         if self.ws and self.ws.sock and self.ws.sock.connected:
             full_msg = f"PRIVMSG #{channel} :{message}\r\n"
             self.ws.send(full_msg)
@@ -238,6 +239,7 @@ class TwitchIRC:
         """[HELPER] Espera (em um thread) e envia uma parte da mensagem."""
         try:
             time.sleep(delay)
+            part = self.emote_manager.normalize_emote_spacing(part)
             # Verifica conexão antes de enviar
             if self.ws and self.ws.sock and self.ws.sock.connected:
                 full_msg = f"PRIVMSG #{channel} :{part}\r\n"
