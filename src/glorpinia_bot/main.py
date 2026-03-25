@@ -9,6 +9,7 @@ import re
 import json
 import requests
 import threading
+import random
 from datetime import datetime
 from collections import deque
 import subprocess
@@ -575,7 +576,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *debt, *slots, *fortune, *roll, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *debt, *slots, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -605,6 +606,7 @@ class TwitchIRC:
                         "help": "Você deve estar precisando mesmo nise",
                         "fortune": "Tire uma leitura do seu arcano",
                         "roll": "Rolar um D20 para RPG com narração temática. Ex: *roll [ação desejada]",
+                        "bald": "Mede o nível de calvície de alguém. Ex: *bald [nick]",
                         "debt": "Veja os maiores devedores do império (quem deve mais cookies)."
                     }
                     self.send_message(channel, help_msg.get(cmd_target, "glorp Comando desconhecido."))
@@ -630,6 +632,27 @@ class TwitchIRC:
                     query = " ".join(parts[1:]) if len(parts) > 1 else ""
 
                     self.rpg_feature.trigger_roll(channel, author, query)
+                    return
+
+                if command_raw == "bald":
+                    raw_target = " ".join(parts[1:]).strip() if len(parts) > 1 else ""
+                    target = raw_target.replace("@", "").strip() if raw_target else author
+                    target = target or author
+                    percentage = random.randint(0, 100)
+
+                    prompt = (
+                        f"Gere UM comentário curto (máximo 12 palavras), em português, engraçado e leve "
+                        f"sobre {target} estar {percentage}% careca. Não use aspas, não use emojis."
+                    )
+                    short_comment = "com potencial aerodinâmico em desenvolvimento."
+                    try:
+                        ai_comment = self.gemini_client.get_response(prompt, channel, "system", self.memory_mgr)
+                        if ai_comment:
+                            short_comment = ai_comment.strip().replace("\n", " ")
+                    except Exception:
+                        pass
+
+                    self.send_message(channel, f"O {target} está {percentage}% careca o7 {short_comment}")
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)
