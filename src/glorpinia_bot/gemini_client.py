@@ -191,7 +191,8 @@ class GeminiClient:
                 memory_mgr.load_user_memory(channel, author)
                 retrieved = memory_mgr.search_memory(channel, author, clean_query)
                 if retrieved: memory_context = f"**HISTÓRICO RECENTE:**\n{retrieved}"
-            except: pass
+            except Exception as e:
+                logging.warning("[Gemini] Falha ao carregar memória RAG channel=%s author=%s error=%s", channel, author, e)
 
         web_context = ""
         performed_search = False
@@ -202,9 +203,30 @@ class GeminiClient:
                 if res:
                     web_context = f"**CONTEXTO WEB:**\n{res}"
                     performed_search = True
-        except: pass
+                    logging.info(
+                        "[Gemini] Web context anexado channel=%s author=%s query=%s chars=%s",
+                        channel,
+                        author,
+                        optimized,
+                        len(web_context),
+                    )
+                else:
+                    logging.info("[Gemini] Busca web sem resultados úteis channel=%s author=%s query=%s", channel, author, optimized)
+            else:
+                logging.debug("[Gemini] Busca web ignorada channel=%s author=%s skip_search=%s", channel, author, skip_search)
+        except Exception as e:
+            logging.warning("[Gemini] Falha na busca web channel=%s author=%s error=%s", channel, author, e)
 
         rag_context = "\n\n".join([ctx for ctx in [chat_context_str, memory_context, web_context] if ctx.strip()])
+        logging.debug(
+            "[Gemini] Contextos montados channel=%s author=%s chat=%s memory=%s web=%s total_chars=%s",
+            channel,
+            author,
+            bool(chat_context_str),
+            bool(memory_context),
+            bool(web_context),
+            len(rag_context),
+        )
 
         # Monta Prompt Principal
         prompt = self._build_final_prompt(
