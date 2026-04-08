@@ -222,6 +222,7 @@ class TwitchIRC:
             self.ws.send(full_msg)
             print(f"[BOT] {channel}: {message}")
             self._register_recent_message(channel, self.auth.bot_nick, message)
+            self.social_dynamics.register_bot_message(channel)
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
 
@@ -246,6 +247,7 @@ class TwitchIRC:
                 self.ws.send(full_msg)
                 print(f"[BOT-PART] {channel}: {part}")
                 self._register_recent_message(channel, self.auth.bot_nick, part)
+                self.social_dynamics.register_bot_message(channel)
             else:
                 print(f"[ERROR] WebSocket desconectado ao tentar enviar parte: {part}")
         except Exception as e:
