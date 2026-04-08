@@ -371,6 +371,7 @@ class TwitchIRC:
 
         social_summary = (
             f"Mood: {social_debug.get('mood', 'neutral')}({social_debug.get('mood_duration', 0)}) | "
+            f"Cooldown mood: {social_debug.get('mood_cooldown', 0)} | "
             f"{_fmt('Fav', drama_state.get('favorite_of_the_day'))} | "
             f"{_fmt('Enemy', drama_state.get('enemy_of_the_day'))} | "
             f"{_fmt('Suspect', drama_state.get('suspect'))} | "
