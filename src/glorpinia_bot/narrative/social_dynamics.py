@@ -31,7 +31,9 @@ class ChannelSocialState:
             "rivalries": [],
         }
     )
-    bot_state: Dict[str, object] = field(default_factory=lambda: {"mood": "neutral", "duration": 0})
+    bot_state: Dict[str, object] = field(
+        default_factory=lambda: {"mood": "neutral", "remaining_messages": 0, "cooldown_messages": 0}
+    )
     drama_reset_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -104,9 +106,30 @@ class SocialDynamicsEngine:
             "rivalries": [],
         }
         state.users_seen = set()
-        state.bot_state = {"mood": "neutral", "duration": 0}
+        state.bot_state = {"mood": "neutral", "remaining_messages": 0, "cooldown_messages": 0}
         state.drama_reset_at = datetime.utcnow()
         logging.info("[SocialDynamics] drama_state reset channel=%s reason=%s", channel, reason)
+
+    def register_bot_message(self, channel: str):
+        state = self._get_channel_state(channel)
+        remaining = int(state.bot_state.get("remaining_messages", 0) or 0)
+        cooldown = int(state.bot_state.get("cooldown_messages", 0) or 0)
+
+        if remaining > 0:
+            remaining -= 1
+            state.bot_state["remaining_messages"] = remaining
+            if remaining <= 0:
+                state.bot_state["mood"] = "neutral"
+                state.bot_state["remaining_messages"] = 0
+                state.bot_state["cooldown_messages"] = 3
+            logging.debug("[SocialDynamics] bot_message mood_progress state=%s", state.bot_state)
+            return
+
+        if cooldown > 0:
+            state.bot_state["mood"] = "neutral"
+            state.bot_state["cooldown_messages"] = cooldown - 1
+            logging.debug("[SocialDynamics] bot_message cooldown_progress state=%s", state.bot_state)
+            return
 
     def _maybe_reset_drama_for_interval(self, state: ChannelSocialState, channel: str):
         now = datetime.utcnow()
@@ -188,20 +211,26 @@ class SocialDynamicsEngine:
         bot_aliases = {"glorpinia", "glorp", (bot_nick or "").lower().strip()}
         bot_aliases.discard("")
 
+        remaining = int(state.bot_state.get("remaining_messages", 0) or 0)
+        cooldown = int(state.bot_state.get("cooldown_messages", 0) or 0)
+        if remaining > 0:
+            return
+        if cooldown > 0:
+            state.bot_state["mood"] = "neutral"
+            return
+
         mood_event = self._infer_contextual_mood_event(text=text, author=lowered_author, bot_aliases=bot_aliases)
 
         if mood_event:
-            state.bot_state["mood"] = mood_event[0]
-            state.bot_state["duration"] = mood_event[1]
-            logging.debug("[SocialDynamics] mood_updated mood=%s duration=%s", mood_event[0], mood_event[1])
+            duration = random.randint(1, 5)
+            state.bot_state["mood"] = mood_event
+            state.bot_state["remaining_messages"] = duration
+            state.bot_state["cooldown_messages"] = 0
+            logging.debug("[SocialDynamics] mood_updated mood=%s remaining_messages=%s", mood_event, duration)
             return
 
-        duration = state.bot_state.get("duration", 0)
-        if duration > 0:
-            state.bot_state["duration"] = duration - 1
-        if state.bot_state.get("duration", 0) <= 0:
-            state.bot_state["mood"] = "neutral"
-            state.bot_state["duration"] = 0
+        state.bot_state["mood"] = "neutral"
+        state.bot_state["remaining_messages"] = 0
         logging.debug("[SocialDynamics] mood_state=%s", state.bot_state)
 
     def _infer_contextual_mood_event(self, text: str, author: str, bot_aliases: set):
@@ -221,19 +250,19 @@ class SocialDynamicsEngine:
         direct_to_bot = mentions_bot or second_person
 
         if direct_to_bot and any(token in text for token in rude_tokens):
-            return ("angry", 5)
+            return "angry"
 
         if direct_to_bot and any(token in text for token in praise_tokens):
-            return ("happy", 6)
+            return "happy"
 
         if mentions_bot and "?" in text and any(token in text for token in question_tokens):
-            return ("curious", 5)
+            return "curious"
 
         if re.search(r"\b(caos|anarquia|glitch)\b", text):
-            return ("chaotic", 3)
+            return "chaotic"
 
         if re.search(r"\btsundere\b", text):
-            return ("tsundere", 4)
+            return "tsundere"
 
         return None
 
@@ -287,7 +316,8 @@ class SocialDynamicsEngine:
             "message_count": state.message_count,
             "users_seen": sorted(state.users_seen),
             "mood": state.bot_state.get("mood", "neutral"),
-            "mood_duration": state.bot_state.get("duration", 0),
+            "mood_duration": state.bot_state.get("remaining_messages", 0),
+            "mood_cooldown": state.bot_state.get("cooldown_messages", 0),
             "drama_state": dict(state.drama_state),
             "active_memory_loop": active_loop,
             "memory_loops": [
