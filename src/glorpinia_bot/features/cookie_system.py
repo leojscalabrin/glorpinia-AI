@@ -224,6 +224,41 @@ class CookieSystem:
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao remover/transferir cookies de {nick}: {e}")
 
+    def transfer_cookies(self, from_nick: str, to_nick: str, amount: int) -> bool:
+        """Transfere cookies de um usuário para outro."""
+        if amount <= 0:
+            return False
+
+        if not self._is_nick_valid(from_nick) or not self._is_nick_valid(to_nick):
+            return False
+
+        from_nick = from_nick.lower()
+        to_nick = to_nick.lower()
+
+        if from_nick == to_nick:
+            return False
+
+        self._check_or_create_user(from_nick)
+        self._check_or_create_user(to_nick)
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                c.execute(
+                    "UPDATE user_cookies SET cookie_count = cookie_count - ? WHERE user_nick = ?",
+                    (amount, from_nick),
+                )
+                c.execute(
+                    "UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?",
+                    (amount, to_nick),
+                )
+                conn.commit()
+            logging.info(f"[CookieSystem] Transferidos {amount} cookies de {from_nick} para {to_nick}.")
+            return True
+        except Exception as e:
+            logging.error(f"[CookieSystem] Falha ao transferir cookies de {from_nick} para {to_nick}: {e}")
+            return False
+
     def handle_interaction(self, nick: str):
         """Concede +1 cookie por interação."""
         if not self._is_nick_valid(nick): return 

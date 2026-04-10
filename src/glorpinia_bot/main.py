@@ -581,7 +581,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *debt, *slots, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *debt, *slots, *duel, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -594,6 +594,7 @@ class TwitchIRC:
                     help_msg = {
                         "check": "glorp checa status das features.",
                         "slots": "glorp aposte cookies! *slots [valor] (min 10).",
+                        "duel": "glorp desafie alguém por cookies. *duel @nick [valor] (min 10).",
                         "8ball": "glorp Pergunte ao oráculo! *8ball [pergunta].",
                         "cookie": "glorp Pegue seu biscoito da sorte diário.",
                         "balance": "glorp Veja seu saldo ou de outro. *balance @nick.",
@@ -658,6 +659,60 @@ class TwitchIRC:
                         pass
 
                     self.send_message(channel, f"O {target} está {percentage}% careca o7 {short_comment}")
+                    return
+
+                if command_raw == "duel":
+                    if not self.cookie_system:
+                        return
+
+                    if len(parts) < 2:
+                        self.send_message(channel, f"@{author}, use: *duel @alvo [valor]")
+                        return
+
+                    target = parts[1].replace("@", "").strip().lower()
+                    if not target:
+                        self.send_message(channel, f"@{author}, alvo inválido para duelo.")
+                        return
+
+                    if target == author.lower():
+                        self.send_message(channel, f"@{author}, você não pode duelar consigo mesmo glorp")
+                        return
+
+                    if target == self.auth.bot_nick.lower():
+                        self.send_message(channel, f"@{author}, eu não duelo contra mortais nise")
+                        return
+
+                    if target in self.IGNORED_NICKS:
+                        self.send_message(channel, f"@{author}, esse alvo não pode participar de duelo.")
+                        return
+
+                    bet_amount = 10
+                    if len(parts) > 2:
+                        try:
+                            bet_amount = int(parts[2])
+                        except ValueError:
+                            self.send_message(channel, f"@{author}, valor inválido. Use número inteiro.")
+                            return
+
+                    if bet_amount < 10:
+                        bet_amount = 10
+
+                    players = [author.lower(), target]
+                    winner = random.choice(players)
+                    loser = players[0] if winner == players[1] else players[1]
+
+                    transfer_ok = self.cookie_system.transfer_cookies(loser, winner, bet_amount)
+                    if not transfer_ok:
+                        self.send_message(channel, "glorp Falha ao processar o duelo. Tente novamente.")
+                        return
+
+                    winner_display = author if winner == author.lower() else target
+                    loser_display = author if loser == author.lower() else target
+
+                    self.send_message(
+                        channel,
+                        f"{winner_display} venceu o duelo! o7 (-{bet_amount} 🍪 para {loser_display} e +{bet_amount}🍪 para {winner_display})"
+                    )
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)
