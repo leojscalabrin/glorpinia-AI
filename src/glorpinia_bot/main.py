@@ -675,7 +675,7 @@ class TwitchIRC:
                         return
 
                     if target == author.lower():
-                        self.send_message(channel, f"@{author}, você não pode duelar consigo mesmo glorp")
+                        self.send_message(channel, f"@{author}, se desafiar no *duel é treino de derrota? xdx")
                         return
 
                     if target == self.auth.bot_nick.lower():
@@ -696,6 +696,22 @@ class TwitchIRC:
 
                     if bet_amount < 10:
                         bet_amount = 10
+
+                    author_balance = self.cookie_system.get_cookies(author.lower())
+                    if author_balance < bet_amount:
+                        self.send_message(
+                            channel,
+                            f"@{author}, você não tem cookies suficientes pra apostar {bet_amount} 🍪. Saldo: {author_balance} 🍪."
+                        )
+                        return
+
+                    target_balance = self.cookie_system.get_cookies(target)
+                    if target_balance < bet_amount:
+                        self.send_message(
+                            channel,
+                            f"@{author}, @{target} não tem cookies suficientes pra cobrir a aposta de {bet_amount} 🍪. Saldo dele: {target_balance} 🍪."
+                        )
+                        return
 
                     players = [author.lower(), target]
                     winner = random.choice(players)
