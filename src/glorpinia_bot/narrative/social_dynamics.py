@@ -28,7 +28,7 @@ class ChannelSocialState:
             "favorite_of_the_day": None,
             "enemy_of_the_day": None,
             "suspect": None,
-            "rivalries": [],
+            "rivals": None,
         }
     )
     bot_state: Dict[str, object] = field(
@@ -103,7 +103,7 @@ class SocialDynamicsEngine:
             "favorite_of_the_day": None,
             "enemy_of_the_day": None,
             "suspect": None,
-            "rivalries": [],
+            "rivals": None,
         }
         state.users_seen = set()
         state.bot_state = {"mood": "neutral", "remaining_messages": 0, "cooldown_messages": 0}
@@ -197,13 +197,30 @@ class SocialDynamicsEngine:
         if random.random() < self.SUSPECT_PROBABILITY:
             state.drama_state["suspect"] = random.choice(candidates)
 
-        enemy = state.drama_state.get("enemy_of_the_day")
-        favorite = state.drama_state.get("favorite_of_the_day")
+        self._refresh_rivals_from_drama_state(state)
+
+    def set_drama_role_target(self, channel: str, role: str, user: str):
+        state = self._get_channel_state(channel)
+        normalized_user = (user or "").strip().lower()
+        if not normalized_user:
+            return
+
+        valid_roles = {"favorite_of_the_day", "enemy_of_the_day", "suspect"}
+        if role not in valid_roles:
+            return
+
+        state.drama_state[role] = normalized_user
+        state.users_seen.add(normalized_user)
+        self._refresh_rivals_from_drama_state(state)
+        logging.info("[SocialDynamics] role_target_updated channel=%s role=%s user=%s", channel, role, normalized_user)
+
+    def _refresh_rivals_from_drama_state(self, state: ChannelSocialState):
+        enemy = (state.drama_state.get("enemy_of_the_day") or "").strip()
+        favorite = (state.drama_state.get("favorite_of_the_day") or "").strip()
         if enemy and favorite and enemy != favorite:
-            rivalry = f"{favorite} vs {enemy}"
-            if rivalry not in state.drama_state["rivalries"]:
-                state.drama_state["rivalries"].append(rivalry)
-                state.drama_state["rivalries"] = state.drama_state["rivalries"][-5:]
+            state.drama_state["rivals"] = f"{favorite} vs {enemy}"
+            return
+        state.drama_state["rivals"] = None
 
     def _update_mood(self, state: ChannelSocialState, author: str, content: str, bot_nick: Optional[str] = None):
         text = (content or "").lower().strip()

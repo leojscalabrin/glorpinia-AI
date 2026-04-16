@@ -22,7 +22,7 @@ def build_context_prompt(
         favorite = drama_state.get("favorite_of_the_day")
         enemy = drama_state.get("enemy_of_the_day")
         suspect = drama_state.get("suspect")
-        rivalry = ", ".join(drama_state.get("rivalries", [])[-3:])
+        rivalry = drama_state.get("rivals")
         drama_block = (
             "[SISTEMA: estado social do chat]\n"
             f"favorito: {favorite}\n"

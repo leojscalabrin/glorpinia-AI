@@ -362,7 +362,7 @@ class TwitchIRC:
         emote_debug = self.emote_manager.get_debug_state(channel)
 
         drama_state = social_debug.get("drama_state", {})
-        rivals = drama_state.get("rivalries") or []
+        rivals = (drama_state.get("rivals") or "").strip()
         users_seen = social_debug.get("users_seen", [])
         random_params = social_debug.get("random_roll_parameters", {})
 
@@ -375,7 +375,7 @@ class TwitchIRC:
             f"{_fmt('Fav', drama_state.get('favorite_of_the_day'))} | "
             f"{_fmt('Enemy', drama_state.get('enemy_of_the_day'))} | "
             f"{_fmt('Suspect', drama_state.get('suspect'))} | "
-            f"Rivais: {', '.join(rivals) if rivals else '-'} | "
+            f"Rivais: {rivals if rivals else '-'} | "
             f"Users: {len(users_seen)}"
         )
 
