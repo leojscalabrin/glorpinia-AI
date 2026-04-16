@@ -5,10 +5,12 @@ import random
 import re
 
 class Comment:
-    DRAMA_ROLEPLAY_MENTION_PROBABILITY = 0.35
     COMMENT_IMPERIAL_TAX_PROBABILITY = 0.18
-    COMMENT_IMPERIAL_TAX_MIN = 5
-    COMMENT_IMPERIAL_TAX_MAX = 18
+    COMMENT_IMPERIAL_TAX_MIN = 1
+    COMMENT_IMPERIAL_TAX_MAX = 999
+    COMMENT_FAVORITE_TRIGGER_PROBABILITY = 0.35
+    COMMENT_ENEMY_TRIGGER_PROBABILITY = 0.2625
+    COMMENT_SUSPECT_TRIGGER_PROBABILITY = 0.175
 
     def __init__(self, bot):
         """
@@ -105,7 +107,8 @@ class Comment:
             # Formata a lista de usuários para o prompt
             users_str = ", ".join(active_users)
 
-            drama_roleplay_hint = self._build_drama_roleplay_hint(channel)
+            drama_trigger = self._roll_comment_drama_trigger(channel, active_users)
+            drama_roleplay_hint = self._build_drama_trigger_prompt(channel, drama_trigger)
             tax_context = self._maybe_apply_comment_imperial_tax(channel, active_users)
 
             comment_query = (
@@ -125,7 +128,7 @@ class Comment:
                 comment_query += (
                     "\n\n"
                     f"Imposto imperial já executado antes desta resposta: {tax_context}. "
-                    "Mencione o imposto no seu comentário, de forma curta e teatral."
+                    "No comentário, invente uma desculpa absurda e divertida para justificar essa cobrança."
                 )
 
             injection_context = self.bot.social_dynamics.get_injection_payload(channel)
@@ -158,45 +161,100 @@ class Comment:
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
 
-    def _build_drama_roleplay_hint(self, channel: str):
-        if random.random() >= self.DRAMA_ROLEPLAY_MENTION_PROBABILITY:
-            return None
+    def _roll_comment_drama_trigger(self, channel: str, active_users: list):
+        favorite_probability = self.COMMENT_FAVORITE_TRIGGER_PROBABILITY
+        enemy_probability = self.COMMENT_ENEMY_TRIGGER_PROBABILITY
+        suspect_probability = self.COMMENT_SUSPECT_TRIGGER_PROBABILITY
 
+        eligible_users = self._get_eligible_users_for_drama(active_users)
+        if not eligible_users:
+            return {"type": "main", "target": None}
+
+        weighted_triggers = [
+            ("favorite", favorite_probability),
+            ("enemy", enemy_probability),
+            ("suspect", suspect_probability),
+        ]
+        total_probability = sum(weight for _, weight in weighted_triggers)
+        if total_probability <= 0:
+            return {"type": "main", "target": None}
+
+        roll = random.random()
+        if roll >= total_probability:
+            return {"type": "main", "target": None}
+
+        running = 0.0
+        selected_type = "main"
+        for trigger_type, weight in weighted_triggers:
+            running += weight
+            if roll < running:
+                selected_type = trigger_type
+                break
+
+        target = random.choice(eligible_users)
+        role_map = {
+            "favorite": "favorite_of_the_day",
+            "enemy": "enemy_of_the_day",
+            "suspect": "suspect",
+        }
+        selected_role = role_map.get(selected_type)
+        if selected_role:
+            self.bot.social_dynamics.set_drama_role_target(channel, selected_role, target)
+            return {"type": selected_type, "target": target}
+        return {"type": "main", "target": None}
+
+    def _build_drama_trigger_prompt(self, channel: str, drama_trigger: dict):
         drama_state = self.bot.social_dynamics.get_debug_snapshot(channel).get("drama_state", {})
         if not drama_state:
             return None
 
-        candidates = []
         favorite = (drama_state.get("favorite_of_the_day") or "").strip()
         enemy = (drama_state.get("enemy_of_the_day") or "").strip()
         suspect = (drama_state.get("suspect") or "").strip()
-        rivalries = [r for r in drama_state.get("rivalries", []) if isinstance(r, str) and r.strip()]
+        rivals = (drama_state.get("rivals") or "").strip()
+        trigger_type = (drama_trigger or {}).get("type", "main")
 
-        if favorite:
-            candidates.append(
-                f"Se fizer sentido no assunto, mencione de forma curta e teatral que @{favorite} virou seu queridinho do momento."
+        if trigger_type == "favorite" and favorite:
+            return (
+                "TRIGGER FAVORITO ATIVO.\n"
+                f"Enalteça @{favorite} com humor aristocrático e criatividade (1-2 frases), "
+                "como se fosse um decreto imperial de favoritismo momentâneo. "
+                "Evite repetição literal; use elogio inventivo ligado ao tema atual."
             )
-        if enemy:
-            candidates.append(
-                f"Se combinar com o contexto, faça uma provocação breve dizendo que @{enemy} está na sua lista de desafetos hoje."
-            )
-        if suspect:
-            candidates.append(
-                f"Se houver gancho no papo, solte uma suspeita dramática em 1 frase sobre @{suspect}."
-            )
-        if rivalries:
-            rivalry = random.choice(rivalries)
-            if " vs " in rivalry:
-                left, right = [part.strip() for part in rivalry.split(" vs ", 1)]
-                if left and right:
-                    candidates.append(
-                        f"Se encaixar, provoque uma rivalidade curtinha entre @{left} e @{right} em tom de fofoca imperial."
-                    )
 
-        if not candidates:
-            return None
+        if trigger_type == "enemy" and enemy:
+            rival_clause = f" Conecte a provocação à rivalidade atual ({rivals})." if rivals else ""
+            return (
+                "TRIGGER INIMIGO ATIVO.\n"
+                f"Provoca @{enemy} com ironia elegante e escárnio divertido, sem ofensa pesada.{rival_clause} "
+                "Mantenha 1-2 frases com ritmo de deboche inteligente."
+            )
 
-        return random.choice(candidates)
+        if trigger_type == "suspect" and suspect:
+            return (
+                "TRIGGER SUSPEITO ATIVO.\n"
+                f"Invente uma teoria absurda e cômica sobre @{suspect} (fofoca claramente fantasiosa), "
+                "como se você tivesse 'provas imperiais duvidosas'. "
+                "A acusação deve ser surreal, curta e engraçada."
+            )
+
+        return (
+            "TRIGGER COMMENT PRINCIPAL ATIVO.\n"
+            "Comente apenas o que está acontecendo no chat agora, em 1-2 frases com personalidade e timing cômico. "
+            "Sem puxar drama gratuito se não houver gancho natural."
+        )
+
+    def _get_eligible_users_for_drama(self, active_users: list):
+        eligible_users = []
+        bot_nick = (self.bot.auth.bot_nick or "").strip().lower()
+        for user in active_users:
+            normalized = (user or "").strip().lower()
+            if not normalized:
+                continue
+            if normalized in {"system", "user", "usuario", bot_nick}:
+                continue
+            eligible_users.append(normalized)
+        return eligible_users
 
     def _maybe_apply_comment_imperial_tax(self, channel: str, active_users: list):
         if random.random() >= self.COMMENT_IMPERIAL_TAX_PROBABILITY:
@@ -205,15 +263,7 @@ class Comment:
         if not self.bot.cookie_system:
             return None
 
-        eligible_users = []
-        for user in active_users:
-            user_lower = (user or "").strip().lower()
-            if not user_lower:
-                continue
-            if user_lower in {"system", "user", "usuario", self.bot.auth.bot_nick.lower()}:
-                continue
-            eligible_users.append(user_lower)
-
+        eligible_users = self._get_eligible_users_for_drama(active_users)
         if not eligible_users:
             return None
 
