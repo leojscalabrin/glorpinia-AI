@@ -4,6 +4,7 @@ anime: thomeAyaya, ayayaJAM
 approval: Massa, nise, yesyes
 arrival: catArrive, gachiRoll, gachiAwake
 attention: alaO, DinkDonk
+authority: POLICE, POLICE2
 bald: baldKek, Baldge
 business: Corpa, abelhoBusiness, pepeMoney, SadgeBusiness, thomeVibecode
 checking: modCheck, thomeCheck, where
@@ -31,7 +32,7 @@ hope: donkPraise, thomeHope
 hype: HandsUp, LETSGO, OOOO, POGGERS
 judge: HUHH, MadgeClap, thomeRly, arnoldHalt, ClassicO, Concerned, huh, Judging, uuh
 kiss: catKISS, KissoThome, thomeKiss, mwah
-laugh: KEKW, pepeLaugh, kekdrunk, om, QUECO, wideLaughHard
+laugh: KEKW, pepeLaugh, kekdrunk, om, QUECO, wideLaughHard, atumalaca
 magic: catWizard, Leviosa
 mesmerized: lookUp, Looking, lookUpSmile
 mockery: peepoFinger, pepeLoser, pepeLook, thomeMimimi, AHAHA, hihi, Fiddy, xdd, WAJAJA
@@ -68,6 +69,7 @@ anime: AYAYA, AYAYAWeird, AYAYAwhat, DinkDonk
 approval: Massa, nise
 arrival: AreYouWinningSon, ARRIVE, ASSEMBLE, peepoArriveSalami
 attention: ALERT, Aloo, Dinkdonk, Oiala, wakeup
+authority: peepoPoliceStop, peePolice, hmmPolice
 bald: Baldge, baldio, BomDia, Maicabeca, maicareca
 business: BIGMONEY, CorpaArrive, Corpa
 checking: modCheck

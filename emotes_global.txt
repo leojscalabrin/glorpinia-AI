@@ -2,7 +2,8 @@ angry:
 anime: AYAYA
 approval: BillyApprove
 arrival: 
-attention: 
+attention:
+authority:
 bald: 
 business: 
 checking: 
