@@ -104,6 +104,7 @@ class TwitchIRC:
         
         # Cooldown timer para o trigger "oziell"
         self.last_oziell_time = 0
+        self.raffle_tickets = []
 
         # Lista de Admins
         admin_nicks_str = os.getenv("ADMIN_NICKS") 
@@ -581,7 +582,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *debt, *slots, *duel, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *debt, *slots, *duel, *ticket, *sorteio, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -595,6 +596,8 @@ class TwitchIRC:
                         "check": "glorp checa status das features.",
                         "slots": "glorp aposte cookies! *slots [valor] (min 10).",
                         "duel": "glorp desafie alguém por cookies. *duel @nick [valor] (min 10).",
+                        "ticket": "glorp compre 1 ticket do sorteio por 100 cookies (pode ficar negativo).",
+                        "sorteio": "glorp (oziell) sorteia um vencedor entre os tickets.",
                         "8ball": "glorp Pergunte ao oráculo! *8ball [pergunta].",
                         "cookie": "glorp Pegue seu biscoito da sorte diário.",
                         "balance": "glorp Veja seu saldo ou de outro. *balance @nick.",
@@ -729,6 +732,44 @@ class TwitchIRC:
                         channel,
                         f"{winner_display} venceu o duelo! o7 (-{bet_amount} 🍪 para {loser_display} e +{bet_amount}🍪 para {winner_display})"
                     )
+                    return
+
+                if command_raw == "ticket":
+                    if not self.cookie_system:
+                        return
+
+                    author_lower = author.lower()
+                    if author_lower in self.raffle_tickets:
+                        self.send_message(channel, f"{author} Você já está no sorteio Stare")
+                        return
+
+                    current_balance = self.cookie_system.get_cookies(author_lower)
+                    self.cookie_system.remove_cookies(author_lower, 100)
+                    self.raffle_tickets.append(author_lower)
+
+                    if current_balance >= 100:
+                        self.send_message(channel, f"{author} comprou um ticket para o sorteio do oziell thomeFat thumbsUp0 (-100 🍪)")
+                    else:
+                        self.send_message(channel, f"{author} fez um empréstimo para comprar um ticket para o sorteio do oziell thomeFat thumbsUp0 (-100 🍪)")
+                    return
+
+                if command_raw == "sorteio":
+                    if not self.cookie_system:
+                        return
+
+                    if author.lower() != "oziell":
+                        self.send_message(channel, f"@{author}, apenas oziell pode usar esse comando Stare")
+                        return
+
+                    if not self.raffle_tickets:
+                        self.send_message(channel, "Sem participantes no sorteio Stare")
+                        return
+
+                    winner = random.choice(self.raffle_tickets)
+                    prize = len(self.raffle_tickets) * 100
+                    self.cookie_system.add_cookies(winner, prize)
+                    self.send_message(channel, f"{winner} venceu o sorteio! Clap pode vir buscar seu prêmio unzips (+{prize} 🍪 para {winner})")
+                    self.raffle_tickets = []
                     return
                 
                 # COMANDOS DE ADMIN (Verificação)
@@ -873,7 +914,7 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, slots, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], check, scan, debug")
+                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], check, scan, debug")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)
