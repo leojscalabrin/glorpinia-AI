@@ -183,6 +183,89 @@ class TwitchIRC:
         self._save_channel_feature_states()
 
 
+
+    def _parse_fatking_rows_from_env(self):
+        """Lê dados do leaderboard a partir de uma planilha pública configurada no .env."""
+        sheet_id = os.getenv("SHEET_ID", "").strip()
+        sheet_gid = os.getenv("SHEET_GID", "").strip()
+        if not sheet_id or not sheet_gid:
+            return []
+
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={sheet_gid}"
+
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            csv_text = response.text
+        except Exception as e:
+            logging.error(f"[FatKing] Falha ao buscar planilha pública: {e}")
+            return []
+
+        rows = []
+        lines = [line.strip() for line in csv_text.splitlines() if line.strip()]
+        if not lines:
+            return []
+
+        parsed_lines = []
+        for line in lines:
+            cols = [c.strip().strip('"').strip("'") for c in line.split(",")]
+            parsed_lines.append(cols)
+
+        header = [c.lower() for c in parsed_lines[0]]
+        nick_idx = None
+        score_idx = None
+
+        nick_keys = {"nick", "user", "usuario", "usuário", "nome"}
+        score_keys = {"score", "pontos", "ponto", "valor", "fat", "fatking"}
+
+        for i, col in enumerate(header):
+            if nick_idx is None and col in nick_keys:
+                nick_idx = i
+            if score_idx is None and col in score_keys:
+                score_idx = i
+
+        data_rows = parsed_lines[1:] if (nick_idx is not None or score_idx is not None) else parsed_lines
+
+        for cols in data_rows:
+            if not cols:
+                continue
+
+            if nick_idx is not None and score_idx is not None and max(nick_idx, score_idx) < len(cols):
+                nick = cols[nick_idx].replace("@", "").strip()
+                score_raw = cols[score_idx].strip()
+            elif len(cols) >= 2:
+                nick = cols[0].replace("@", "").strip()
+                score_raw = cols[1].strip()
+            else:
+                continue
+
+            score_raw = re.sub(r"[^0-9-]", "", score_raw)
+            try:
+                score = int(score_raw)
+            except ValueError:
+                continue
+
+            if nick:
+                rows.append((nick, score))
+
+        merged = {}
+        for nick, score in rows:
+            key = nick.lower()
+            merged[key] = max(score, merged.get(key, score))
+
+        ordered = sorted(merged.items(), key=lambda x: x[1], reverse=True)
+        return [(nick, score) for nick, score in ordered]
+
+    def _handle_fatking_command(self, channel):
+        ranking = self._parse_fatking_rows_from_env()
+        if not ranking:
+            self.send_message(channel, "glorp leaderboard *fatking indisponível. configure SHEET_ID e SHEET_GID no .env")
+            return
+
+        top = ranking[:10]
+        msg = "FatKing Leaderboard: " + " | ".join([f"#{idx+1} {nick} [{score}]" for idx, (nick, score) in enumerate(top)])
+        self.send_long_message(channel, f"glorp {msg}")
+
     def handle_exit(self, signum, frame):
         """
         Handler para shutdown.
@@ -571,6 +654,10 @@ class TwitchIRC:
                             self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap")
                     return
 
+                if command_raw == "fatking":
+                    self._handle_fatking_command(channel)
+                    return
+
                 if command_raw == "leaderboard":
                     if self.cookie_system:
                         top = self.cookie_system.get_leaderboard(5)
@@ -582,7 +669,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *debt, *slots, *duel, *ticket, *sorteio, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -603,6 +690,7 @@ class TwitchIRC:
                         "balance": "glorp Veja seu saldo ou de outro. *balance @nick.",
                         "empire": "glorp Veja o tamanho do cofre da Imperatriz Glorpinia.",
                         "leaderboard": "glorp Top 5 magnatas dos cookies.",
+                        "fatking": "glorp Leaderboard público puxado de planilha pública via SHEET_ID/SHEET_GID no .env.",
                         "commands": "glorp Lista todos os comandos.",
                         "chat": "(Admin) Toggle chat. Ex: *chat on", 
                         "listen": "(Admin) Toggle listen. Ex: *listen on", 
@@ -914,7 +1002,7 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], check, scan, debug")
+                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, fatking, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], check, scan, debug")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)
