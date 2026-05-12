@@ -8,6 +8,7 @@ import sys
 import re
 import json
 import requests
+import csv
 import threading
 import random
 from datetime import datetime
@@ -201,31 +202,35 @@ class TwitchIRC:
             logging.error(f"[FatKing] Falha ao buscar planilha pública: {e}")
             return []
 
-        rows = []
-        lines = [line.strip() for line in csv_text.splitlines() if line.strip()]
-        if not lines:
-            return []
-
         parsed_lines = []
-        for line in lines:
-            cols = [c.strip().strip('"').strip("'") for c in line.split(",")]
-            parsed_lines.append(cols)
+        for row in csv.reader(csv_text.splitlines()):
+            cols = [c.strip().strip('"').strip("'") for c in row]
+            if any(cols):
+                parsed_lines.append(cols)
+
+        if not parsed_lines:
+            return []
 
         header = [c.lower() for c in parsed_lines[0]]
         nick_idx = None
         score_idx = None
+        time_idx = None
 
         nick_keys = {"nick", "user", "usuario", "usuário", "nome"}
         score_keys = {"score", "pontos", "ponto", "valor", "fat", "fatking"}
+        time_keys = {"tempo", "time", "duration", "duração", "duracao"}
 
         for i, col in enumerate(header):
             if nick_idx is None and col in nick_keys:
                 nick_idx = i
             if score_idx is None and col in score_keys:
                 score_idx = i
+            if time_idx is None and col in time_keys:
+                time_idx = i
 
         data_rows = parsed_lines[1:] if (nick_idx is not None or score_idx is not None) else parsed_lines
 
+        rows = []
         for cols in data_rows:
             if not cols:
                 continue
@@ -233,9 +238,11 @@ class TwitchIRC:
             if nick_idx is not None and score_idx is not None and max(nick_idx, score_idx) < len(cols):
                 nick = cols[nick_idx].replace("@", "").strip()
                 score_raw = cols[score_idx].strip()
+                time_raw = cols[time_idx].strip() if (time_idx is not None and time_idx < len(cols)) else ""
             elif len(cols) >= 2:
                 nick = cols[0].replace("@", "").strip()
                 score_raw = cols[1].strip()
+                time_raw = cols[2].strip() if len(cols) >= 3 else ""
             else:
                 continue
 
@@ -245,16 +252,40 @@ class TwitchIRC:
             except ValueError:
                 continue
 
+            time_seconds = None
+            if time_raw:
+                m = re.match(r"^\s*(?:(\d+):)?(\d{1,2}):(\d{1,2})\s*$", time_raw)
+                if m:
+                    hh = int(m.group(1) or 0)
+                    mm = int(m.group(2))
+                    ss = int(m.group(3))
+                    time_seconds = hh * 3600 + mm * 60 + ss
+                else:
+                    only_digits = re.sub(r"[^0-9]", "", time_raw)
+                    if only_digits:
+                        time_seconds = int(only_digits)
+
             if nick:
-                rows.append((nick, score))
+                rows.append((nick, score, time_seconds, time_raw))
 
         merged = {}
-        for nick, score in rows:
+        for nick, score, time_seconds, time_raw in rows:
             key = nick.lower()
-            merged[key] = max(score, merged.get(key, score))
+            best = merged.get(key)
+            current = (score, time_seconds if time_seconds is not None else float("inf"))
+            if best is None:
+                merged[key] = (nick, score, time_seconds, time_raw)
+                continue
 
-        ordered = sorted(merged.items(), key=lambda x: x[1], reverse=True)
-        return [(nick, score) for nick, score in ordered]
+            best_cmp = (best[1], best[2] if best[2] is not None else float("inf"))
+            if current[0] > best_cmp[0] or (current[0] == best_cmp[0] and current[1] < best_cmp[1]):
+                merged[key] = (nick, score, time_seconds, time_raw)
+
+        ordered = sorted(
+            merged.values(),
+            key=lambda x: (-x[1], x[2] if x[2] is not None else float("inf"), x[0].lower())
+        )
+        return ordered
 
     def _handle_fatking_command(self, channel):
         ranking = self._parse_fatking_rows_from_env()
@@ -262,8 +293,13 @@ class TwitchIRC:
             self.send_message(channel, "glorp leaderboard *fatking indisponível. configure SHEET_ID e SHEET_GID no .env")
             return
 
-        top = ranking[:10]
-        msg = "FatKing Leaderboard: " + " | ".join([f"#{idx+1} {nick} [{score}]" for idx, (nick, score) in enumerate(top)])
+        top = ranking[:5]
+        parts = []
+        for idx, (nick, score, _, time_raw) in enumerate(top, start=1):
+            time_part = f" ({time_raw})" if time_raw else ""
+            parts.append(f"#{idx} {nick} [{score}]{time_part}")
+
+        msg = "thomeFat Leaderboard dos maiores fatKingueiros: " + " | ".join(parts)
         self.send_long_message(channel, f"glorp {msg}")
 
     def handle_exit(self, signum, frame):
