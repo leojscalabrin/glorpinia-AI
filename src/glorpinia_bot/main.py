@@ -197,7 +197,7 @@ class TwitchIRC:
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
-            csv_text = response.text
+            csv_text = response.content.decode("utf-8-sig", errors="replace")
         except Exception as e:
             logging.error(f"[FatKing] Falha ao buscar planilha pública: {e}")
             return []
@@ -265,8 +265,12 @@ class TwitchIRC:
                     if only_digits:
                         time_seconds = int(only_digits)
 
+            display_time = ""
+            if time_raw and (time_seconds is not None or re.search(r"\d", time_raw)):
+                display_time = time_raw
+
             if nick:
-                rows.append((nick, score, time_seconds, time_raw))
+                rows.append((nick, score, time_seconds, display_time))
 
         merged = {}
         for nick, score, time_seconds, time_raw in rows:
@@ -299,8 +303,8 @@ class TwitchIRC:
             time_part = f" ({time_raw})" if time_raw else ""
             parts.append(f"#{idx} {nick} [{score}]{time_part}")
 
-        msg = "thomeFat Leaderboard dos maiores fatKingueiros: " + " | ".join(parts)
-        self.send_long_message(channel, f"glorp {msg}")
+        msg = "thomeFat Leaderboard dos maiores Fat Kingueiros: " + " | ".join(parts)
+        self.send_long_message(channel, msg)
 
     def handle_exit(self, signum, frame):
         """
