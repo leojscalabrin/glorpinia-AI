@@ -724,7 +724,7 @@ class TwitchIRC:
                         "slots": "glorp aposte cookies! *slots [valor] (min 10).",
                         "duel": "glorp desafie alguém por cookies. *duel @nick [valor] (min 10).",
                         "ticket": "glorp compre 1 ticket do sorteio por 100 cookies (pode ficar negativo).",
-                        "sorteio": "glorp (oziell) sorteia um vencedor entre os tickets.",
+                        "sorteio": "glorp (oziell) *sorteio shuffle para sortear e *sorteio list para ver participantes/pote.",
                         "8ball": "glorp Pergunte ao oráculo! *8ball [pergunta].",
                         "cookie": "glorp Pegue seu biscoito da sorte diário.",
                         "balance": "glorp Veja seu saldo ou de outro. *balance @nick.",
@@ -889,12 +889,41 @@ class TwitchIRC:
                         self.send_message(channel, f"@{author}, apenas oziell pode usar esse comando Stare")
                         return
 
+                    raffle_action = parts[1].lower() if len(parts) > 1 else ""
+
+                    if raffle_action == "list":
+                        if not self.raffle_tickets:
+                            self.send_message(channel, "Sem participantes no sorteio Stare")
+                            return
+
+                        prize = len(self.raffle_tickets) * 100
+                        participants = ", ".join(self.raffle_tickets)
+                        self.send_message(channel, f"Participantes do sorteio ({len(self.raffle_tickets)}): {participants} | Pote atual: {prize} 🍪")
+                        return
+
+                    if raffle_action != "shuffle":
+                        self.send_message(channel, "Uso: *sorteio shuffle | *sorteio list")
+                        return
+
                     if not self.raffle_tickets:
                         self.send_message(channel, "Sem participantes no sorteio Stare")
                         return
 
-                    winner = random.choice(self.raffle_tickets)
                     prize = len(self.raffle_tickets) * 100
+                    secret_roll = random.randint(1, 100)
+
+                    if secret_roll == 1:
+                        self.send_message(channel, f"Ninguém venceu. Valeu pelos {prize}🍪 otários xdx")
+                        self.raffle_tickets = []
+                        return
+
+                    if secret_roll == 2:
+                        self.cookie_system.add_cookies("oziell", prize)
+                        self.send_message(channel, f"Oziell venceu o sorteio Clap ele vai pegar no prêmio de todo mundo unzips (+{prize} 🍪 para oziell)")
+                        self.raffle_tickets = []
+                        return
+
+                    winner = random.choice(self.raffle_tickets)
                     self.cookie_system.add_cookies(winner, prize)
                     self.send_message(channel, f"{winner} venceu o sorteio! Clap pode vir buscar seu prêmio unzips (+{prize} 🍪 para {winner})")
                     self.raffle_tickets = []
