@@ -25,6 +25,7 @@ class GeminiClient:
     """
     RECENT_HISTORY_WINDOW_SECONDS = 120
     RECENT_HISTORY_FALLBACK_COUNT = 15
+    COOKIE_PENALTY_COOLDOWN_SECONDS = 45
 
     def __init__(self, personality_profile):
         self.base_profile = personality_profile
@@ -62,6 +63,7 @@ class GeminiClient:
         )
 
         self.search_tool = SearchTool()
+        self._cookie_guard_state = {}
 
     def _load_alternative_personalities(self):
         """Carrega personalidades alternativas do arquivo glitches.txt."""
@@ -279,6 +281,12 @@ class GeminiClient:
         generated = self._clean_response(generated)
         generated = self._maybe_apply_glitch(generated, query, channel)
         if self.cookie_system:
+            generated = self._apply_cookie_command_guard(
+                generated_text=generated,
+                user_query=query,
+                channel=channel,
+                author=author,
+            )
             has_cookie_command = bool(self.cookie_system.COOKIE_COMMAND_PATTERN.search(generated or ""))
             if allow_cookie_actions or has_cookie_command:
                 # Sempre converte tags de cookie em texto humano para nunca vazar comando cru no chat.
@@ -296,6 +304,70 @@ class GeminiClient:
             return f"@{author}, {generated}"
         else:
             return f"@{author}, Meow. O portal está com lag. 😸"
+
+    def _has_explicit_debt_trigger(self, text: str) -> bool:
+        if not text:
+            return False
+
+        debt_pattern = re.compile(
+            r"\b(d[íi]vida|devedor|devedora|devedores|devendo|devo|deve|debt|owe|owing)\b",
+            flags=re.IGNORECASE,
+        )
+        return bool(debt_pattern.search(text))
+
+    def _apply_cookie_command_guard(self, generated_text: str, user_query: str, channel: str, author: str) -> str:
+        """
+        Aplica controle temporal leve por canal/autor para evitar punições repetidas.
+        """
+        if not generated_text:
+            return generated_text
+
+        matches = self.cookie_system.COOKIE_COMMAND_PATTERN.findall(generated_text)
+        if not matches:
+            return generated_text
+
+        key = (channel.lower(), author.lower())
+        now = time.time()
+        state = self._cookie_guard_state.get(
+            key,
+            {
+                "last_debt_mention_ts": 0,
+                "last_take_ts": 0,
+                "last_valid_trigger_ts": 0,
+            },
+        )
+
+        has_debt_trigger = self._has_explicit_debt_trigger(user_query)
+        if has_debt_trigger:
+            state["last_debt_mention_ts"] = now
+            state["last_valid_trigger_ts"] = now
+
+        has_take_command = any(action.upper() == "TAKE" for action, _, _ in matches)
+        if not has_take_command:
+            self._cookie_guard_state[key] = state
+            return generated_text
+
+        debt_mention_recent = (now - state["last_debt_mention_ts"]) < self.COOKIE_PENALTY_COOLDOWN_SECONDS
+        recent_take_without_new_trigger = (
+            (now - state["last_take_ts"]) < self.COOKIE_PENALTY_COOLDOWN_SECONDS
+            and not has_debt_trigger
+        )
+
+        if debt_mention_recent or recent_take_without_new_trigger:
+            logging.info(
+                "[Gemini] Cookie guard bloqueou TAKE repetitivo channel=%s author=%s debt_recent=%s take_recent=%s",
+                channel,
+                author,
+                debt_mention_recent,
+                recent_take_without_new_trigger,
+            )
+            sanitized = self.cookie_system.strip_cookie_commands(generated_text)
+            self._cookie_guard_state[key] = state
+            return sanitized
+
+        state["last_take_ts"] = now
+        self._cookie_guard_state[key] = state
+        return generated_text
 
     def _maybe_apply_glitch(self, generated, user_query, channel):
         if not generated or "*glitch*" in generated:
