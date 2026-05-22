@@ -9,6 +9,7 @@ def build_context_prompt(
     rag_context: Optional[str],
     chat_message: str,
     mention_context: Optional[Dict[str, object]] = None,
+    economy_context: Optional[Dict[str, object]] = None,
 ) -> str:
     blocks = []
 
@@ -52,6 +53,17 @@ def build_context_prompt(
             "Só cite outras pessoas quando fizer sentido direto com a mensagem foco."
         )
         blocks.append(focus_block)
+
+    if economy_context:
+        balances = economy_context.get("balances") or []
+        instruction = (economy_context.get("instruction") or "").strip()
+        balance_line = " | ".join(balances) if balances else "(sem dados de saldo)"
+        economy_block = (
+            "[SISTEMA: CONTEXTO DE ECONOMIA (PRIORIDADE BAIXA)]\n"
+            f"Saldos atuais: {balance_line}\n"
+            f"{instruction or 'Use saldo apenas quando for relevante para a intenção da mensagem.'}"
+        )
+        blocks.append(economy_block)
 
     if rag_context and rag_context.strip():
         blocks.append(f"[SISTEMA: CONTEXTO AUXILIAR]\n{rag_context.strip()}")
