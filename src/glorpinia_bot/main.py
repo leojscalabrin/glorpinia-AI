@@ -937,26 +937,26 @@ class TwitchIRC:
                     if len(parts) == 3:
                         target = parts[1].lower().replace("@", "").strip()
                         if not target:
-                            self.send_message(channel, f"@{author}, alvo inválido.")
+                            self.send_message(channel, f"@{author}, alvo inválido. Stare")
                             return
 
                         if target == author.lower():
-                            self.send_message(channel, f"@{author}, você não pode transferir para você mesmo.")
+                            self.send_message(channel, f"@{author}, você não pode transferir para você mesmo, bobaião. Stare")
                             return
 
                         try:
                             amount = int(parts[2])
                         except ValueError:
-                            self.send_message(channel, f"@{author}, valor inválido. Use um número inteiro.")
+                            self.send_message(channel, f"@{author}, valor inválido. Use um número inteiro. Stare")
                             return
 
                         if amount <= 0:
-                            self.send_message(channel, f"@{author}, valor inválido. Use um número maior que zero.")
+                            self.send_message(channel, f"@{author}, valor inválido. Use um número maior que zero. Stare")
                             return
 
                         author_balance = self.cookie_system.get_cookies(author.lower())
                         if author_balance < amount:
-                            self.send_message(channel, f"@{author}, saldo insuficiente. Você tem {author_balance}🍪.")
+                            self.send_message(channel, f"@{author}, saldo insuficiente. Você tem {author_balance}🍪. poor")
                             return
 
                         transfer_ok = self.cookie_system.transfer_cookies(author.lower(), target, amount)
@@ -964,38 +964,38 @@ class TwitchIRC:
                             self.send_message(channel, "glorp Falha ao processar transferência.")
                             return
 
-                        self.send_message(channel, f"@{author} transferiu {amount}🍪 para @{target}.")
+                        self.send_message(channel, f"@{author} transferiu {amount}🍪 para @{target}. nise")
                         return
 
                     if len(parts) == 4:
                         if author.lower() not in self.admin_nicks:
-                            self.send_message(channel, f"@{author}, esse formato é apenas para admins arnoldHalt")
+                            self.send_message(channel, f"@{author}, esse formato é apenas para os chegados arnoldHalt")
                             return
 
                         from_target = parts[1].lower().replace("@", "").strip()
                         to_target = parts[2].lower().replace("@", "").strip()
 
                         if not from_target or not to_target:
-                            self.send_message(channel, f"@{author}, usuários inválidos.")
+                            self.send_message(channel, f"@{author}, usuários inválidos. Stare")
                             return
 
                         if from_target == to_target:
-                            self.send_message(channel, f"@{author}, origem e destino não podem ser iguais.")
+                            self.send_message(channel, f"@{author}, origem e destino não podem ser iguais. Stare")
                             return
 
                         try:
                             amount = int(parts[3])
                         except ValueError:
-                            self.send_message(channel, f"@{author}, valor inválido. Use um número inteiro.")
+                            self.send_message(channel, f"@{author}, valor inválido. Use um número inteiro. Stare")
                             return
 
                         if amount <= 0:
-                            self.send_message(channel, f"@{author}, valor inválido. Use um número maior que zero.")
+                            self.send_message(channel, f"@{author}, valor inválido. Use um número maior que zero. Stare")
                             return
 
                         from_balance = self.cookie_system.get_cookies(from_target)
                         if from_balance < amount:
-                            self.send_message(channel, f"@{author}, @{from_target} não tem saldo suficiente ({from_balance}🍪).")
+                            self.send_message(channel, f"@{author}, @{from_target} não tem saldo suficiente ({from_balance}🍪). poor")
                             return
 
                         transfer_ok = self.cookie_system.transfer_cookies(from_target, to_target, amount)
@@ -1003,7 +1003,7 @@ class TwitchIRC:
                             self.send_message(channel, "glorp Falha ao processar transferência.")
                             return
 
-                        self.send_message(channel, f"(Admin) Transferidos {amount}🍪 de @{from_target} para @{to_target}.")
+                        self.send_message(channel, f"(Admin) Transferidos {amount}🍪 de @{from_target} para @{to_target}. nise")
                         return
 
                     self.send_message(channel, f"@{author}, uso: *transfer @alvo valor | (admin) *transfer @origem @destino valor")
