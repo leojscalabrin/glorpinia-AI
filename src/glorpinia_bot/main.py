@@ -1044,12 +1044,12 @@ class TwitchIRC:
                     # Convertendo Deque para List para a IA poder ler
                     recent_history_list = list(self.recent_messages.get(channel, []))
                     
-                    enriched_content = content
+                    economy_context = None
                     if self.cookie_system:
-                        system_notes = []
+                        balance_notes = []
                         # Pega o saldo de quem falou
                         author_bal = self.cookie_system.get_cookies(author.lower())
-                        system_notes.append(f"{author}: {author_bal}🍪")
+                        balance_notes.append(f"{author}: {author_bal}🍪")
                         
                         # Tenta pegar o saldo de alguém que ele mencionou na mensagem
                         for w in content_lower.split():
@@ -1057,11 +1057,14 @@ class TwitchIRC:
                                 target_nick = w.replace("@", "").strip()
                                 if target_nick and target_nick != self.auth.bot_nick.lower():
                                     target_bal = self.cookie_system.get_cookies(target_nick)
-                                    system_notes.append(f"{target_nick}: {target_bal}🍪")
+                                    balance_notes.append(f"{target_nick}: {target_bal}🍪")
                         
-                        if system_notes:
-                            unique_notes = list(set(system_notes))
-                            enriched_content += f"\n\n[SISTEMA: Saldos atuais -> {' | '.join(unique_notes)}. Se o saldo for negativo, a pessoa é uma devedora/caloteira do Império.]"
+                        if balance_notes:
+                            unique_notes = sorted(set(balance_notes))
+                            economy_context = {
+                                "balances": unique_notes,
+                                "instruction": "Use saldo apenas quando for relevante para a intenção da mensagem.",
+                            }
                     
                     if self.gemini_client and self.memory_mgr:
                         explicit_mentions = []
@@ -1080,13 +1083,14 @@ class TwitchIRC:
                         }
                         injection_context = self.social_dynamics.get_injection_payload(channel)
                         response_text = self.gemini_client.get_response(
-                            query=enriched_content,
+                            query=content,
                             channel=channel, 
                             author=author, 
                             memory_mgr=self.memory_mgr,
                             recent_history=recent_history_list,
                             injection_context=injection_context,
                             mention_context=mention_context,
+                            economy_context=economy_context,
                             allow_cookie_actions=True,
                         )
                         
