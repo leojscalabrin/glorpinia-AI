@@ -1063,7 +1063,11 @@ class TwitchIRC:
                             unique_notes = sorted(set(balance_notes))
                             economy_context = {
                                 "balances": unique_notes,
-                                "instruction": "Use saldo apenas quando for relevante para a intenção da mensagem.",
+                                "instruction": (
+                                    "Saldo pode ser usado apenas se fizer sentido com o tom e assunto da conversa; "
+                                    "não transformar toda resposta em cobrança. "
+                                    "Se balance < 0, trate como contexto opcional e não como gatilho automático de punição."
+                                ),
                             }
                     
                     if self.gemini_client and self.memory_mgr:
