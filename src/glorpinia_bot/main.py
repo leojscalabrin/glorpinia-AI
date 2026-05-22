@@ -709,7 +709,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -730,6 +730,7 @@ class TwitchIRC:
                         "balance": "glorp Veja seu saldo ou de outro. *balance @nick.",
                         "empire": "glorp Veja o tamanho do cofre da Imperatriz Glorpinia.",
                         "leaderboard": "glorp Top 5 magnatas dos cookies.",
+                        "transfer": "glorp Transfira cookies. *transfer @alvo [valor] | (admin) *transfer @origem @destino [valor].",
                         "fatking": "glorp Leaderboard público puxado de planilha pública via SHEET_ID/SHEET_GID no .env.",
                         "commands": "glorp Lista todos os comandos.",
                         "chat": "(Admin) Toggle chat. Ex: *chat on", 
@@ -929,6 +930,85 @@ class TwitchIRC:
                     self.raffle_tickets = []
                     return
                 
+                if command_raw == "transfer":
+                    if not self.cookie_system:
+                        return
+
+                    if len(parts) == 3:
+                        target = parts[1].lower().replace("@", "").strip()
+                        if not target:
+                            self.send_message(channel, f"@{author}, alvo inválido.")
+                            return
+
+                        if target == author.lower():
+                            self.send_message(channel, f"@{author}, você não pode transferir para você mesmo.")
+                            return
+
+                        try:
+                            amount = int(parts[2])
+                        except ValueError:
+                            self.send_message(channel, f"@{author}, valor inválido. Use um número inteiro.")
+                            return
+
+                        if amount <= 0:
+                            self.send_message(channel, f"@{author}, valor inválido. Use um número maior que zero.")
+                            return
+
+                        author_balance = self.cookie_system.get_cookies(author.lower())
+                        if author_balance < amount:
+                            self.send_message(channel, f"@{author}, saldo insuficiente. Você tem {author_balance}🍪.")
+                            return
+
+                        transfer_ok = self.cookie_system.transfer_cookies(author.lower(), target, amount)
+                        if not transfer_ok:
+                            self.send_message(channel, "glorp Falha ao processar transferência.")
+                            return
+
+                        self.send_message(channel, f"@{author} transferiu {amount}🍪 para @{target}.")
+                        return
+
+                    if len(parts) == 4:
+                        if author.lower() not in self.admin_nicks:
+                            self.send_message(channel, f"@{author}, esse formato é apenas para admins arnoldHalt")
+                            return
+
+                        from_target = parts[1].lower().replace("@", "").strip()
+                        to_target = parts[2].lower().replace("@", "").strip()
+
+                        if not from_target or not to_target:
+                            self.send_message(channel, f"@{author}, usuários inválidos.")
+                            return
+
+                        if from_target == to_target:
+                            self.send_message(channel, f"@{author}, origem e destino não podem ser iguais.")
+                            return
+
+                        try:
+                            amount = int(parts[3])
+                        except ValueError:
+                            self.send_message(channel, f"@{author}, valor inválido. Use um número inteiro.")
+                            return
+
+                        if amount <= 0:
+                            self.send_message(channel, f"@{author}, valor inválido. Use um número maior que zero.")
+                            return
+
+                        from_balance = self.cookie_system.get_cookies(from_target)
+                        if from_balance < amount:
+                            self.send_message(channel, f"@{author}, @{from_target} não tem saldo suficiente ({from_balance}🍪).")
+                            return
+
+                        transfer_ok = self.cookie_system.transfer_cookies(from_target, to_target, amount)
+                        if not transfer_ok:
+                            self.send_message(channel, "glorp Falha ao processar transferência.")
+                            return
+
+                        self.send_message(channel, f"(Admin) Transferidos {amount}🍪 de @{from_target} para @{to_target}.")
+                        return
+
+                    self.send_message(channel, f"@{author}, uso: *transfer @alvo valor | (admin) *transfer @origem @destino valor")
+                    return
+
                 # COMANDOS DE ADMIN (Verificação)
                 admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "debug"]
                 
@@ -1071,7 +1151,7 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, fatking, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], check, scan, debug")
+                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, fatking, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], transfer [origem] [destino] [valor], check, scan, debug")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)
