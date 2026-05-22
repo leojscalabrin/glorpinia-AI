@@ -43,6 +43,24 @@ class TwitchIRC:
     TOPIC_MIN_OCCURRENCES = 3
     TOPIC_SCAN_WINDOW = 25
     FEATURE_STATE_FILE = "channel_feature_states.json"
+    ECONOMIC_INTENT_KEYWORDS = {
+        "bet": {
+            "aposta", "apostar", "apostei", "apostou", "odd", "odds", "all in", "all-in", "double", "dobrar",
+            "slots", "roleta", "jackpot", "gamble", "gambiar", "arriscar",
+        },
+        "debt": {
+            "dívida", "divida", "devendo", "devo", "devedor", "calote", "pagar", "pagamento", "quitar",
+            "cobrar", "cobrança", "multa", "juros", "saldo", "negativo", "falido",
+        },
+        "reward_punishment": {
+            "recompensa", "premio", "prêmio", "bonus", "bônus", "punicao", "punição", "penalidade", "castigo",
+            "mimo", "taxa", "multa", "prender", "liberar", "multar",
+        },
+        "explicit_commands": {
+            "dar cookie", "dá cookie", "da cookie", "tirar cookie", "remove cookie", "transferir cookie",
+            "!cookie", "!cookies", "!pay", "!give", "!bet", "!slots", "!slot", "!apostar",
+        },
+    }
 
     def __init__(self):
         # Core Auth (sempre necessário)
@@ -182,6 +200,23 @@ class TwitchIRC:
             self.channel_feature_states[channel] = self._default_feature_states()
         self.channel_feature_states[channel][feature_name] = bool(state)
         self._save_channel_feature_states()
+
+    def _normalize_intent_text(self, text):
+        normalized = (text or "").lower()
+        normalized = normalized.replace("’", "'")
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized
+
+    def _has_economic_intent(self, text):
+        normalized_text = self._normalize_intent_text(text)
+        if not normalized_text:
+            return False
+
+        for _, keywords in self.ECONOMIC_INTENT_KEYWORDS.items():
+            for kw in keywords:
+                if kw in normalized_text:
+                    return True
+        return False
 
 
 
@@ -1085,6 +1120,7 @@ class TwitchIRC:
                             "trigger_message": content.strip(),
                             "explicit_mentions": explicit_mentions,
                         }
+                        allow_cookie_actions = self._has_economic_intent(content)
                         injection_context = self.social_dynamics.get_injection_payload(channel)
                         response_text = self.gemini_client.get_response(
                             query=content,
@@ -1095,7 +1131,7 @@ class TwitchIRC:
                             injection_context=injection_context,
                             mention_context=mention_context,
                             economy_context=economy_context,
-                            allow_cookie_actions=True,
+                            allow_cookie_actions=allow_cookie_actions,
                         )
                         
                         if response_text:
