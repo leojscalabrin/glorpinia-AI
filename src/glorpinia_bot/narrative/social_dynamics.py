@@ -18,11 +18,21 @@ class MemoryLoop:
 
 
 @dataclass
+class UserSocialProfile:
+    positive_interactions: float = 0.0
+    negative_interactions: float = 0.0
+    teasing_style: str = "neutral"
+    trusted_joke_level: float = 0.0
+    last_emotion: str = "neutral"
+    last_updated_message: int = 0
+
+@dataclass
 class ChannelSocialState:
     message_count: int = 0
     users_seen: set = field(default_factory=set)
     active_loop_for_message: Optional[MemoryLoop] = None
     memory_loops: List[MemoryLoop] = field(default_factory=list)
+    user_profiles: Dict[str, UserSocialProfile] = field(default_factory=dict)
     drama_state: Dict[str, Optional[str]] = field(
         default_factory=lambda: {
             "favorite_of_the_day": None,
@@ -46,6 +56,9 @@ class SocialDynamicsEngine:
     MAX_LOOPS = 8
     MIN_LOOP_WEIGHT = 0.2
     LOOP_TTL_MESSAGES = 600
+    SOCIAL_PROFILE_TTL_MESSAGES = 1_200
+    SOCIAL_PROFILE_DECAY_PER_MESSAGE = 0.997
+    SOCIAL_PROFILE_MIN_SIGNAL = 0.08
     DRAMA_RESET_INTERVAL = timedelta(hours=24)
     DEFAULT_STORAGE_PATH = Path("glorpinia_memory_loops.json")
 
@@ -76,7 +89,9 @@ class SocialDynamicsEngine:
 
         state = ChannelSocialState(memory_loops=self._default_memory_loops())
         self._load_memory_loops(channel_key, state)
+        self._load_user_profiles(channel_key, state)
         self._prune_loops(state, channel=channel_key, save=False)
+        self._prune_user_profiles(state, channel=channel_key, save=False)
         self.channel_states[channel_key] = state
         return state
 
@@ -92,7 +107,9 @@ class SocialDynamicsEngine:
             for loop in state.memory_loops:
                 loop.weight *= 0.97
 
+        self._update_user_profile(state, channel=channel, author=author, content=content, intent_analysis=intent_analysis)
         self._prune_loops(state, channel=channel)
+        self._prune_user_profiles(state, channel=channel)
         self._roll_memory_loop(state)
         self._roll_drama_events(state, author)
         self._update_mood(state, author=author, content=content, bot_nick=bot_nick, intent_analysis=intent_analysis)
@@ -136,7 +153,7 @@ class SocialDynamicsEngine:
         if (now - state.drama_reset_at) >= self.DRAMA_RESET_INTERVAL:
             self.reset_drama_state(channel, reason="24h_interval")
 
-    def get_injection_payload(self, channel: str) -> Dict[str, object]:
+    def get_injection_payload(self, channel: str, author: Optional[str] = None) -> Dict[str, object]:
         state = self._get_channel_state(channel)
         memory_loop = None
         if state.active_loop_for_message:
@@ -151,6 +168,7 @@ class SocialDynamicsEngine:
             "mood": state.bot_state.get("mood", "neutral"),
             "drama_state": state.drama_state,
             "memory_loop": memory_loop,
+            "social_memory": self._build_social_memory_summary(state, author),
         }
         logging.debug("[SocialDynamics] injection_payload channel=%s payload=%s", channel, payload)
         return payload
@@ -303,6 +321,140 @@ class SocialDynamicsEngine:
 
         return None
 
+    def _normalize_author(self, author: Optional[str]) -> str:
+        return re.sub(r"[^a-z0-9_]", "", str(author or "").strip().lower())
+
+    def _update_user_profile(
+        self,
+        state: ChannelSocialState,
+        channel: str,
+        author: str,
+        content: str,
+        intent_analysis: Optional[Dict[str, object]] = None,
+    ):
+        user_key = self._normalize_author(author)
+        if not user_key:
+            return
+
+        profile = state.user_profiles.get(user_key) or UserSocialProfile(last_updated_message=state.message_count)
+        self._decay_user_profile(profile, state.message_count)
+
+        analysis = intent_analysis or {}
+        sentiment = (analysis.get("sentiment") or "neutral").strip().lower()
+        emotion = (analysis.get("emotion") or "neutral").strip().lower()
+        primary_intent = (analysis.get("primary_intent") or "chat").strip().lower()
+        confidence = float(analysis.get("confidence") or 0.0)
+
+        if sentiment == "positive" or primary_intent == "praise":
+            profile.positive_interactions += max(0.45, confidence)
+        elif sentiment == "negative" or primary_intent == "complaint":
+            profile.negative_interactions += max(0.35, confidence)
+        elif emotion in {"joy", "tsundere", "chaos"}:
+            profile.positive_interactions += 0.15
+        elif emotion in {"anger", "sadness"}:
+            profile.negative_interactions += 0.15
+
+        profile.last_emotion = self._safe_emotion_label(emotion)
+        profile.teasing_style = self._infer_teasing_style(content=content, intent_analysis=analysis)
+        profile.trusted_joke_level = self._calculate_trusted_joke_level(profile)
+        profile.last_updated_message = state.message_count
+        state.user_profiles[user_key] = profile
+        self._persist_user_profiles(channel, state)
+        logging.debug(
+            "[SocialDynamics] user_profile_updated channel=%s user=%s positive=%.3f negative=%.3f style=%s trusted=%.3f emotion=%s",
+            channel,
+            user_key,
+            profile.positive_interactions,
+            profile.negative_interactions,
+            profile.teasing_style,
+            profile.trusted_joke_level,
+            profile.last_emotion,
+        )
+
+    def _decay_user_profile(self, profile: UserSocialProfile, current_message_count: int):
+        age = max(0, current_message_count - int(profile.last_updated_message or 0))
+        if age <= 0:
+            return
+        decay = self.SOCIAL_PROFILE_DECAY_PER_MESSAGE ** age
+        profile.positive_interactions *= decay
+        profile.negative_interactions *= decay
+        profile.trusted_joke_level *= decay
+
+    def _infer_teasing_style(self, content: str, intent_analysis: Dict[str, object]) -> str:
+        """Classify style from safe signals only; never persist literal message text."""
+        text = (content or "").lower()
+        sentiment = (intent_analysis.get("sentiment") or "neutral").strip().lower()
+        emotion = (intent_analysis.get("emotion") or "neutral").strip().lower()
+        primary_intent = (intent_analysis.get("primary_intent") or "chat").strip().lower()
+
+        has_laughter = bool(re.search(r"\b(k{2,}|kkk+|rsrs+|haha+)\b", text))
+        has_teasing_marker = any(
+            marker in text
+            for marker in ["zoeira", "zoando", "brincadeira", "ironia", "sarcasmo", "provoca", "provocar"]
+        )
+        if has_teasing_marker or (has_laughter and (sentiment == "negative" or emotion in {"anger", "tsundere"})):
+            return "provocative"
+        if sentiment == "positive" or primary_intent == "praise":
+            return "supportive"
+        if emotion in {"curiosity", "chaos", "tsundere"}:
+            return emotion
+        return "neutral"
+
+    def _calculate_trusted_joke_level(self, profile: UserSocialProfile) -> float:
+        positive = max(0.0, float(profile.positive_interactions or 0.0))
+        negative = max(0.0, float(profile.negative_interactions or 0.0))
+        teasing_bonus = 0.25 if profile.teasing_style in {"provocative", "tsundere", "chaos"} else 0.0
+        trust = (positive + teasing_bonus) / (positive + negative + 1.0)
+        return max(0.0, min(1.0, trust))
+
+    def _decayed_profile_values(self, profile: UserSocialProfile, current_message_count: int):
+        age = max(0, current_message_count - int(profile.last_updated_message or 0))
+        decay = self.SOCIAL_PROFILE_DECAY_PER_MESSAGE ** age
+        return (
+            max(0.0, float(profile.positive_interactions or 0.0) * decay),
+            max(0.0, float(profile.negative_interactions or 0.0) * decay),
+            max(0.0, float(profile.trusted_joke_level or 0.0) * decay),
+        )
+
+    def _safe_emotion_label(self, emotion: str) -> str:
+        allowed = {"neutral", "joy", "anger", "sadness", "curiosity", "chaos", "tsundere"}
+        normalized = (emotion or "neutral").strip().lower()
+        return normalized if normalized in allowed else "neutral"
+
+    def _build_social_memory_summary(self, state: ChannelSocialState, author: Optional[str]) -> Optional[str]:
+        user_key = self._normalize_author(author)
+        if not user_key:
+            return None
+        profile = state.user_profiles.get(user_key)
+        if not profile:
+            return None
+
+        age = state.message_count - profile.last_updated_message
+        if age > self.SOCIAL_PROFILE_TTL_MESSAGES:
+            return None
+        positive, negative, trusted = self._decayed_profile_values(profile, state.message_count)
+        if max(positive, negative, trusted) < self.SOCIAL_PROFILE_MIN_SIGNAL:
+            return None
+
+        style_fragments = {
+            "provocative": "costuma brincar de forma provocativa",
+            "supportive": "costuma interagir de forma positiva",
+            "curiosity": "costuma puxar perguntas e teorias",
+            "chaos": "costuma entrar na energia caótica do chat",
+            "tsundere": "costuma brincar em tom tsundere",
+            "neutral": "tem histórico social neutro",
+        }
+        tone = "responder de forma neutra."
+        if trusted >= 0.55 and negative <= positive + 0.5:
+            tone = "responder com ironia leve."
+        elif negative > positive + 1.0:
+            tone = "evitar escalar conflito; responder com limites e humor seco."
+        elif positive > negative + 0.7:
+            tone = "manter tom cúmplice e amigável."
+
+        style = style_fragments.get(profile.teasing_style, style_fragments["neutral"])
+        return f"@{user_key} {style}, {tone} Última emoção percebida: {profile.last_emotion}."
+
     def add_memory_loop(self, channel: str, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke"):
         state = self._get_channel_state(channel)
         normalized_topic = (topic or "").strip()
@@ -357,6 +509,17 @@ class SocialDynamicsEngine:
             "mood_cooldown": state.bot_state.get("cooldown_messages", 0),
             "drama_state": dict(state.drama_state),
             "active_memory_loop": active_loop,
+            "user_profiles": {
+                user: {
+                    "positive_interactions": round(profile.positive_interactions, 3),
+                    "negative_interactions": round(profile.negative_interactions, 3),
+                    "teasing_style": profile.teasing_style,
+                    "trusted_joke_level": round(profile.trusted_joke_level, 3),
+                    "last_emotion": profile.last_emotion,
+                    "age_messages": max(0, state.message_count - profile.last_updated_message),
+                }
+                for user, profile in sorted(state.user_profiles.items())
+            },
             "memory_loops": [
                 {
                     "topic": loop.topic,
@@ -413,6 +576,12 @@ class SocialDynamicsEngine:
         suffix = self.storage_path.suffix or ".json"
         return self.storage_path.with_name(f"{stem}_{channel_key}{suffix}")
 
+    def _profile_storage_path_for_channel(self, channel: str) -> Path:
+        channel_key = self._normalize_channel(channel)
+        stem = self.storage_path.stem
+        suffix = self.storage_path.suffix or ".json"
+        return self.storage_path.with_name(f"{stem}_social_profiles_{channel_key}{suffix}")
+
     def _load_memory_loops(self, channel: str, state: ChannelSocialState):
         channel_path = self._storage_path_for_channel(channel)
         if not channel_path.exists():
@@ -439,6 +608,68 @@ class SocialDynamicsEngine:
             logging.debug("[SocialDynamics] memory_loops loaded path=%s count=%s", channel_path, len(state.memory_loops))
         except Exception as exc:
             logging.error("[SocialDynamics] failed loading memory loops path=%s error=%s", channel_path, exc)
+
+    def _load_user_profiles(self, channel: str, state: ChannelSocialState):
+        channel_path = self._profile_storage_path_for_channel(channel)
+        if not channel_path.exists():
+            return
+        try:
+            raw = json.loads(channel_path.read_text(encoding="utf-8"))
+            loaded_profiles = {}
+            for user, item in raw.items():
+                user_key = self._normalize_author(user)
+                if not user_key or not isinstance(item, dict):
+                    continue
+                loaded_profiles[user_key] = UserSocialProfile(
+                    positive_interactions=float(item.get("positive_interactions", 0.0)),
+                    negative_interactions=float(item.get("negative_interactions", 0.0)),
+                    teasing_style=(item.get("teasing_style") or "neutral"),
+                    trusted_joke_level=float(item.get("trusted_joke_level", 0.0)),
+                    last_emotion=self._safe_emotion_label(item.get("last_emotion") or "neutral"),
+                    last_updated_message=int(item.get("last_updated_message", 0)),
+                )
+            state.user_profiles = loaded_profiles
+            logging.debug("[SocialDynamics] user_profiles loaded path=%s count=%s", channel_path, len(state.user_profiles))
+        except Exception as exc:
+            logging.error("[SocialDynamics] failed loading user profiles path=%s error=%s", channel_path, exc)
+
+    def _persist_user_profiles(self, channel: str, state: ChannelSocialState):
+        serialized = {
+            user: {
+                "positive_interactions": round(profile.positive_interactions, 4),
+                "negative_interactions": round(profile.negative_interactions, 4),
+                "teasing_style": profile.teasing_style,
+                "trusted_joke_level": round(profile.trusted_joke_level, 4),
+                "last_emotion": profile.last_emotion,
+                "last_updated_message": profile.last_updated_message,
+            }
+            for user, profile in sorted(state.user_profiles.items())
+        }
+        try:
+            channel_path = self._profile_storage_path_for_channel(channel)
+            channel_path.parent.mkdir(parents=True, exist_ok=True)
+            channel_path.write_text(json.dumps(serialized, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logging.error("[SocialDynamics] failed persisting user profiles channel=%s error=%s", channel, exc)
+
+    def _prune_user_profiles(self, state: ChannelSocialState, channel: str, save: bool = True):
+        before = len(state.user_profiles)
+        retained_profiles = {}
+        for user, profile in state.user_profiles.items():
+            age = state.message_count - profile.last_updated_message
+            strongest_signal = max(self._decayed_profile_values(profile, state.message_count))
+            if age > self.SOCIAL_PROFILE_TTL_MESSAGES or strongest_signal < self.SOCIAL_PROFILE_MIN_SIGNAL:
+                logging.debug(
+                    "[SocialDynamics] user_profile expired user=%s age=%s signal=%.3f",
+                    user,
+                    age,
+                    strongest_signal,
+                )
+                continue
+            retained_profiles[user] = profile
+        state.user_profiles = retained_profiles
+        if save and len(state.user_profiles) != before:
+            self._persist_user_profiles(channel, state)
 
     def _persist_loops(self, channel: str, state: ChannelSocialState):
         serialized = [

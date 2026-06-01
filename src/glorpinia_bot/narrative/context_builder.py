@@ -53,6 +53,7 @@ def build_context_prompt(
     mood: Optional[str],
     drama_state: Optional[Dict[str, object]],
     memory_loop: Optional[Dict[str, str]],
+    social_memory: Optional[str],
     rag_context: Optional[str],
     chat_message: str,
     mention_context: Optional[Dict[str, object]] = None,
@@ -131,6 +132,13 @@ def build_context_prompt(
 
     if memory_loop and memory_loop.get("topic"):
         auxiliary_blocks.append(f"[SISTEMA: memória recorrente]\n{memory_loop['topic']}")
+
+    if social_memory and social_memory.strip():
+        auxiliary_blocks.append(
+            "[SISTEMA: memória social curta]\n"
+            f"{social_memory.strip()}\n"
+            "Use como ajuste de tom; não cite como ficha ou histórico explícito."
+        )
 
     if economy_context is not None:
         balances = economy_context.get("balances") or []
