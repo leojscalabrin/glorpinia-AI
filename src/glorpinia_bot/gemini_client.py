@@ -170,7 +170,20 @@ class GeminiClient:
         self.models_cache[channel_name] = new_model
         return new_model
 
-    def get_response(self, query, channel, author, memory_mgr=None, recent_history=None, skip_search=False, injection_context=None, mention_context=None, economy_context=None, allow_cookie_actions=False):
+    def get_response(
+        self,
+        query,
+        channel,
+        author,
+        memory_mgr=None,
+        recent_history=None,
+        skip_search=False,
+        injection_context=None,
+        mention_context=None,
+        economy_context=None,
+        allow_cookie_actions=False,
+        bypass_cookie_penalty_cooldown=False,
+    ):
         """
         Gera uma resposta. 
         Se bloquear -> Tenta Retry sem busca.
@@ -286,6 +299,7 @@ class GeminiClient:
                 user_query=query,
                 channel=channel,
                 author=author,
+                bypass_cooldown=bypass_cookie_penalty_cooldown,
             )
             has_cookie_command = bool(self.cookie_system.COOKIE_COMMAND_PATTERN.search(generated or ""))
             if allow_cookie_actions or has_cookie_command:
@@ -315,7 +329,14 @@ class GeminiClient:
         )
         return bool(debt_pattern.search(text))
 
-    def _apply_cookie_command_guard(self, generated_text: str, user_query: str, channel: str, author: str) -> str:
+    def _apply_cookie_command_guard(
+        self,
+        generated_text: str,
+        user_query: str,
+        channel: str,
+        author: str,
+        bypass_cooldown: bool = False,
+    ) -> str:
         """
         Aplica controle temporal leve por canal/autor para evitar punições repetidas.
         """
@@ -345,6 +366,14 @@ class GeminiClient:
         has_take_command = any(action.upper() == "TAKE" for action, _, _ in matches)
         if not has_take_command:
             self._cookie_guard_state[key] = state
+            return generated_text
+
+        if bypass_cooldown:
+            logging.debug(
+                "[Gemini] Cookie guard liberou TAKE com bypass de cooldown channel=%s author=%s",
+                channel,
+                author,
+            )
             return generated_text
 
         debt_mention_recent = (now - state["last_debt_mention_ts"]) < self.COOKIE_PENALTY_COOLDOWN_SECONDS

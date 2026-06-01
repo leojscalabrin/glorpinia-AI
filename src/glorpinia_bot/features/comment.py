@@ -139,6 +139,7 @@ class Comment:
                 memory_mgr=memory_mgr,
                 skip_search=True,
                 allow_cookie_actions=True,
+                bypass_cookie_penalty_cooldown=True,
                 injection_context=injection_context,
             )
 
