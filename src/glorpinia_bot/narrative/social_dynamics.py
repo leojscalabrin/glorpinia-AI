@@ -15,6 +15,7 @@ class MemoryLoop:
     weight: float = 0.5
     last_used: int = 0
     type: str = "running_joke"
+    examples: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -158,7 +159,7 @@ class SocialDynamicsEngine:
         memory_loop = None
         if state.active_loop_for_message:
             loop = state.active_loop_for_message
-            memory_loop = {"topic": loop.topic, "type": loop.type}
+            memory_loop = {"topic": loop.topic, "type": loop.type, "examples": loop.examples}
             loop.weight *= 0.9
             loop.last_used = state.message_count
             self._persist_loops(channel, state)
@@ -455,11 +456,17 @@ class SocialDynamicsEngine:
         style = style_fragments.get(profile.teasing_style, style_fragments["neutral"])
         return f"@{user_key} {style}, {tone} Última emoção percebida: {profile.last_emotion}."
 
-    def add_memory_loop(self, channel: str, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke"):
+    def add_memory_loop(self, channel: str, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke", examples: Optional[List[str]] = None):
         state = self._get_channel_state(channel)
         normalized_topic = (topic or "").strip()
         if not normalized_topic:
             return
+
+        clean_examples = []
+        for example in examples or []:
+            clean_example = str(example).strip()
+            if clean_example and clean_example not in clean_examples:
+                clean_examples.append(clean_example[:160])
 
         for loop in state.memory_loops:
             if loop.topic.lower() == normalized_topic.lower():
@@ -467,25 +474,32 @@ class SocialDynamicsEngine:
                 loop.users = merged_users
                 loop.weight = max(loop.weight, weight)
                 loop.last_used = state.message_count
+                merged_examples = list(loop.examples)
+                for example in clean_examples:
+                    if example not in merged_examples:
+                        merged_examples.append(example)
+                loop.examples = merged_examples[-5:]
                 logging.debug(
-                    "[SocialDynamics] memory_loop refreshed topic=%s users=%s weight=%.3f",
+                    "[SocialDynamics] memory_loop refreshed topic=%s users=%s weight=%.3f examples=%s",
                     loop.topic,
                     loop.users,
                     loop.weight,
+                    loop.examples,
                 )
                 self._persist_loops(channel, state)
                 self._prune_loops(state, channel=channel)
                 return
 
         state.memory_loops.append(
-            MemoryLoop(topic=normalized_topic, users=users or [], weight=weight, last_used=state.message_count, type=loop_type)
+            MemoryLoop(topic=normalized_topic, users=users or [], weight=weight, last_used=state.message_count, type=loop_type, examples=clean_examples[-5:])
         )
         logging.debug(
-            "[SocialDynamics] memory_loop created topic=%s users=%s weight=%.3f type=%s",
+            "[SocialDynamics] memory_loop created topic=%s users=%s weight=%.3f type=%s examples=%s",
             normalized_topic,
             users or [],
             weight,
             loop_type,
+            clean_examples[-5:],
         )
         self._persist_loops(channel, state)
         state.memory_loops = state.memory_loops[-self.MAX_LOOPS :]
@@ -499,6 +513,7 @@ class SocialDynamicsEngine:
                 "topic": state.active_loop_for_message.topic,
                 "type": state.active_loop_for_message.type,
                 "weight": round(state.active_loop_for_message.weight, 3),
+                "examples": state.active_loop_for_message.examples,
             }
 
         return {
@@ -527,6 +542,7 @@ class SocialDynamicsEngine:
                     "weight": round(loop.weight, 3),
                     "last_used": loop.last_used,
                     "type": loop.type,
+                    "examples": loop.examples,
                 }
                 for loop in state.memory_loops
             ],
@@ -601,6 +617,7 @@ class SocialDynamicsEngine:
                         weight=float(item.get("weight", 0.5)),
                         last_used=int(item.get("last_used", 0)),
                         type=item.get("type", "running_joke"),
+                        examples=[str(example)[:160] for example in item.get("examples", []) if example],
                     )
                 )
             if loaded_loops:
@@ -679,6 +696,7 @@ class SocialDynamicsEngine:
                 "weight": loop.weight,
                 "last_used": loop.last_used,
                 "type": loop.type,
+                "examples": loop.examples,
             }
             for loop in state.memory_loops
         ]
