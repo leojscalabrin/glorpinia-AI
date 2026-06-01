@@ -22,6 +22,7 @@ from .memory_manager import MemoryManager
 from .emote_manager import EmoteManager
 from .narrative.social_dynamics import SocialDynamicsEngine
 from .narrative.intent_engine import IntentEngine
+from .narrative.intent_store import LearnedIntentStore
 
 from .features.comment import Comment
 from .features.listen import Listen
@@ -72,7 +73,8 @@ class TwitchIRC:
         )
         self.memory_mgr = MemoryManager()
         self.emote_manager = EmoteManager()
-        self.intent_engine = IntentEngine()
+        self.intent_store = LearnedIntentStore(db_path=self.memory_mgr.db_path)
+        self.intent_engine = IntentEngine(learned_intent_store=self.intent_store)
         self.social_dynamics = SocialDynamicsEngine()
         
         self.live_status = {} # Dicionário para guardar { 'canal': True/False }
@@ -104,6 +106,7 @@ class TwitchIRC:
         self.processed_message_ids = deque(maxlen=500)
         self.recent_messages = {channel: deque(maxlen=100) for channel in self.auth.channels}
         self.last_bot_message_by_channel = {}
+        self.last_intent_decay_time = 0
         
         # Cooldown timer para o trigger "oziell"
         self.last_oziell_time = 0
@@ -630,6 +633,7 @@ class TwitchIRC:
                 author,
             )
             self._maybe_register_recurring_memory_loop(channel, author, content)
+            self._maybe_learn_intent_proposal(channel, content, intent_analysis)
 
             # PROCESSA COMANDOS E TRIGGERS
 
@@ -725,7 +729,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *intent, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -754,6 +758,7 @@ class TwitchIRC:
                         "comment": "(Admin) Toggle comment. Ex: *comment on", 
                         "scan": "(Admin) Scan manual.",
                         "debug": "(Admin) Mostra resumo social atual (mood e drama state).",
+                        "intent": "(Admin) Gerencia intenções aprendidas. Ex: *intent list | *intent approve nome | *intent reject nome.",
                         "addcookie": "(Admin) Add cookies. Ex: *addcookie nick 100", 
                         "removecookie": "(Admin) Remove cookies. Ex: *removecookie nick 100",
                         "analysis": "Análise de um assunto, dúvidas ou resumo do chat. Ex: *analysis [pergunta específica]",
@@ -1026,7 +1031,7 @@ class TwitchIRC:
                     return
 
                 # COMANDOS DE ADMIN (Verificação)
-                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "debug"]
+                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "debug", "intent"]
                 
                 if command_raw in admin_cmds:
                     if author.lower() in self.admin_nicks:
@@ -1163,10 +1168,75 @@ class TwitchIRC:
             if self.comment_feature:
                 self.comment_feature.roll_for_comment(channel, author)
             
+    def _maybe_learn_intent_proposal(self, channel, content, intent_analysis):
+        if not getattr(self, "intent_store", None):
+            return
+
+        try:
+            proposal = self.intent_store.propose_from_interaction(channel, content, intent_analysis)
+            if proposal:
+                logging.debug(
+                    "[IntentStore] proposal channel=%s intent=%s status=%s confidence=%.3f",
+                    channel,
+                    proposal.get("intent_name"),
+                    proposal.get("status"),
+                    proposal.get("confidence", 0.0),
+                )
+
+            now = time.time()
+            if now - self.last_intent_decay_time > 3600:
+                self.intent_store.apply_confidence_decay(channel)
+                self.last_intent_decay_time = now
+        except Exception as e:
+            logging.error("[IntentStore] Falha ao aprender proposta de intenção: %s", e)
+
+    def _handle_intent_admin_command(self, parts, channel):
+        if not getattr(self, "intent_store", None):
+            self.send_message(channel, "glorp Sistema de intenções indisponível.")
+            return
+
+        if len(parts) < 2 or parts[1].lower() == "list":
+            status = parts[2].lower() if len(parts) > 2 else None
+            intents = self.intent_store.list_intents(channel, status=status)
+            if not intents:
+                self.send_message(channel, "glorp Nenhuma intenção aprendida encontrada.")
+                return
+
+            chunks = []
+            for item in intents:
+                keywords = ",".join(item.get("keywords", [])[:3]) or "sem_keywords"
+                chunks.append(
+                    f"{item['intent_name']} [{item['status']} {item['confidence']:.2f}] {keywords}"
+                )
+            self.send_long_message(channel, "Intenções aprendidas: " + " | ".join(chunks))
+            return
+
+        action = parts[1].lower()
+        if action not in {"approve", "reject"} or len(parts) < 3:
+            self.send_message(channel, "glorp Uso: *intent list [status] | *intent approve nome | *intent reject nome")
+            return
+
+        intent_name = parts[2].strip()
+        if action == "approve":
+            changed = self.intent_store.approve_intent(channel, intent_name)
+            verb = "aprovada"
+        else:
+            changed = self.intent_store.reject_intent(channel, intent_name)
+            verb = "rejeitada"
+
+        if changed:
+            self.send_message(channel, f"glorp Intenção {intent_name} {verb}.")
+        else:
+            self.send_message(channel, f"glorp Intenção {intent_name} não encontrada.")
+
     def handle_admin_command(self, command, channel):
         """Processa comandos de admin."""
         parts = command.split()
         command_name = parts[0][1:].lower()
+
+        if command_name == "intent":
+            self._handle_intent_admin_command(parts, channel)
+            return
         
         # Comandos sem argumento (*check) -> len 1
         if len(parts) == 1:
@@ -1177,7 +1247,7 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, fatking, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], transfer [origem] [destino] [valor], check, scan, debug")
+                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, fatking, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], transfer [origem] [destino] [valor], check, scan, debug, intent")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)
