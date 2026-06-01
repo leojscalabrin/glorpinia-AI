@@ -1107,7 +1107,7 @@ class TwitchIRC:
                             "explicit_mentions": explicit_mentions,
                         }
                         allow_cookie_actions = intent_analysis.get("economy_relevance", 0.0) >= 0.35
-                        injection_context = self.social_dynamics.get_injection_payload(channel)
+                        injection_context = self.social_dynamics.get_injection_payload(channel, author=author)
                         response_text = self.gemini_client.get_response(
                             query=content,
                             channel=channel, 

@@ -532,6 +532,7 @@ class GeminiClient:
             mood=injection_context.get("mood"),
             drama_state=injection_context.get("drama_state"),
             memory_loop=injection_context.get("memory_loop"),
+            social_memory=injection_context.get("social_memory"),
             rag_context=rag_context,
             chat_message=user_query,
             mention_context=mention_context,
