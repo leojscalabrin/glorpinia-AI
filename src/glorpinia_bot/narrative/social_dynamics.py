@@ -80,7 +80,7 @@ class SocialDynamicsEngine:
         self.channel_states[channel_key] = state
         return state
 
-    def observe_message(self, channel: str, author: str, content: str, bot_nick: Optional[str] = None):
+    def observe_message(self, channel: str, author: str, content: str, bot_nick: Optional[str] = None, intent_analysis: Optional[Dict[str, object]] = None):
         state = self._get_channel_state(channel)
         self._maybe_reset_drama_for_interval(state, channel)
 
@@ -95,7 +95,7 @@ class SocialDynamicsEngine:
         self._prune_loops(state, channel=channel)
         self._roll_memory_loop(state)
         self._roll_drama_events(state, author)
-        self._update_mood(state, author=author, content=content, bot_nick=bot_nick)
+        self._update_mood(state, author=author, content=content, bot_nick=bot_nick, intent_analysis=intent_analysis)
 
     def reset_drama_state(self, channel: str, reason: str = "manual"):
         state = self._get_channel_state(channel)
@@ -222,7 +222,7 @@ class SocialDynamicsEngine:
             return
         state.drama_state["rivals"] = None
 
-    def _update_mood(self, state: ChannelSocialState, author: str, content: str, bot_nick: Optional[str] = None):
+    def _update_mood(self, state: ChannelSocialState, author: str, content: str, bot_nick: Optional[str] = None, intent_analysis: Optional[Dict[str, object]] = None):
         text = (content or "").lower().strip()
         lowered_author = (author or "").lower()
         bot_aliases = {"glorpinia", "glorp", (bot_nick or "").lower().strip()}
@@ -236,7 +236,12 @@ class SocialDynamicsEngine:
             state.bot_state["mood"] = "neutral"
             return
 
-        mood_event = self._infer_contextual_mood_event(text=text, author=lowered_author, bot_aliases=bot_aliases)
+        mood_event = self._infer_contextual_mood_event(
+            text=text,
+            author=lowered_author,
+            bot_aliases=bot_aliases,
+            intent_analysis=intent_analysis,
+        )
 
         if mood_event:
             duration = random.randint(1, 5)
@@ -250,7 +255,7 @@ class SocialDynamicsEngine:
         state.bot_state["remaining_messages"] = 0
         logging.debug("[SocialDynamics] mood_state=%s", state.bot_state)
 
-    def _infer_contextual_mood_event(self, text: str, author: str, bot_aliases: set):
+    def _infer_contextual_mood_event(self, text: str, author: str, bot_aliases: set, intent_analysis: Optional[Dict[str, object]] = None):
         if not text:
             return None
 
@@ -265,6 +270,21 @@ class SocialDynamicsEngine:
         mentions_bot = any(alias and (f"@{alias}" in text or alias in text) for alias in bot_aliases)
         second_person = any(token in text for token in ["vc", "você", "tu", "teu", "tua", "sua", "seu", "te "])
         direct_to_bot = mentions_bot or second_person
+
+        if intent_analysis:
+            emotion = (intent_analysis.get("emotion") or "").strip().lower()
+            confidence = float(intent_analysis.get("confidence") or 0.0)
+            if confidence >= 0.55:
+                if direct_to_bot and emotion == "anger":
+                    return "angry"
+                if direct_to_bot and emotion == "joy":
+                    return "happy"
+                if mentions_bot and emotion == "curiosity":
+                    return "curious"
+                if emotion == "chaos":
+                    return "chaotic"
+                if emotion == "tsundere":
+                    return "tsundere"
 
         if direct_to_bot and any(token in text for token in rude_tokens):
             return "angry"

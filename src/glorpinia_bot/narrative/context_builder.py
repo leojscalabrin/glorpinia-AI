@@ -57,6 +57,7 @@ def build_context_prompt(
     chat_message: str,
     mention_context: Optional[Dict[str, object]] = None,
     economy_context: Optional[Dict[str, object]] = None,
+    intent_analysis: Optional[Dict[str, object]] = None,
 ) -> str:
     required_blocks = []
     auxiliary_blocks = []
@@ -89,6 +90,29 @@ def build_context_prompt(
 
     if mood and mood.strip():
         auxiliary_blocks.append(f"[SISTEMA: mood atual = {mood.strip()}]")
+
+    if intent_analysis is not None:
+        primary_intent = intent_analysis.get("primary_intent") or "unknown"
+        emotion = intent_analysis.get("emotion") or "neutral"
+        sentiment = intent_analysis.get("sentiment") or "neutral"
+        confidence = intent_analysis.get("confidence")
+        should_search_web = bool(intent_analysis.get("should_search_web"))
+        economy_relevance = intent_analysis.get("economy_relevance")
+        keywords = intent_analysis.get("keywords") or []
+        secondary_intents = intent_analysis.get("secondary_intents") or []
+        intent_block = (
+            "[SISTEMA: análise de intenção da mensagem]\n"
+            f"intenção primária: {primary_intent}\n"
+            f"intenções secundárias: {', '.join(secondary_intents) if secondary_intents else '(nenhuma)'}\n"
+            f"emoção detectada: {emotion}\n"
+            f"sentimento: {sentiment}\n"
+            f"confiança: {confidence}\n"
+            f"buscar web: {'sim' if should_search_web else 'não'}\n"
+            f"relevância econômica: {economy_relevance}\n"
+            f"palavras-chave: {', '.join(keywords) if keywords else '(nenhuma)'}\n"
+            "Use isto como sinal de roteamento e tom; não cite a análise diretamente ao usuário."
+        )
+        auxiliary_blocks.append(intent_block)
 
     if drama_state:
         favorite = drama_state.get("favorite_of_the_day")

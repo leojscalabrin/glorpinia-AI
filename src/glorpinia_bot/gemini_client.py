@@ -184,6 +184,7 @@ class GeminiClient:
         economy_context=None,
         allow_cookie_actions=False,
         bypass_cookie_penalty_cooldown=False,
+        intent_analysis=None,
     ):
         """
         Gera uma resposta. 
@@ -219,7 +220,10 @@ class GeminiClient:
         web_context = ""
         performed_search = False
         try:
-            if not skip_search and self._should_search(clean_query):
+            should_search = self._should_search(clean_query)
+            if intent_analysis is not None:
+                should_search = bool(intent_analysis.get("should_search_web"))
+            if not skip_search and should_search:
                 optimized = self._generate_search_query(clean_query)
                 res = self.search_tool.perform_search(optimized)
                 if res:
@@ -257,6 +261,7 @@ class GeminiClient:
             injection_context=injection_context,
             mention_context=mention_context,
             economy_context=economy_context,
+            intent_analysis=intent_analysis,
         )
         logging.debug("[Gemini] context_injection channel=%s author=%s payload=%s", channel, author, injection_context or {})
         
@@ -274,6 +279,7 @@ class GeminiClient:
                     injection_context=injection_context,
                     mention_context=mention_context,
                     economy_context=economy_context,
+                    intent_analysis=intent_analysis,
                 )
                 generated = self._generate_safe(channel, fallback_prompt)
 
@@ -518,7 +524,7 @@ class GeminiClient:
         except:
             return "__SAFETY_BLOCK__"
 
-    def _build_final_prompt(self, rag_context, user_query, injection_context=None, mention_context=None, economy_context=None):
+    def _build_final_prompt(self, rag_context, user_query, injection_context=None, mention_context=None, economy_context=None, intent_analysis=None):
         """Monta prompt final via camada de injeção de contexto."""
         injection_context = injection_context or {}
         return build_context_prompt(
@@ -530,6 +536,7 @@ class GeminiClient:
             chat_message=user_query,
             mention_context=mention_context,
             economy_context=economy_context,
+            intent_analysis=intent_analysis,
         )
 
     def _generate_safe(self, channel, prompt):
