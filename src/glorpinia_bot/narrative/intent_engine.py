@@ -56,6 +56,9 @@ class IntentEngine:
         "voce", "ele", "ela", "isso", "esse", "essa", "meu", "minha", "seu", "sua", "glorpinia", "glorp",
     }
 
+    def __init__(self, learned_intent_store=None):
+        self.learned_intent_store = learned_intent_store
+
     def analyze_message(self, channel, author, content, recent_history=None):
         text = (content or "").strip()
         normalized = self._normalize_text(text)
@@ -94,6 +97,12 @@ class IntentEngine:
             economy_relevance=economy_relevance,
             should_search_web=should_search_web,
         )
+        learned_intents = self._match_learned_intents(channel, normalized, tokens)
+        for learned_intent in learned_intents:
+            secondary_intents.append(learned_intent["intent_name"])
+        if primary_intent == "chat" and learned_intents:
+            primary_intent = learned_intents[0]["intent_name"]
+            confidence = max(confidence, learned_intents[0].get("match_score", 0.0))
 
         return {
             "primary_intent": primary_intent,
@@ -110,7 +119,17 @@ class IntentEngine:
             "confidence": confidence,
             "should_search_web": should_search_web,
             "economy_relevance": economy_relevance,
+            "learned_intents": learned_intents,
         }
+
+
+    def _match_learned_intents(self, channel, normalized, tokens):
+        if not self.learned_intent_store:
+            return []
+        try:
+            return self.learned_intent_store.match_active_intents(channel, normalized, tokens)
+        except Exception:
+            return []
 
     def has_economic_intent(self, text: str) -> bool:
         analysis = self.analyze_message(channel=None, author=None, content=text)
