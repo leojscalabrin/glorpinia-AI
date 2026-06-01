@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from .features.search import SearchTool
 from .narrative.context_builder import build_context_prompt
+from .narrative.memory_extractor import extract_user_memory, is_persistable_memory
 
 load_dotenv()
 
@@ -310,9 +311,35 @@ class GeminiClient:
 
         # Salva e Retorna
         if generated and "Sadge" not in generated:
-            # Não salva memórias de bloqueios estáticos
-            if generated not in self.static_safety_responses: 
-                 if memory_mgr: memory_mgr.save_user_memory(channel, author, query, generated)
+            # Não salva memórias de bloqueios estáticos nem conversa crua sem valor duradouro.
+            if generated not in self.static_safety_responses and memory_mgr:
+                memory = extract_user_memory(channel, author, query, generated)
+                if is_persistable_memory(memory):
+                    memory_summary = memory["summary"]
+                    ttl_days = memory.get("ttl_days")
+                    if ttl_days:
+                        memory_summary = f"{memory_summary} (validade sugerida: {ttl_days} dias)"
+                    memory_mgr.save_user_memory(
+                        channel,
+                        author,
+                        f"[{memory['memory_type']}] {memory_summary}",
+                        "",
+                    )
+                    logging.debug(
+                        "[Gemini] Memória extraída channel=%s author=%s type=%s confidence=%.2f",
+                        channel,
+                        author,
+                        memory.get("memory_type"),
+                        float(memory.get("confidence", 0.0)),
+                    )
+                else:
+                    logging.debug(
+                        "[Gemini] Interação ignorada pela extração de memória channel=%s author=%s type=%s confidence=%s",
+                        channel,
+                        author,
+                        memory.get("memory_type"),
+                        memory.get("confidence"),
+                    )
             
             if author.lower() == "system": return generated
             return f"@{author}, {generated}"
