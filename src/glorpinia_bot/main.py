@@ -11,6 +11,8 @@ import requests
 import csv
 import threading
 import random
+import unicodedata
+from difflib import SequenceMatcher
 from datetime import datetime
 from collections import deque
 import subprocess
@@ -44,6 +46,10 @@ logging.basicConfig(
 class TwitchIRC:
     TOPIC_MIN_OCCURRENCES = 3
     TOPIC_SCAN_WINDOW = 25
+    TOPIC_MIN_MESSAGE_CHARS = 12
+    TOPIC_MIN_KEYWORDS = 2
+    TOPIC_SIMILARITY_THRESHOLD = 0.72
+    TOPIC_EXAMPLE_LIMIT = 5
     FEATURE_STATE_FILE = "channel_feature_states.json"
 
     def __init__(self):
@@ -526,56 +532,160 @@ class TwitchIRC:
 
         return social_summary, emote_summary, params_summary
 
-    def _extract_topic_candidate(self, content: str):
-        text = (content or "").lower().strip()
-        if not text:
-            return None
+    def _topic_bot_aliases(self):
+        aliases = {"bot", "glorpinia", "glorp"}
+        bot_nick = getattr(getattr(self, "auth", None), "bot_nick", None)
+        if bot_nick:
+            aliases.add(self._normalize_topic_token(bot_nick))
+        return {alias for alias in aliases if alias}
 
-        text = re.sub(r"https?://\S+", " ", text)
-        text = re.sub(r"[^\w\sáàãâéêíóôõúç]", " ", text)
+    def _normalize_topic_token(self, token: str) -> str:
+        token = unicodedata.normalize("NFKD", token or "")
+        token = "".join(ch for ch in token if not unicodedata.combining(ch))
+        token = token.lower().strip()
+        token = re.sub(r"(.)\1{2,}", r"\1", token)
+        token = re.sub(r"[^a-z0-9_]", "", token)
 
-        stopwords = {
-            "de", "da", "do", "das", "dos", "em", "na", "no", "pra", "para", "que", "com",
-            "uma", "um", "as", "os", "eu", "tu", "ele", "ela", "isso", "isto", "aqui", "ali",
-            "tipo", "mano", "bot", "glorpinia", "glorp", "kkk", "kkkk", "k", "rs", "rss", "haha",
-            "não", "sim", "mais", "muito", "pouco", "como", "porque", "por", "se", "me", "te",
+        # Normalização simples de plural: remove finais comuns sem tentar fazer stemming completo.
+        if len(token) > 5 and token.endswith("oes"):
+            token = token[:-3] + "ao"
+        elif len(token) > 5 and token.endswith("aes"):
+            token = token[:-3] + "ao"
+        elif len(token) > 5 and token.endswith("ais"):
+            token = token[:-3] + "al"
+        elif len(token) > 5 and token.endswith("eis"):
+            token = token[:-3] + "el"
+        elif len(token) > 4 and token.endswith("es") and not token.endswith(("ses", "zes")):
+            token = token[:-2]
+        elif len(token) > 3 and token.endswith("s") and not token.endswith(("ss", "us")):
+            token = token[:-1]
+        return token
+
+    def _topic_stopwords(self):
+        return {
+            "de", "da", "do", "das", "dos", "em", "na", "no", "nas", "nos", "pra", "para", "que", "com",
+            "uma", "um", "umas", "uns", "as", "os", "ao", "aos", "e", "ou", "mas", "foi", "ser", "ter",
+            "eu", "tu", "ele", "ela", "eles", "elas", "nos", "voce", "voces", "vc", "vcs", "meu", "minha",
+            "isso", "isto", "esse", "essa", "esses", "essas", "aquele", "aquela", "aqui", "ali", "la",
+            "tipo", "mano", "cara", "galera", "chat", "live", "stream", "hoje", "agora", "tambem", "demais", "demal",
+            "bot", "glorpinia", "glorp", "kkk", "kkkk", "k", "rs", "rss", "haha", "hehe", "lol",
+            "nao", "sim", "mais", "muito", "pouco", "como", "porque", "por", "se", "me", "te",
         }
 
-        words = [w for w in text.split() if len(w) >= 4 and w not in stopwords and not w.startswith("@")] 
-        if not words:
+    def _message_is_command_or_bot_only(self, content: str) -> bool:
+        text = (content or "").strip()
+        if not text:
+            return True
+
+        lowered = text.lower()
+        if lowered.startswith("*") or lowered.startswith(("!", "/")):
+            return True
+
+        normalized_text = unicodedata.normalize("NFKD", lowered)
+        normalized_text = "".join(ch for ch in normalized_text if not unicodedata.combining(ch))
+        if normalized_text.strip() == "glorp":
+            return True
+
+        aliases = self._topic_bot_aliases()
+        mention_tokens = re.findall(r"@?[\wáàãâéêíóôõúç]+", normalized_text, flags=re.IGNORECASE)
+        normalized_tokens = [self._normalize_topic_token(token.lstrip("@")) for token in mention_tokens]
+        non_bot_tokens = [token for token in normalized_tokens if token and token not in aliases]
+        return bool(normalized_tokens) and not non_bot_tokens
+
+    def _extract_topic_keywords(self, content: str):
+        raw_text = (content or "").strip()
+        if len(raw_text) < self.TOPIC_MIN_MESSAGE_CHARS or self._message_is_command_or_bot_only(raw_text):
+            return []
+
+        text = re.sub(r"https?://\S+", " ", raw_text)
+        text = re.sub(r"@\w+", " ", text)
+        text = re.sub(r"[^\w\sáàãâéêíóôõúçÁÀÃÂÉÊÍÓÔÕÚÇ]", " ", text)
+
+        stopwords = self._topic_stopwords()
+        bot_aliases = self._topic_bot_aliases()
+        keywords = []
+        seen = set()
+        for raw_word in text.split():
+            word = self._normalize_topic_token(raw_word)
+            if len(word) < 4 or word in stopwords or word in bot_aliases or word.isdigit():
+                continue
+            if word not in seen:
+                keywords.append(word)
+                seen.add(word)
+
+        if len(keywords) < self.TOPIC_MIN_KEYWORDS:
+            return []
+        return keywords
+
+    def _extract_topic_candidate(self, content: str):
+        keywords = self._extract_topic_keywords(content)
+        if not keywords:
             return None
-        return " ".join(words[:4])
+        return " ".join(keywords[:4])
+
+    def _topics_are_similar(self, topic_a: str, keywords_a, topic_b: str, keywords_b) -> bool:
+        set_a = set(keywords_a or [])
+        set_b = set(keywords_b or [])
+        if not set_a or not set_b:
+            return False
+
+        intersection = set_a & set_b
+        if len(intersection) >= min(2, len(set_a), len(set_b)):
+            return True
+
+        jaccard = len(intersection) / len(set_a | set_b)
+        if jaccard >= 0.34 and intersection:
+            return True
+
+        similarity = SequenceMatcher(None, topic_a or "", topic_b or "").ratio()
+        return similarity >= self.TOPIC_SIMILARITY_THRESHOLD
 
     def _maybe_register_recurring_memory_loop(self, channel: str, author: str, content: str):
         if channel not in self.recent_messages:
             return
 
         topic_candidate = self._extract_topic_candidate(content)
-        if not topic_candidate:
+        topic_keywords = self._extract_topic_keywords(content)
+        if not topic_candidate or not topic_keywords:
             return
 
         recent = list(self.recent_messages[channel])[-self.TOPIC_SCAN_WINDOW :]
         occurrences = 0
         authors = set()
+        examples = []
         for msg in recent:
-            msg_topic = self._extract_topic_candidate(msg.get("content", ""))
-            if msg_topic == topic_candidate:
+            msg_content = msg.get("content", "")
+            msg_topic = self._extract_topic_candidate(msg_content)
+            msg_keywords = self._extract_topic_keywords(msg_content)
+            if msg_topic and self._topics_are_similar(topic_candidate, topic_keywords, msg_topic, msg_keywords):
                 occurrences += 1
                 author_name = (msg.get("author") or "").lower()
                 if author_name:
                     authors.add(author_name)
+                clean_example = re.sub(r"\s+", " ", msg_content).strip()
+                if clean_example and clean_example not in examples:
+                    examples.append(clean_example[:160])
 
         if occurrences < self.TOPIC_MIN_OCCURRENCES:
             return
 
         users = sorted(authors | {author.lower()})
-        self.social_dynamics.add_memory_loop(channel=channel, topic=topic_candidate, users=users, weight=0.55, loop_type="recurring_topic")
+        self.social_dynamics.add_memory_loop(
+            channel=channel,
+            topic=topic_candidate,
+            users=users,
+            weight=0.55,
+            loop_type="recurring_topic",
+            examples=examples[: self.TOPIC_EXAMPLE_LIMIT],
+        )
         logging.debug(
-            "[Main] recurring_topic loop_created channel=%s topic=%s occurrences=%s users=%s",
+            "[Main] recurring_topic loop_created channel=%s topic=%s keywords=%s occurrences=%s users=%s examples=%s",
             channel,
             topic_candidate,
+            topic_keywords,
             occurrences,
             users,
+            examples[: self.TOPIC_EXAMPLE_LIMIT],
         )
 
 
