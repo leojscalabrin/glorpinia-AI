@@ -363,6 +363,46 @@ class TwitchIRC:
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
 
+    def send_whisper(self, channel, target_nick, message, max_length=330):
+        """Envia uma resposta privada usando o comando /w para evitar spam no chat."""
+        target = re.sub(r"[^A-Za-z0-9_]", "", str(target_nick or "")).strip()
+        if not target:
+            self.send_message(channel, message)
+            return
+
+        clean_message = self.emote_manager.normalize_emote_spacing(str(message or "").strip())
+        if not clean_message:
+            clean_message = "glorp Sem conteúdo para listar."
+
+        prefix = f"/w {target} "
+        payload_limit = max(40, max_length - len(prefix))
+        words = clean_message.split()
+        chunks = []
+        current = ""
+
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if current and len(candidate) > payload_limit:
+                chunks.append(current)
+                current = word
+            else:
+                current = candidate
+
+        if current:
+            chunks.append(current)
+
+        if not chunks:
+            chunks = [clean_message[:payload_limit]]
+
+        for chunk in chunks:
+            whisper_command = f"{prefix}{chunk}".strip()
+            if self.ws and self.ws.sock and self.ws.sock.connected:
+                full_msg = f"PRIVMSG #{channel} :{whisper_command}\r\n"
+                self.ws.send(full_msg)
+                print(f"[WHISPER] {channel} -> {target}: {chunk}")
+            else:
+                print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar whisper para {target}: {chunk}")
+
     def _register_recent_message(self, channel, author, content):
         if channel not in self.recent_messages:
             self.recent_messages[channel] = deque(maxlen=100)
@@ -1145,7 +1185,7 @@ class TwitchIRC:
                 
                 if command_raw in admin_cmds:
                     if author.lower() in self.admin_nicks:
-                        self.handle_admin_command(content, channel)
+                        self.handle_admin_command(content, channel, author)
                     else:
                         self.send_message(channel, f"@{author}, comando apenas para os chegados arnoldHalt")
                     return
@@ -1300,7 +1340,7 @@ class TwitchIRC:
         except Exception as e:
             logging.error("[IntentStore] Falha ao aprender proposta de intenção: %s", e)
 
-    def _handle_intent_admin_command(self, parts, channel):
+    def _handle_intent_admin_command(self, parts, channel, requester=None):
         if not getattr(self, "intent_store", None):
             self.send_message(channel, "glorp Sistema de intenções indisponível.")
             return
@@ -1309,7 +1349,7 @@ class TwitchIRC:
             status = parts[2].lower() if len(parts) > 2 else None
             intents = self.intent_store.list_intents(channel, status=status)
             if not intents:
-                self.send_message(channel, "glorp Nenhuma intenção aprendida encontrada.")
+                self.send_whisper(channel, requester, "glorp Nenhuma intenção aprendida encontrada.")
                 return
 
             chunks = []
@@ -1318,7 +1358,7 @@ class TwitchIRC:
                 chunks.append(
                     f"{item['intent_name']} [{item['status']} {item['confidence']:.2f}] {keywords}"
                 )
-            self.send_long_message(channel, "Intenções aprendidas: " + " | ".join(chunks))
+            self.send_whisper(channel, requester, "Intenções aprendidas: " + " | ".join(chunks))
             return
 
         action = parts[1].lower()
@@ -1339,13 +1379,13 @@ class TwitchIRC:
         else:
             self.send_message(channel, f"glorp Intenção {intent_name} não encontrada.")
 
-    def handle_admin_command(self, command, channel):
+    def handle_admin_command(self, command, channel, author=None):
         """Processa comandos de admin."""
         parts = command.split()
         command_name = parts[0][1:].lower()
 
         if command_name == "intent":
-            self._handle_intent_admin_command(parts, channel)
+            self._handle_intent_admin_command(parts, channel, requester=author)
             return
         
         # Comandos sem argumento (*check) -> len 1
