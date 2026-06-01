@@ -316,7 +316,7 @@ class TwitchIRC:
             time_part = f" ({time_raw})" if time_raw else ""
             parts.append(f"#{idx} {nick} [{score}]{time_part}")
 
-        msg = "thomeFat Leaderboard dos maiores Fat Kingueiros: " + " | ".join(parts)
+        msg = "FatKing Leaderboard dos maiores Fat Kingueiros: " + " | ".join(parts)
         self.send_long_message(channel, msg)
 
     def handle_exit(self, signum, frame):
