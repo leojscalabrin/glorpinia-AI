@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime
 
@@ -165,13 +166,60 @@ class MemoryManager:
         conn.commit()
         conn.close()
 
+    def _tokenize_for_search(self, text):
+        """Normaliza texto em palavras simples para o fallback SQLite."""
+        if not text:
+            return set()
+        return set(re.findall(r"\w+", str(text).lower()))
+
+    def _search_memory_sqlite(self, channel, user, query, k):
+        """Busca memórias relevantes no log SQLite quando FAISS não está disponível."""
+        query_words = self._tokenize_for_search(query)
+        if not query_words or k <= 0:
+            return ""
+
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT query, response, ts
+            FROM interactions
+            WHERE channel=? AND user=?
+            """,
+            (channel, user),
+        )
+        rows = c.fetchall()
+        conn.close()
+
+        ranked_rows = []
+        for row_query, row_response, ts in rows:
+            memory_words = self._tokenize_for_search(row_query) | self._tokenize_for_search(
+                row_response
+            )
+            score = len(query_words & memory_words)
+            if score > 0:
+                ranked_rows.append((score, ts or "", row_query or "", row_response or ""))
+
+        if not ranked_rows:
+            return ""
+
+        ranked_rows.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        top_rows = ranked_rows[:k]
+
+        return "\n".join(
+            [
+                f"- Usuário {user} em {channel}: {row_query} -> {row_response}"
+                for _, _, row_query, row_response in top_rows
+            ]
+        )
+
     def search_memory(self, channel, user, query, k=3):
         """
         Busca memórias relevantes no banco vetorial (RAG).
         Retorna uma string formatada com as memórias encontradas.
         """
         if not self._use_faiss:
-            return ""
+            return self._search_memory_sqlite(channel, user, query, k)
 
         key = self._memory_key(channel, user)
         vectorstore = self._vectorstores.get(key)
