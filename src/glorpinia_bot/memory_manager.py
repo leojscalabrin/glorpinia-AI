@@ -126,8 +126,16 @@ class MemoryManager:
 
         return self._vectorstores.get(key)
 
+    def _format_memory_document(self, channel, user, query, response):
+        """Formata uma memória para indexação ou exibição no fallback SQLite."""
+        query = (query or "").strip()
+        response = (response or "").strip()
+        if response:
+            return f"Usuário {user} em {channel}: {query} -> {response}"
+        return f"Memória sobre {user} em {channel}: {query}"
+
     def save_user_memory(self, channel, user, query, response):
-        """Salva nova interação (query -> response) na memória long-term (FAISS + DB)."""
+        """Salva nova memória long-term (FAISS + DB), preferencialmente já resumida."""
 
         if not self._use_faiss:
             conn = sqlite3.connect(self.db_path)
@@ -144,7 +152,7 @@ class MemoryManager:
         key = self._memory_key(channel, user)
         self._active_memory_key = key
         vectorstore = self.load_user_memory(channel, user)
-        doc = f"Usuário {user} em {channel}: {query} -> {response}"
+        doc = self._format_memory_document(channel, user, query, response)
 
         if vectorstore is None:
             vectorstore = FAISS.from_texts([doc], self.embeddings)
@@ -208,7 +216,7 @@ class MemoryManager:
 
         return "\n".join(
             [
-                f"- Usuário {user} em {channel}: {row_query} -> {row_response}"
+                f"- {self._format_memory_document(channel, user, row_query, row_response)}"
                 for _, _, row_query, row_response in top_rows
             ]
         )
