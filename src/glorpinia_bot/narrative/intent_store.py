@@ -149,6 +149,19 @@ class LearnedIntentStore:
     def reject_intent(self, channel: str, intent_name: str) -> bool:
         return self._set_status(channel, intent_name, "rejected")
 
+    def clear_intents(self, channel: str) -> int:
+        channel = self._normalize_channel(channel)
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute(
+            "DELETE FROM learned_intents WHERE channel=?",
+            (channel,),
+        )
+        changed = c.rowcount
+        conn.commit()
+        conn.close()
+        return changed
+
     def match_active_intents(self, channel: str, normalized_text: str, tokens: Optional[Iterable[str]] = None) -> List[Dict]:
         channel = self._normalize_channel(channel)
         token_set = set(tokens or self._tokens(normalized_text))

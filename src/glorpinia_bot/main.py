@@ -1305,9 +1305,25 @@ class TwitchIRC:
             self.send_message(channel, "glorp Sistema de intenções indisponível.")
             return
 
+        status_aliases = {
+            "pending": "proposed",
+            "proposed": "proposed",
+            "approved": "active",
+            "active": "active",
+            "rejected": "rejected",
+        }
+
         if len(parts) < 2 or parts[1].lower() == "list":
-            status = parts[2].lower() if len(parts) > 2 else None
-            intents = self.intent_store.list_intents(channel, status=status)
+            target_channel = channel
+            status = None
+            for token in parts[2:]:
+                normalized_token = token.strip().lower()
+                if normalized_token in status_aliases and status is None:
+                    status = status_aliases[normalized_token]
+                elif target_channel == channel:
+                    target_channel = token.strip()
+
+            intents = self.intent_store.list_intents(target_channel, status=status)
             if not intents:
                 self.send_message(channel, "glorp Nenhuma intenção aprendida encontrada.")
                 return
@@ -1318,26 +1334,72 @@ class TwitchIRC:
                 chunks.append(
                     f"{item['intent_name']} [{item['status']} {item['confidence']:.2f}] {keywords}"
                 )
-            self.send_long_message(channel, "Intenções aprendidas: " + " | ".join(chunks))
+            formatted_list = "Intenções aprendidas: " + " | ".join(chunks)
+            logging.info(
+                "[IntentStore] Lista de intenções channel=%s status=%s: %s",
+                target_channel,
+                status or "todos",
+                formatted_list,
+            )
+            self.send_message(channel, "glorp Lista de intenções impressa nos logs.")
             return
 
         action = parts[1].lower()
-        if action not in {"approve", "reject"} or len(parts) < 3:
-            self.send_message(channel, "glorp Uso: *intent list [status] | *intent approve nome | *intent reject nome")
+        if action == "clear":
+            changed = self.intent_store.clear_intents(channel)
+            self.send_message(channel, f"glorp {changed} intenções removidas.")
             return
 
-        intent_name = parts[2].strip()
-        if action == "approve":
-            changed = self.intent_store.approve_intent(channel, intent_name)
-            verb = "aprovada"
-        else:
-            changed = self.intent_store.reject_intent(channel, intent_name)
-            verb = "rejeitada"
+        if action not in {"approve", "reject"} or len(parts) < 3:
+            self.send_message(
+                channel,
+                "glorp Uso: *intent list [canal|status] | *intent approve nome... | *intent reject nome... | *intent clear",
+            )
+            return
 
-        if changed:
-            self.send_message(channel, f"glorp Intenção {intent_name} {verb}.")
+        if action == "approve":
+            update_intent = self.intent_store.approve_intent
+            singular_verb = "aprovada"
+            plural_label = "Aprovados"
+            count_label = "aprovadas"
         else:
-            self.send_message(channel, f"glorp Intenção {intent_name} não encontrada.")
+            update_intent = self.intent_store.reject_intent
+            singular_verb = "rejeitada"
+            plural_label = "Rejeitados"
+            count_label = "rejeitadas"
+
+        targets = [target.strip() for target in parts[2:] if target.strip()]
+        if len(targets) == 1 and targets[0].lower() == "all":
+            intents = self.intent_store.list_intents(channel, limit=1000)
+            changed = 0
+            for item in intents:
+                if update_intent(channel, item["intent_name"]):
+                    changed += 1
+            self.send_message(channel, f"glorp {changed} intenções {count_label}.")
+            return
+
+        found = []
+        missing = []
+        for intent_name in targets:
+            if update_intent(channel, intent_name):
+                found.append(intent_name)
+            else:
+                missing.append(intent_name)
+
+        if len(targets) == 1:
+            intent_name = targets[0]
+            if found:
+                self.send_message(channel, f"glorp Intenção {intent_name} {singular_verb}.")
+            else:
+                self.send_message(channel, f"glorp Intenção {intent_name} não encontrada.")
+            return
+
+        response_parts = []
+        if found:
+            response_parts.append(f"{plural_label}: {', '.join(found)}.")
+        if missing:
+            response_parts.append(f"Não encontrados: {', '.join(missing)}.")
+        self.send_message(channel, "glorp " + " ".join(response_parts))
 
     def handle_admin_command(self, command, channel, author=None):
         """Processa comandos de admin."""
