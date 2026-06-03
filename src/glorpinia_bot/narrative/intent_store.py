@@ -120,6 +120,8 @@ class LearnedIntentStore:
 
     def list_intents(self, channel: str, status: Optional[str] = None, limit: int = 8) -> List[Dict]:
         channel = self._normalize_channel(channel)
+        status_aliases = {"pending": "proposed", "approved": "active"}
+        status = status_aliases.get(status, status)
         params = [channel]
         where = "WHERE channel=?"
         if status in {"proposed", "active", "rejected"}:
