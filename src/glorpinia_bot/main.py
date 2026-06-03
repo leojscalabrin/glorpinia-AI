@@ -92,6 +92,10 @@ class TwitchIRC:
         # Inicia a thread que vai ficar checando a API da Twitch em segundo plano
         self.monitor_thread = threading.Thread(target=self._monitor_live_status, daemon=True)
         self.monitor_thread.start()
+
+        self.intent_review_interval_hours = self._get_intent_review_interval_hours()
+        self._intent_review_thread = threading.Thread(target=self._intent_review_loop, daemon=True)
+        self._intent_review_thread.start()
         
         # Inicializa Features
         print("[INFO] Loading features...")
@@ -1278,6 +1282,121 @@ class TwitchIRC:
             if self.comment_feature:
                 self.comment_feature.roll_for_comment(channel, author)
             
+    def _get_intent_review_interval_hours(self):
+        """Lê o intervalo da revisão automática de intents, em horas."""
+        raw_value = os.getenv("INTENT_REVIEW_INTERVAL_HOURS", "24")
+        try:
+            interval = float(raw_value)
+            if interval <= 0:
+                raise ValueError("intervalo deve ser positivo")
+            return interval
+        except (TypeError, ValueError):
+            logging.warning(
+                "[IntentReview] INTENT_REVIEW_INTERVAL_HOURS inválido (%r). Usando fallback de 24h.",
+                raw_value,
+            )
+            return 24.0
+
+    def _normalize_intent_review_text(self, value):
+        """Normaliza texto para comparações determinísticas de revisão."""
+        normalized = unicodedata.normalize("NFKD", str(value or ""))
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        return normalized.lower().strip()
+
+    def _intent_review_tokens(self, value):
+        """Extrai tokens alfanuméricos usados nas regras de bloqueio."""
+        return re.findall(r"[a-z0-9]+", self._normalize_intent_review_text(value))
+
+    def _should_reject_intent(self, intent: dict) -> bool:
+        """Retorna True quando um intent deve ser rejeitado automaticamente."""
+        profanity_words = {
+            "arrombado", "bosta", "buceta", "caralho", "cu", "cuzão", "cuzao",
+            "desgraçado", "desgracado", "foda", "foder", "fodase", "foda-se",
+            "merda", "porra", "puta", "puto", "vadia", "vagabunda", "vagabundo",
+            "asshole", "bastard", "bitch", "bullshit", "cunt", "damn", "dick",
+            "fuck", "fucker", "fucking", "motherfucker", "piss", "shit", "slut",
+            "whore",
+        }
+        moderation_terms = {
+            "ban", "unban", "mod", "timeout", "slow", "subscribers", "emoteonly",
+            "clear", "host", "raid",
+        }
+        registered_commands = {
+            "8ball", "cookie", "balance", "empire", "leaderboard", "fatking",
+            "slots", "duel", "ticket", "sorteio", "transfer", "fortune", "roll",
+            "bald", "debt", "analysis", "chat", "listen", "comment", "scan",
+            "debug", "intent", "check", "commands", "help",
+        }
+
+        intent_name = intent.get("intent_name", "")
+        keywords = intent.get("keywords") or []
+        if not isinstance(keywords, list):
+            keywords = [keywords]
+
+        profanity_tokens = set()
+        for value in [intent_name] + keywords:
+            profanity_tokens.update(self._intent_review_tokens(value))
+        normalized_profanity = {self._normalize_intent_review_text(word) for word in profanity_words}
+        if profanity_tokens & normalized_profanity:
+            return True
+
+        intent_tokens = set(self._intent_review_tokens(intent_name))
+        normalized_intent_name = self._normalize_intent_review_text(intent_name)
+        compact_intent_name = re.sub(r"[^a-z0-9]", "", normalized_intent_name)
+
+        if intent_tokens & moderation_terms:
+            return True
+
+        if compact_intent_name in registered_commands or normalized_intent_name.lstrip("!*/.") in registered_commands:
+            return True
+
+        return False
+
+    def _run_intent_review(self):
+        """Revisa intents pendentes/propostos por canal sem acionar chat ou IA externa."""
+        if not getattr(self, "intent_store", None):
+            logging.warning("[IntentReview] intent_store indisponível; revisão ignorada.")
+            return
+
+        for channel in getattr(self.auth, "channels", []):
+            reviewed = 0
+            approved = 0
+            rejected = 0
+            try:
+                intents = self.intent_store.list_intents(channel, status="pending", limit=1000)
+                for intent in intents:
+                    intent_name = intent.get("intent_name")
+                    if not intent_name:
+                        continue
+
+                    reviewed += 1
+                    if self._should_reject_intent(intent):
+                        if self.intent_store.reject_intent(channel, intent_name):
+                            rejected += 1
+                    else:
+                        if self.intent_store.approve_intent(channel, intent_name):
+                            approved += 1
+
+                logging.info(
+                    "[IntentReview] canal=%s revisados=%d aprovados=%d rejeitados=%d.",
+                    channel,
+                    reviewed,
+                    approved,
+                    rejected,
+                )
+            except Exception as e:
+                logging.error("[IntentReview] Falha ao revisar canal=%s: %s", channel, e)
+
+    def _intent_review_loop(self):
+        """Thread daemon que executa a revisão automática no intervalo configurado."""
+        logging.info(
+            "[IntentReview] Thread iniciada com intervalo de %.2fh.",
+            self.intent_review_interval_hours,
+        )
+        while self.running:
+            self._run_intent_review()
+            time.sleep(self.intent_review_interval_hours * 3600)
+
     def _maybe_learn_intent_proposal(self, channel, content, intent_analysis):
         if not getattr(self, "intent_store", None):
             return
