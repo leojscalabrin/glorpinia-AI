@@ -4,7 +4,7 @@ import logging
 import random
 import hashlib
 import time
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 
 from .features.search import SearchTool
@@ -14,10 +14,38 @@ from .narrative.memory_extractor import extract_user_memory, is_persistable_memo
 load_dotenv()
 
 try:
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+    _api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    genai_client = genai.Client(api_key=_api_key) if _api_key else genai.Client()
 except Exception as e:
     logging.error(f"Falha ao configurar a API do Google GenAI: {e}")
     raise
+
+
+class GenAIModel:
+    """Adaptador simples para centralizar chamadas do SDK google-genai."""
+
+    def __init__(self, client, model_name, generation_config=None, safety_settings=None, system_instruction=None):
+        self.client = client
+        self.model_name = model_name
+        self.generation_config = generation_config or {}
+        self.safety_settings = safety_settings or []
+        self.system_instruction = system_instruction
+
+    def generate_content(self, contents, generation_config=None, safety_settings=None):
+        config = {**self.generation_config, **(generation_config or {})}
+        resolved_safety_settings = self.safety_settings if safety_settings is None else safety_settings
+
+        if resolved_safety_settings:
+            config["safety_settings"] = resolved_safety_settings
+        if self.system_instruction:
+            config["system_instruction"] = self.system_instruction
+
+        return self.client.models.generate_content(
+            model=self.model_name,
+            contents=contents,
+            config=config or None,
+        )
+
 
 class GeminiClient:
     """
@@ -57,7 +85,8 @@ class GeminiClient:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
-        self.analysis_model = genai.GenerativeModel(
+        self.analysis_model = GenAIModel(
+            genai_client,
             model_name="gemini-flash-lite-latest",
             generation_config={"temperature": 0.1},
             safety_settings=self.safety_settings
@@ -65,6 +94,22 @@ class GeminiClient:
 
         self.search_tool = SearchTool()
         self._cookie_guard_state = {}
+
+    @staticmethod
+    def _finish_reason_name(reason):
+        if hasattr(reason, "name"):
+            return reason.name.upper()
+        return str(reason).upper()
+
+    @classmethod
+    def _is_stop_finish(cls, reason):
+        reason_name = cls._finish_reason_name(reason)
+        return reason == 1 or reason_name == "STOP" or reason_name.endswith(".STOP")
+
+    @classmethod
+    def _is_safety_finish(cls, reason):
+        reason_name = cls._finish_reason_name(reason)
+        return reason == 2 or reason_name == "SAFETY" or reason_name.endswith(".SAFETY")
 
     def _load_alternative_personalities(self):
         """Carrega personalidades alternativas do arquivo glitches.txt."""
@@ -161,7 +206,8 @@ class GeminiClient:
         logging.info(f"[Gemini] Configurando personalidade para o canal: #{channel_name}...")
         final_instruction = self._build_channel_instruction(channel_name)
 
-        new_model = genai.GenerativeModel(
+        new_model = GenAIModel(
+            genai_client,
             model_name="gemini-flash-lite-latest", 
             generation_config=self.generation_config,
             safety_settings=self.safety_settings,
@@ -480,7 +526,7 @@ class GeminiClient:
                 prompt,
                 generation_config={"temperature": 1.0, "max_output_tokens": 80},
             )
-            if response.candidates and response.candidates[0].finish_reason == 1:
+            if response.candidates and self._is_stop_finish(response.candidates[0].finish_reason):
                 text = response.text.strip().upper()
                 text = re.sub(r"\s+", " ", text)
                 return text if text else fallback
@@ -517,7 +563,7 @@ class GeminiClient:
                 generation_config={"temperature": 0.9} 
             )
             
-            if response.candidates and response.candidates[0].finish_reason == 1:
+            if response.candidates and self._is_stop_finish(response.candidates[0].finish_reason):
                 return response.text.strip()
             else:
                 return "__SAFETY_BLOCK__"
@@ -548,7 +594,7 @@ class GeminiClient:
             if not response.candidates: return None
             
             reason = response.candidates[0].finish_reason
-            if reason == 1 and response.candidates[0].content.parts:
+            if self._is_stop_finish(reason) and response.candidates[0].content.parts:
                 return response.text.strip()
             
             logging.warning(f"[Gemini] Bloqueio detectado. Reason: {reason}")
@@ -626,10 +672,10 @@ class GeminiClient:
             candidate = response.candidates[0]
             reason = candidate.finish_reason
 
-            if reason == 1:
+            if self._is_stop_finish(reason):
                 return response.text.strip()
             
-            if reason == 2:
+            if self._is_safety_finish(reason):
                 logging.warning(f"[Analysis] Bloqueio de Segurança Padrão.")
                 return "⚠️ **GL-0RP5:** *Acesso Negado.* Comentário adicional: seje menos."
 
@@ -667,10 +713,10 @@ class GeminiClient:
             candidate = response.candidates[0]
             reason = candidate.finish_reason
 
-            if reason == 1:
+            if self._is_stop_finish(reason):
                 return response.text.strip()
             
-            if reason == 2:
+            if self._is_safety_finish(reason):
                 logging.warning(f"[RPG] Bloqueio (Reason 2).")
                 return "As lendas sobre este feito são proibidas pelos Deuses do Conteúdo!"
 
