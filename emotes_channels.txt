@@ -6,8 +6,8 @@ arrival: catArrive, gachiRoll, gachiAwake
 attention: alaO, DinkDonk
 authority: POLICE, POLICE2
 bald: baldKek, Baldge
-business: Corpa, abelhoBusiness, pepeMoney, SadgeBusiness, thomeVibecode
-checking: modCheck, thomeCheck, where
+business: Corpa, abelhoBusiness, pepeMoney, SadgeBusiness, thomeVibecode, ReallyDressed
+checking: modCheck, thomeCheck, where, catAsk
 clap: thomeClap, peepoClap
 clown: thomeJoker, Paiaso, thomeRola
 cringe: DansChamp, Erm, DIESOFCRINGE, KEKsuffer, PepeCringe, thomeDecepcao
@@ -22,17 +22,17 @@ evil: Peepoevil, devious, elmoFire, Evilge, Plotge
 euphoria: thomeAhegao, gooned, kok
 fabulous: thomeFabulosa, Imaginanumateta, QUEEN
 farewell: peepoBye, peepoLeave
-fight: PepeGun, PepeFight, PepegaGun, ELPERMASSACRE, PepegaSword
+fight: PepeGun, PepeFight, PepegaGun, ELPERMASSACRE, PepegaSword, fight
 gambling: GAMBA, gambabert
-gay: 
-greeting: peepoHey, MLADY, thomeWave, Handshake, Handshakege, MMEOWDY
+gay: ?
+greeting: peepoHey, MLADY, thomeWave, Handshake, Handshakege, MMEOWDY, yo
 happy: peepoHappy, thomeFeliz, Gladge, happi, keking
 hiding: ppLurk, thomeLurk
 hope: donkPraise, thomeHope
-hype: HandsUp, LETSGO, OOOO, POGGERS
+hype: HandsUp, LETSGO, OOOO, POGGERS, POGCRAZY, thomeFatPOGCRAZY
 judge: HUHH, MadgeClap, thomeRly, arnoldHalt, ClassicO, Concerned, huh, Judging, uuh
 kiss: catKISS, KissoThome, thomeKiss, mwah
-laugh: KEKW, pepeLaugh, kekdrunk, om, QUECO, wideLaughHard, atumalaca
+laugh: KEKW, pepeLaugh, kekdrunk, om, QUECO, wideLaughHard, atumalaca, thomeFatLO, thomeFatLOL, LOL, LO, LLO, bambinocatino
 magic: catWizard, Leviosa
 mesmerized: lookUp, Looking, lookUpSmile
 mockery: peepoFinger, pepeLoser, pepeLook, thomeMimimi, AHAHA, hihi, Fiddy, xdd, WAJAJA
@@ -49,19 +49,19 @@ relief: Saved, EZ
 running: peepoRun, pepeRun, SCATTER
 sad: peepoHuggers, Pepehand, peepoSad, sadCat, Sadge, SadgeCry
 scared: Aware, COOKED, peepohide
-seduce: thomeMilos, ComeHereBoy, Flirt, GachiWink, FLEX
+seduce: thomeMilos, ComeHereBoy, Flirt, gachiWink, FLEX, thomeFatRIZZ, thomeFatMilos
 shock: AYOOO, Monkeshocked, Omaigaa, WHAt
 shy: thomeShy, FlushedCat
 sleep: Bedge, thomeMimir
-smart: PepoG, thomeSmart, weSmart, EUSABO
+smart: PepoG, thomeSmart, weSmart, EUSABO, thomeFatSmart, NOTED
 sneaky: Sneak, thomePeek
 sniffing: SNIFFA, shibaSniffa
 stare: WeirdChamp, WeirdPaper, Stare
-spinning: borpaSpin, frogSpin, monkeySpin, peepoSpin
-superiority: EZ, Sippin, BASED, GIGACHAD
-suspicion: Susge, thomeSus, catSus, sus, Sure, SUSSY
+spinning: borpaSpin, frogSpin, monkeySpin, peepoSpin, thomeFatSpin
+superiority: EZ, Sippin, BASED, GIGACHAD, ReallyCool, ReallyDressed, baseg, GIGATHOMEFAT
+suspicion: Susge, thomeSus, catSus, sus, Sure, SUSSY, ?, thomeFat?, thomeFatSUSSY
 tired: Deadge, pepeW, thomeDerretido
-thinking: monkaHmm, Thonk, Hmm, Thinkge
+thinking: monkaHmm, Thonk, Hmm, Thinkge, NOTED
 waiting: FeelsLateMan, PauseChamp, peepoSit
 [fabinho7x]
 angry: angrybird, angrybirds, angy, Madge, PISSED, Smadge
@@ -71,14 +71,14 @@ arrival: AreYouWinningSon, ARRIVE, ASSEMBLE, peepoArriveSalami
 attention: ALERT, Aloo, Dinkdonk, Oiala, wakeup
 authority: peepoPoliceStop, peePolice, hmmPolice
 bald: Baldge, baldio, BomDia, Maicabeca, maicareca
-business: BIGMONEY, CorpaArrive, Corpa
+business: BIGMONEY, CorpaArrive, Corpa, glorpa, baseg
 checking: modCheck
 clap: Clap, clappi
 clown: Paiaso, PepeClown
 cringe: WEIRD, Awkward, DIESOFCRINGE, KEKsuffer, PepeCringe
-congratulation: Clap, clappi
+congratulation: Clap, clappi, glorpCheer
 cute: peepoHug, peepoLove, peepoPat, peepoShy, peepoGiggles, SoCute
-dancing: AlienPls, BoneZone, VIBE, ankhaPls, BUSSERS, Jigglin
+dancing: AlienPls, BoneZone, VIBE, ankhaPls, BUSSERS, Jigglin, thomeFatVibe
 denial: Nono, Ew, NoThanks, NOPERS, paia, peepoPoliceStop
 dumb: dankEat, DankPuzzle, peepoPuzzle
 eating: Crunch, burgir, faboChurras, pastel, peepoFAT, Tastyge

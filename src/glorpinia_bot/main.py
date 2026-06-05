@@ -1260,7 +1260,7 @@ class TwitchIRC:
                 now = time.time()
                 if (now - self.last_oziell_time) > 1800:
                     self.last_oziell_time = now
-                    self.send_message(channel, "Olá @Fabinho7x ! Tudo bem @Fabinho7x ? Tchau @Fabinho7x !")
+                    self.send_message(channel, "Olá @oziell ? Tudo bem @oziell ? Tchau @oziell ?")
                 return 
             
             if "thomezord fiddy" in content_lower:
