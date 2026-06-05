@@ -3,7 +3,7 @@ python-dotenv
 requests
 streamlink
 
-google-generativeai
+google-genai
 google-cloud-speech
 google-api-python-client
 
