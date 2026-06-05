@@ -120,6 +120,8 @@ class LearnedIntentStore:
 
     def list_intents(self, channel: str, status: Optional[str] = None, limit: int = 8) -> List[Dict]:
         channel = self._normalize_channel(channel)
+        status_aliases = {"pending": "proposed", "approved": "active"}
+        status = status_aliases.get(status, status)
         params = [channel]
         where = "WHERE channel=?"
         if status in {"proposed", "active", "rejected"}:
@@ -148,6 +150,19 @@ class LearnedIntentStore:
 
     def reject_intent(self, channel: str, intent_name: str) -> bool:
         return self._set_status(channel, intent_name, "rejected")
+
+    def clear_intents(self, channel: str) -> int:
+        channel = self._normalize_channel(channel)
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute(
+            "DELETE FROM learned_intents WHERE channel=?",
+            (channel,),
+        )
+        changed = c.rowcount
+        conn.commit()
+        conn.close()
+        return changed
 
     def match_active_intents(self, channel: str, normalized_text: str, tokens: Optional[Iterable[str]] = None) -> List[Dict]:
         channel = self._normalize_channel(channel)
