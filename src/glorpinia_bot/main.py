@@ -759,6 +759,9 @@ class TwitchIRC:
                 parts = content.split()
                 command_raw = parts[0][1:].lower()
 
+                if not command_raw:
+                    return
+
                 if command_raw == "8ball":
                     self.social_dynamics.add_memory_loop(channel=channel, topic="previsões duvidosas do 8ball", users=[author_lower], weight=0.45)
                     question = " ".join(parts[1:])
