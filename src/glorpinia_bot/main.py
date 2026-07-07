@@ -1,6 +1,7 @@
 import os
 os.environ['GLORPINIA_ALLOW_NO_LANGCHAIN'] = '1'
 
+import unicodedata
 import time
 import logging
 import signal
