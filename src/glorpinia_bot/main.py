@@ -1411,12 +1411,17 @@ class TwitchIRC:
                         current_stream = stream_data[0] if stream_data else None
                         is_live = current_stream is not None
 
-                        if current_stream:
-                            self.live_stream_context[channel] = {
+                        if is_live:
+                            last_context = self.live_stream_context.get(channel, {})
+                            current_context = {
                                 "title": current_stream.get("title"),
                                 "category": current_stream.get("game_name"),
                                 "game_id": current_stream.get("game_id"),
                                 "started_at": current_stream.get("started_at"),
+                            }
+                            self.live_stream_context[channel] = {
+                                **last_context,
+                                **{key: value for key, value in current_context.items() if value},
                             }
                         
                         if channel not in self.live_status_initialized:
@@ -1552,8 +1557,8 @@ class TwitchIRC:
                 context_block = (
                     "\n\nÚltimo contexto conhecido da live:\n"
                     + "\n".join(context_lines)
-                    + "\nVocê pode usar isso de forma natural para frases como boa gameplay de X ou essa live de Y rendeu, "
-                    "mas não invente categoria ou título se os campos não estiverem presentes."
+                    + "\nComente sobre a categoria ou o título somente se isso soar natural na despedida "
+                    "e se esses valores existirem no contexto. Não force menções nem invente categoria ou título."
                 )
 
             prompt = (
