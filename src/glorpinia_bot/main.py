@@ -79,6 +79,7 @@ class TwitchIRC:
         self.social_dynamics = SocialDynamicsEngine()
         
         self.live_status = {} # Dicionário para guardar { 'canal': True/False }
+        self.live_stream_context = {}  # Cache com contexto da live por canal (título/categoria/etc.)
         self.live_status_initialized = set()  # Canais já observados ao menos uma vez pelo monitor
         
         # Define como True antes de iniciar a thread
@@ -1406,7 +1407,17 @@ class TwitchIRC:
                     
                     if response.status_code == 200:
                         data = response.json()
-                        is_live = len(data.get("data", [])) > 0
+                        stream_data = data.get("data", [])
+                        current_stream = stream_data[0] if stream_data else None
+                        is_live = current_stream is not None
+
+                        if current_stream:
+                            self.live_stream_context[channel] = {
+                                "title": current_stream.get("title"),
+                                "category": current_stream.get("game_name"),
+                                "game_id": current_stream.get("game_id"),
+                                "started_at": current_stream.get("started_at"),
+                            }
                         
                         if channel not in self.live_status_initialized:
                             self.live_status[channel] = is_live
@@ -1428,10 +1439,12 @@ class TwitchIRC:
                         if is_live and not was_live:
                             print(f"[Monitor] {channel} entrou AO VIVO!")
                             self.social_dynamics.reset_drama_state(channel, reason="new_stream")
-                            self._trigger_welcome_message(channel)
+                            self._trigger_welcome_message(channel, self.live_stream_context.get(channel, {}))
                         elif not is_live and was_live:
                             print(f"[Monitor] {channel} ficou OFFLINE!")
-                            self._trigger_goodbye_message(channel)
+                            last_context = self.live_stream_context.get(channel, {})
+                            self._trigger_goodbye_message(channel, last_context)
+                            self.live_stream_context.pop(channel, None)
 
                     # Tratamento de Token Expirado
                     elif response.status_code == 401:
@@ -1458,15 +1471,34 @@ class TwitchIRC:
             
             time.sleep(60)
             
-    def _trigger_welcome_message(self, channel):
+    def _trigger_welcome_message(self, channel, stream_context=None):
         """
         Gera e envia uma mensagem de 'Boas Vindas' usando a IA.
         """
         try:
+            stream_context = stream_context or {}
+            context_lines = []
+            category = stream_context.get("category")
+            title = stream_context.get("title")
+
+            if category:
+                context_lines.append(f"Categoria atual: {category}")
+            if title:
+                context_lines.append(f"Título da live: {title}")
+
+            context_block = ""
+            if context_lines:
+                context_block = (
+                    "\n\nContexto da live:\n"
+                    + "\n".join(context_lines)
+                    + "\nUse essas informações de forma natural apenas se forem úteis; não force menções."
+                )
+
             prompt = (
                 f"O streamer @{channel} acabou de iniciar a live! "
                 "Como Glorpinia, mande uma mensagem curta, empolgada e fofa desejando uma ótima stream. "
                 "Diga que estava esperando ele(a) chegar. Use emotes."
+                f"{context_block}"
             )
 
             if self.gemini_client:
@@ -1500,16 +1532,36 @@ class TwitchIRC:
             )
             self.send_message(channel, fallback_message)
     
-    def _trigger_goodbye_message(self, channel):
+    def _trigger_goodbye_message(self, channel, stream_context=None):
         """
         Gera e envia uma mensagem de despedida quando a live cai.
         """
         try:
+            stream_context = stream_context or {}
+            context_lines = []
+            category = stream_context.get("category")
+            title = stream_context.get("title")
+
+            if category:
+                context_lines.append(f"Última categoria conhecida: {category}")
+            if title:
+                context_lines.append(f"Último título conhecido: {title}")
+
+            context_block = ""
+            if context_lines:
+                context_block = (
+                    "\n\nÚltimo contexto conhecido da live:\n"
+                    + "\n".join(context_lines)
+                    + "\nVocê pode usar isso de forma natural para frases como boa gameplay de X ou essa live de Y rendeu, "
+                    "mas não invente categoria ou título se os campos não estiverem presentes."
+                )
+
             prompt = (
                 f"O streamer @{channel} acabou de encerrar a live! "
                 "Como Glorpinia, mande uma mensagem de despedida para o chat. "
                 "Diga algo como 'finalmente paz', ou que vai voltar a consertar a nave/dormir. "
                 "Seja fofa mas aliviada. Use emotes de sono ou despedida."
+                f"{context_block}"
             )
 
             if self.gemini_client:
