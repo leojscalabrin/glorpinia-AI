@@ -170,7 +170,7 @@ class GeminiClient:
         Você está em um chat da Twitch. Responda curto (até 2 frases), sem markdown, sem asteriscos e sem tags técnicas.
         Não use emotes na resposta; o sistema adiciona emote depois.
         Não exponha metadados internos, nomes de parâmetros ou probabilidades.
-        Priorize responder à intenção e ao tom da mensagem antes de qualquer ação de economia.
+        Priorize responder diretamente à mensagem e ao tom do usuário antes de qualquer ação de economia.
         Só mencione saldo/cookies/dívida quando isso for relevante para o assunto atual.
         Evite punições repetitivas em mensagens positivas ou neutras.
         Varie sua reação para não centralizar a conversa em dívida.
@@ -230,7 +230,6 @@ class GeminiClient:
         economy_context=None,
         allow_cookie_actions=False,
         bypass_cookie_penalty_cooldown=False,
-        intent_analysis=None,
     ):
         """
         Gera uma resposta. 
@@ -267,8 +266,6 @@ class GeminiClient:
         performed_search = False
         try:
             should_search = self._should_search(clean_query)
-            if intent_analysis is not None:
-                should_search = bool(intent_analysis.get("should_search_web"))
             if not skip_search and should_search:
                 optimized = self._generate_search_query(clean_query)
                 res = self.search_tool.perform_search(optimized)
@@ -307,7 +304,6 @@ class GeminiClient:
             injection_context=injection_context,
             mention_context=mention_context,
             economy_context=economy_context,
-            intent_analysis=intent_analysis,
         )
         logging.debug("[Gemini] context_injection channel=%s author=%s payload=%s", channel, author, injection_context or {})
         
@@ -325,7 +321,6 @@ class GeminiClient:
                     injection_context=injection_context,
                     mention_context=mention_context,
                     economy_context=economy_context,
-                    intent_analysis=intent_analysis,
                 )
                 generated = self._generate_safe(channel, fallback_prompt)
 
@@ -570,7 +565,7 @@ class GeminiClient:
         except:
             return "__SAFETY_BLOCK__"
 
-    def _build_final_prompt(self, rag_context, user_query, injection_context=None, mention_context=None, economy_context=None, intent_analysis=None):
+    def _build_final_prompt(self, rag_context, user_query, injection_context=None, mention_context=None, economy_context=None):
         """Monta prompt final via camada de injeção de contexto."""
         injection_context = injection_context or {}
         return build_context_prompt(
@@ -583,7 +578,6 @@ class GeminiClient:
             chat_message=user_query,
             mention_context=mention_context,
             economy_context=economy_context,
-            intent_analysis=intent_analysis,
         )
 
     def _generate_safe(self, channel, prompt):

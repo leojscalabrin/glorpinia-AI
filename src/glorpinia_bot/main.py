@@ -11,7 +11,6 @@ import requests
 import csv
 import threading
 import random
-import unicodedata
 from difflib import SequenceMatcher
 from datetime import datetime
 from collections import deque
@@ -23,8 +22,6 @@ from .gemini_client import GeminiClient
 from .memory_manager import MemoryManager
 from .emote_manager import EmoteManager
 from .narrative.social_dynamics import SocialDynamicsEngine
-from .narrative.intent_engine import IntentEngine
-from .narrative.intent_store import LearnedIntentStore
 
 from .features.comment import Comment
 from .features.listen import Listen
@@ -79,8 +76,6 @@ class TwitchIRC:
         )
         self.memory_mgr = MemoryManager()
         self.emote_manager = EmoteManager()
-        self.intent_store = LearnedIntentStore(db_path=self.memory_mgr.db_path)
-        self.intent_engine = IntentEngine(learned_intent_store=self.intent_store)
         self.social_dynamics = SocialDynamicsEngine()
         
         self.live_status = {} # Dicionário para guardar { 'canal': True/False }
@@ -93,9 +88,6 @@ class TwitchIRC:
         self.monitor_thread = threading.Thread(target=self._monitor_live_status, daemon=True)
         self.monitor_thread.start()
 
-        self.intent_review_interval_hours = self._get_intent_review_interval_hours()
-        self._intent_review_thread = threading.Thread(target=self._intent_review_loop, daemon=True)
-        self._intent_review_thread.start()
         
         # Inicializa Features
         print("[INFO] Loading features...")
@@ -116,7 +108,6 @@ class TwitchIRC:
         self.processed_message_ids = deque(maxlen=500)
         self.recent_messages = {channel: deque(maxlen=100) for channel in self.auth.channels}
         self.last_bot_message_by_channel = {}
-        self.last_intent_decay_time = 0
         
         # Cooldown timer para o trigger "oziell"
         self.last_oziell_time = 0
@@ -198,8 +189,15 @@ class TwitchIRC:
         self.channel_feature_states[channel][feature_name] = bool(state)
         self._save_channel_feature_states()
 
-    def _has_economic_intent(self, text):
-        return self.intent_engine.has_economic_intent(text)
+    def _is_economy_related(self, text):
+        normalized = (text or "").lower()
+        economy_terms = {
+            "cookie", "cookies", "biscoito", "biscoitos", "saldo", "balance",
+            "pagar", "pagamento", "transfer", "transferir", "apostar", "aposta",
+            "duel", "duelo", "slots", "ticket", "sorteio", "dívida", "divida",
+            "debt", "leaderboard", "fatking", "empire", "império", "imperio",
+        }
+        return any(term in normalized for term in economy_terms)
 
 
     def _parse_fatking_rows_from_env(self):
@@ -724,18 +722,11 @@ class TwitchIRC:
                 self.send_message(channel, "Então to indo nessa pessoal peepoHey")
                 return
             
-            intent_analysis = self.intent_engine.analyze_message(
-                channel=channel,
-                author=author,
-                content=content,
-                recent_history=list(self.recent_messages.get(channel, [])),
-            )
             self.social_dynamics.observe_message(
                 channel,
                 author,
                 content,
                 bot_nick=self.auth.bot_nick,
-                intent_analysis=intent_analysis,
             )
 
             # Salvar no Histórico Recente (Memória de Curto Prazo)
@@ -747,7 +738,6 @@ class TwitchIRC:
                 author,
             )
             self._maybe_register_recurring_memory_loop(channel, author, content)
-            self._maybe_learn_intent_proposal(channel, content, intent_analysis)
 
             # PROCESSA COMANDOS E TRIGGERS
 
@@ -846,7 +836,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *intent, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -875,7 +865,6 @@ class TwitchIRC:
                         "comment": "(Admin) Toggle comment. Ex: *comment on", 
                         "scan": "(Admin) Scan manual.",
                         "debug": "(Admin) Mostra resumo social atual (mood e drama state).",
-                        "intent": "(Admin) Gerencia intenções aprendidas. Ex: *intent list | *intent approve nome | *intent reject nome.",
                         "addcookie": "(Admin) Add cookies. Ex: *addcookie nick 100", 
                         "removecookie": "(Admin) Remove cookies. Ex: *removecookie nick 100",
                         "analysis": "Análise de um assunto, dúvidas ou resumo do chat. Ex: *analysis [pergunta específica]",
@@ -1148,7 +1137,7 @@ class TwitchIRC:
                     return
 
                 # COMANDOS DE ADMIN (Verificação)
-                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "debug", "intent"]
+                admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "debug"]
                 
                 if command_raw in admin_cmds:
                     if author.lower() in self.admin_nicks:
@@ -1223,7 +1212,7 @@ class TwitchIRC:
                             "trigger_message": content.strip(),
                             "explicit_mentions": explicit_mentions,
                         }
-                        allow_cookie_actions = intent_analysis.get("economy_relevance", 0.0) >= 0.69
+                        allow_cookie_actions = self._is_economy_related(content)
                         injection_context = self.social_dynamics.get_injection_payload(channel, author=author)
                         response_text = self.gemini_client.get_response(
                             query=content,
@@ -1235,7 +1224,6 @@ class TwitchIRC:
                             mention_context=mention_context,
                             economy_context=economy_context,
                             allow_cookie_actions=allow_cookie_actions,
-                            intent_analysis=intent_analysis,
                         )
                         
                         if response_text:
@@ -1285,253 +1273,11 @@ class TwitchIRC:
             if self.comment_feature:
                 self.comment_feature.roll_for_comment(channel, author)
             
-    def _get_intent_review_interval_hours(self):
-        """Lê o intervalo da revisão automática de intents, em horas."""
-        raw_value = os.getenv("INTENT_REVIEW_INTERVAL_HOURS", "24")
-        try:
-            interval = float(raw_value)
-            if interval <= 0:
-                raise ValueError("intervalo deve ser positivo")
-            return interval
-        except (TypeError, ValueError):
-            logging.warning(
-                "[IntentReview] INTENT_REVIEW_INTERVAL_HOURS inválido (%r). Usando fallback de 24h.",
-                raw_value,
-            )
-            return 24.0
-
-    def _normalize_intent_review_text(self, value):
-        """Normaliza texto para comparações determinísticas de revisão."""
-        normalized = unicodedata.normalize("NFKD", str(value or ""))
-        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-        return normalized.lower().strip()
-
-    def _intent_review_tokens(self, value):
-        """Extrai tokens alfanuméricos usados nas regras de bloqueio."""
-        return re.findall(r"[a-z0-9]+", self._normalize_intent_review_text(value))
-
-    def _should_reject_intent(self, intent: dict) -> bool:
-        """Retorna True quando um intent deve ser rejeitado automaticamente."""
-        profanity_words = {
-            "arrombado", "bosta", "buceta", "caralho", "cu", "cuzão", "cuzao",
-            "desgraçado", "desgracado", "foda", "foder", "fodase", "foda-se",
-            "merda", "porra", "puta", "puto", "vadia", "vagabunda", "vagabundo",
-            "asshole", "bastard", "bitch", "bullshit", "cunt", "damn", "dick",
-            "fuck", "fucker", "fucking", "motherfucker", "piss", "shit", "slut",
-            "whore",
-        }
-        moderation_terms = {
-            "ban", "unban", "mod", "timeout", "slow", "subscribers", "emoteonly",
-            "clear", "host", "raid",
-        }
-        registered_commands = {
-            "8ball", "cookie", "balance", "empire", "leaderboard", "fatking",
-            "slots", "duel", "ticket", "sorteio", "transfer", "fortune", "roll",
-            "bald", "debt", "analysis", "chat", "listen", "comment", "scan",
-            "debug", "intent", "check", "commands", "help",
-        }
-
-        intent_name = intent.get("intent_name", "")
-        keywords = intent.get("keywords") or []
-        if not isinstance(keywords, list):
-            keywords = [keywords]
-
-        profanity_tokens = set()
-        for value in [intent_name] + keywords:
-            profanity_tokens.update(self._intent_review_tokens(value))
-        normalized_profanity = {self._normalize_intent_review_text(word) for word in profanity_words}
-        if profanity_tokens & normalized_profanity:
-            return True
-
-        intent_tokens = set(self._intent_review_tokens(intent_name))
-        normalized_intent_name = self._normalize_intent_review_text(intent_name)
-        compact_intent_name = re.sub(r"[^a-z0-9]", "", normalized_intent_name)
-
-        if intent_tokens & moderation_terms:
-            return True
-
-        if compact_intent_name in registered_commands or normalized_intent_name.lstrip("!*/.") in registered_commands:
-            return True
-
-        return False
-
-    def _run_intent_review(self):
-        """Revisa intents pendentes/propostos por canal sem acionar chat ou IA externa."""
-        if not getattr(self, "intent_store", None):
-            logging.warning("[IntentReview] intent_store indisponível; revisão ignorada.")
-            return
-
-        for channel in getattr(self.auth, "channels", []):
-            reviewed = 0
-            approved = 0
-            rejected = 0
-            try:
-                intents = self.intent_store.list_intents(channel, status="pending", limit=1000)
-                for intent in intents:
-                    intent_name = intent.get("intent_name")
-                    if not intent_name:
-                        continue
-
-                    reviewed += 1
-                    if self._should_reject_intent(intent):
-                        if self.intent_store.reject_intent(channel, intent_name):
-                            rejected += 1
-                    else:
-                        if self.intent_store.approve_intent(channel, intent_name):
-                            approved += 1
-
-                logging.info(
-                    "[IntentReview] canal=%s revisados=%d aprovados=%d rejeitados=%d.",
-                    channel,
-                    reviewed,
-                    approved,
-                    rejected,
-                )
-            except Exception as e:
-                logging.error("[IntentReview] Falha ao revisar canal=%s: %s", channel, e)
-
-    def _intent_review_loop(self):
-        """Thread daemon que executa a revisão automática no intervalo configurado."""
-        logging.info(
-            "[IntentReview] Thread iniciada com intervalo de %.2fh.",
-            self.intent_review_interval_hours,
-        )
-        while self.running:
-            self._run_intent_review()
-            time.sleep(self.intent_review_interval_hours * 3600)
-
-    def _maybe_learn_intent_proposal(self, channel, content, intent_analysis):
-        if not getattr(self, "intent_store", None):
-            return
-
-        try:
-            proposal = self.intent_store.propose_from_interaction(channel, content, intent_analysis)
-            if proposal:
-                logging.debug(
-                    "[IntentStore] proposal channel=%s intent=%s status=%s confidence=%.3f",
-                    channel,
-                    proposal.get("intent_name"),
-                    proposal.get("status"),
-                    proposal.get("confidence", 0.0),
-                )
-
-            now = time.time()
-            if now - self.last_intent_decay_time > 3600:
-                self.intent_store.apply_confidence_decay(channel)
-                self.last_intent_decay_time = now
-        except Exception as e:
-            logging.error("[IntentStore] Falha ao aprender proposta de intenção: %s", e)
-
-    def _handle_intent_admin_command(self, parts, channel, requester=None):
-        if not getattr(self, "intent_store", None):
-            self.send_message(channel, "glorp Sistema de intenções indisponível.")
-            return
-
-        status_aliases = {
-            "pending": "proposed",
-            "proposed": "proposed",
-            "approved": "active",
-            "active": "active",
-            "rejected": "rejected",
-        }
-
-        if len(parts) < 2 or parts[1].lower() == "list":
-            target_channel = channel
-            status = None
-            for token in parts[2:]:
-                normalized_token = token.strip().lower()
-                if normalized_token in status_aliases and status is None:
-                    status = status_aliases[normalized_token]
-                elif target_channel == channel:
-                    target_channel = token.strip()
-
-            intents = self.intent_store.list_intents(target_channel, status=status)
-            if not intents:
-                self.send_message(channel, "glorp Nenhuma intenção aprendida encontrada.")
-                return
-
-            chunks = []
-            for item in intents:
-                keywords = ",".join(item.get("keywords", [])[:3]) or "sem_keywords"
-                chunks.append(
-                    f"{item['intent_name']} [{item['status']} {item['confidence']:.2f}] {keywords}"
-                )
-            formatted_list = "Intenções aprendidas: " + " | ".join(chunks)
-            logging.info(
-                "[IntentStore] Lista de intenções channel=%s status=%s: %s",
-                target_channel,
-                status or "todos",
-                formatted_list,
-            )
-            self.send_message(channel, "glorp Lista de intenções impressa nos logs.")
-            return
-
-        action = parts[1].lower()
-        if action == "clear":
-            changed = self.intent_store.clear_intents(channel)
-            self.send_message(channel, f"glorp {changed} intenções removidas.")
-            return
-
-        if action not in {"approve", "reject"} or len(parts) < 3:
-            self.send_message(
-                channel,
-                "glorp Uso: *intent list [canal|status] | *intent approve nome... | *intent reject nome... | *intent clear",
-            )
-            return
-
-        if action == "approve":
-            update_intent = self.intent_store.approve_intent
-            singular_verb = "aprovada"
-            plural_label = "Aprovados"
-            count_label = "aprovadas"
-        else:
-            update_intent = self.intent_store.reject_intent
-            singular_verb = "rejeitada"
-            plural_label = "Rejeitados"
-            count_label = "rejeitadas"
-
-        targets = [target.strip() for target in parts[2:] if target.strip()]
-        if len(targets) == 1 and targets[0].lower() == "all":
-            intents = self.intent_store.list_intents(channel, limit=1000)
-            changed = 0
-            for item in intents:
-                if update_intent(channel, item["intent_name"]):
-                    changed += 1
-            self.send_message(channel, f"glorp {changed} intenções {count_label}.")
-            return
-
-        found = []
-        missing = []
-        for intent_name in targets:
-            if update_intent(channel, intent_name):
-                found.append(intent_name)
-            else:
-                missing.append(intent_name)
-
-        if len(targets) == 1:
-            intent_name = targets[0]
-            if found:
-                self.send_message(channel, f"glorp Intenção {intent_name} {singular_verb}.")
-            else:
-                self.send_message(channel, f"glorp Intenção {intent_name} não encontrada.")
-            return
-
-        response_parts = []
-        if found:
-            response_parts.append(f"{plural_label}: {', '.join(found)}.")
-        if missing:
-            response_parts.append(f"Não encontrados: {', '.join(missing)}.")
-        self.send_message(channel, "glorp " + " ".join(response_parts))
-
     def handle_admin_command(self, command, channel, author=None):
         """Processa comandos de admin."""
         parts = command.split()
         command_name = parts[0][1:].lower()
 
-        if command_name == "intent":
-            self._handle_intent_admin_command(parts, channel)
-            return
-        
         # Comandos sem argumento (*check) -> len 1
         if len(parts) == 1:
             if command_name == "check":
@@ -1541,7 +1287,7 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, fatking, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], transfer [origem] [destino] [valor], check, scan, debug, intent")
+                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, fatking, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], transfer [origem] [destino] [valor], check, scan, debug")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)

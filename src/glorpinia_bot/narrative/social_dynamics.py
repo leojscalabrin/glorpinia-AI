@@ -96,7 +96,7 @@ class SocialDynamicsEngine:
         self.channel_states[channel_key] = state
         return state
 
-    def observe_message(self, channel: str, author: str, content: str, bot_nick: Optional[str] = None, intent_analysis: Optional[Dict[str, object]] = None):
+    def observe_message(self, channel: str, author: str, content: str, bot_nick: Optional[str] = None):
         state = self._get_channel_state(channel)
         self._maybe_reset_drama_for_interval(state, channel)
 
@@ -108,12 +108,12 @@ class SocialDynamicsEngine:
             for loop in state.memory_loops:
                 loop.weight *= 0.97
 
-        self._update_user_profile(state, channel=channel, author=author, content=content, intent_analysis=intent_analysis)
+        self._update_user_profile(state, channel=channel, author=author, content=content)
         self._prune_loops(state, channel=channel)
         self._prune_user_profiles(state, channel=channel)
         self._roll_memory_loop(state)
         self._roll_drama_events(state, author)
-        self._update_mood(state, author=author, content=content, bot_nick=bot_nick, intent_analysis=intent_analysis)
+        self._update_mood(state, author=author, content=content, bot_nick=bot_nick)
 
     def reset_drama_state(self, channel: str, reason: str = "manual"):
         state = self._get_channel_state(channel)
@@ -241,7 +241,7 @@ class SocialDynamicsEngine:
             return
         state.drama_state["rivals"] = None
 
-    def _update_mood(self, state: ChannelSocialState, author: str, content: str, bot_nick: Optional[str] = None, intent_analysis: Optional[Dict[str, object]] = None):
+    def _update_mood(self, state: ChannelSocialState, author: str, content: str, bot_nick: Optional[str] = None):
         text = (content or "").lower().strip()
         lowered_author = (author or "").lower()
         bot_aliases = {"glorpinia", "glorp", (bot_nick or "").lower().strip()}
@@ -259,7 +259,6 @@ class SocialDynamicsEngine:
             text=text,
             author=lowered_author,
             bot_aliases=bot_aliases,
-            intent_analysis=intent_analysis,
         )
 
         if mood_event:
@@ -274,7 +273,7 @@ class SocialDynamicsEngine:
         state.bot_state["remaining_messages"] = 0
         logging.debug("[SocialDynamics] mood_state=%s", state.bot_state)
 
-    def _infer_contextual_mood_event(self, text: str, author: str, bot_aliases: set, intent_analysis: Optional[Dict[str, object]] = None):
+    def _infer_contextual_mood_event(self, text: str, author: str, bot_aliases: set):
         if not text:
             return None
 
@@ -289,21 +288,6 @@ class SocialDynamicsEngine:
         mentions_bot = any(alias and (f"@{alias}" in text or alias in text) for alias in bot_aliases)
         second_person = any(token in text for token in ["vc", "você", "tu", "teu", "tua", "sua", "seu", "te "])
         direct_to_bot = mentions_bot or second_person
-
-        if intent_analysis:
-            emotion = (intent_analysis.get("emotion") or "").strip().lower()
-            confidence = float(intent_analysis.get("confidence") or 0.0)
-            if confidence >= 0.55:
-                if direct_to_bot and emotion == "anger":
-                    return "angry"
-                if direct_to_bot and emotion == "joy":
-                    return "happy"
-                if mentions_bot and emotion == "curiosity":
-                    return "curious"
-                if emotion == "chaos":
-                    return "chaotic"
-                if emotion == "tsundere":
-                    return "tsundere"
 
         if direct_to_bot and any(token in text for token in rude_tokens):
             return "angry"
@@ -331,7 +315,6 @@ class SocialDynamicsEngine:
         channel: str,
         author: str,
         content: str,
-        intent_analysis: Optional[Dict[str, object]] = None,
     ):
         user_key = self._normalize_author(author)
         if not user_key:
@@ -340,23 +323,25 @@ class SocialDynamicsEngine:
         profile = state.user_profiles.get(user_key) or UserSocialProfile(last_updated_message=state.message_count)
         self._decay_user_profile(profile, state.message_count)
 
-        analysis = intent_analysis or {}
-        sentiment = (analysis.get("sentiment") or "neutral").strip().lower()
-        emotion = (analysis.get("emotion") or "neutral").strip().lower()
-        primary_intent = (analysis.get("primary_intent") or "chat").strip().lower()
-        confidence = float(analysis.get("confidence") or 0.0)
-
-        if sentiment == "positive" or primary_intent == "praise":
-            profile.positive_interactions += max(0.45, confidence)
-        elif sentiment == "negative" or primary_intent == "complaint":
-            profile.negative_interactions += max(0.35, confidence)
-        elif emotion in {"joy", "tsundere", "chaos"}:
+        text = (content or "").lower()
+        positive_markers = ["boa", "mandou bem", "linda", "fofa", "gênia", "genia", "braba", "te amo", "arrasou"]
+        negative_markers = ["burra", "burro", "idiota", "lixo", "inutil", "inútil", "calada", "cala boca", "bot ruim"]
+        if any(marker in text for marker in positive_markers):
+            profile.positive_interactions += 0.45
+            emotion = "joy"
+        elif any(marker in text for marker in negative_markers):
+            profile.negative_interactions += 0.35
+            emotion = "anger"
+        elif re.search(r"\b(caos|anarquia|glitch)\b", text):
             profile.positive_interactions += 0.15
-        elif emotion in {"anger", "sadness"}:
-            profile.negative_interactions += 0.15
+            emotion = "chaos"
+        elif "?" in text:
+            emotion = "curiosity"
+        else:
+            emotion = "neutral"
 
         profile.last_emotion = self._safe_emotion_label(emotion)
-        profile.teasing_style = self._infer_teasing_style(content=content, intent_analysis=analysis)
+        profile.teasing_style = self._infer_teasing_style(content=content)
         profile.trusted_joke_level = self._calculate_trusted_joke_level(profile)
         profile.last_updated_message = state.message_count
         state.user_profiles[user_key] = profile
@@ -381,24 +366,24 @@ class SocialDynamicsEngine:
         profile.negative_interactions *= decay
         profile.trusted_joke_level *= decay
 
-    def _infer_teasing_style(self, content: str, intent_analysis: Dict[str, object]) -> str:
+    def _infer_teasing_style(self, content: str) -> str:
         """Classify style from safe signals only; never persist literal message text."""
         text = (content or "").lower()
-        sentiment = (intent_analysis.get("sentiment") or "neutral").strip().lower()
-        emotion = (intent_analysis.get("emotion") or "neutral").strip().lower()
-        primary_intent = (intent_analysis.get("primary_intent") or "chat").strip().lower()
-
         has_laughter = bool(re.search(r"\b(k{2,}|kkk+|rsrs+|haha+)\b", text))
         has_teasing_marker = any(
             marker in text
             for marker in ["zoeira", "zoando", "brincadeira", "ironia", "sarcasmo", "provoca", "provocar"]
         )
-        if has_teasing_marker or (has_laughter and (sentiment == "negative" or emotion in {"anger", "tsundere"})):
+        if has_teasing_marker or has_laughter:
             return "provocative"
-        if sentiment == "positive" or primary_intent == "praise":
+        if any(marker in text for marker in ["boa", "mandou bem", "linda", "fofa", "gênia", "genia", "braba", "te amo", "arrasou"]):
             return "supportive"
-        if emotion in {"curiosity", "chaos", "tsundere"}:
-            return emotion
+        if "?" in text:
+            return "curiosity"
+        if re.search(r"\b(caos|anarquia|glitch)\b", text):
+            return "chaos"
+        if re.search(r"\btsundere\b", text):
+            return "tsundere"
         return "neutral"
 
     def _calculate_trusted_joke_level(self, profile: UserSocialProfile) -> float:
