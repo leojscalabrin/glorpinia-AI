@@ -228,6 +228,7 @@ class GeminiClient:
         injection_context=None,
         mention_context=None,
         economy_context=None,
+        live_context=None,
         allow_cookie_actions=False,
         bypass_cookie_penalty_cooldown=False,
     ):
@@ -304,8 +305,15 @@ class GeminiClient:
             injection_context=injection_context,
             mention_context=mention_context,
             economy_context=economy_context,
+            live_context=live_context,
         )
-        logging.debug("[Gemini] context_injection channel=%s author=%s payload=%s", channel, author, injection_context or {})
+        logging.debug(
+            "[Gemini] context_injection channel=%s author=%s payload=%s live_context=%s",
+            channel,
+            author,
+            injection_context or {},
+            bool(live_context),
+        )
         
         try:
             # 1. TENTATIVA NORMAL
@@ -321,6 +329,7 @@ class GeminiClient:
                     injection_context=injection_context,
                     mention_context=mention_context,
                     economy_context=economy_context,
+                    live_context=live_context,
                 )
                 generated = self._generate_safe(channel, fallback_prompt)
 
@@ -565,7 +574,15 @@ class GeminiClient:
         except:
             return "__SAFETY_BLOCK__"
 
-    def _build_final_prompt(self, rag_context, user_query, injection_context=None, mention_context=None, economy_context=None):
+    def _build_final_prompt(
+        self,
+        rag_context,
+        user_query,
+        injection_context=None,
+        mention_context=None,
+        economy_context=None,
+        live_context=None,
+    ):
         """Monta prompt final via camada de injeção de contexto."""
         injection_context = injection_context or {}
         return build_context_prompt(
@@ -578,6 +595,7 @@ class GeminiClient:
             chat_message=user_query,
             mention_context=mention_context,
             economy_context=economy_context,
+            live_context=live_context,
         )
 
     def _generate_safe(self, channel, prompt):

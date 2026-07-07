@@ -74,7 +74,8 @@ class EightBall:
                 channel=channel,
                 author=author,
                 memory_mgr=self.bot.memory_mgr,
-                skip_search=True
+                skip_search=True,
+                live_context=self.bot.get_live_context(channel)
             )
 
             # Envia a resposta

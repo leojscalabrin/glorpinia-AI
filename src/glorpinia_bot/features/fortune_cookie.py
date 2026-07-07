@@ -90,7 +90,8 @@ class FortuneCookie:
                 channel=channel,
                 author=author,
                 memory_mgr=self.bot.memory_mgr,
-                skip_search=True # Não precisa pesquisar no Google para inventar uma sorte
+                skip_search=True, # Não precisa pesquisar no Google para inventar uma sorte
+                live_context=self.bot.get_live_context(channel)
             )
 
             if response:
