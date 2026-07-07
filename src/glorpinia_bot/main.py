@@ -812,7 +812,11 @@ class TwitchIRC:
                         
                         try:
                             comment = self.gemini_client.get_response(
-                                empire_query, channel, "system", self.memory_mgr
+                                empire_query,
+                                channel,
+                                "system",
+                                self.memory_mgr,
+                                live_context=self.get_live_context(channel),
                             )
                             if comment:
                                 self.send_message(channel, f"O império já arrecadou {count}🍪 EZ Clap {comment}")
@@ -912,7 +916,13 @@ class TwitchIRC:
                     )
                     short_comment = "com potencial aerodinâmico em desenvolvimento."
                     try:
-                        ai_comment = self.gemini_client.get_response(prompt, channel, "system", self.memory_mgr)
+                        ai_comment = self.gemini_client.get_response(
+                            prompt,
+                            channel,
+                            "system",
+                            self.memory_mgr,
+                            live_context=self.get_live_context(channel),
+                        )
                         if ai_comment:
                             short_comment = ai_comment.strip().replace("\n", " ")
                     except Exception:
@@ -1215,6 +1225,7 @@ class TwitchIRC:
                         }
                         allow_cookie_actions = self._is_economy_related(content)
                         injection_context = self.social_dynamics.get_injection_payload(channel, author=author)
+                        live_context = self.get_live_context(channel)
                         response_text = self.gemini_client.get_response(
                             query=content,
                             channel=channel, 
@@ -1224,6 +1235,7 @@ class TwitchIRC:
                             injection_context=injection_context,
                             mention_context=mention_context,
                             economy_context=economy_context,
+                            live_context=live_context,
                             allow_cookie_actions=allow_cookie_actions,
                         )
                         
@@ -1387,6 +1399,49 @@ class TwitchIRC:
         """Retorna True se o bot estiver com WebSocket conectado à Twitch."""
         return bool(self.ws and self.ws.sock and self.ws.sock.connected)
 
+    def _build_live_context(self, stream_data):
+        """Normaliza todos os campos retornados pela Twitch para contexto de baixa prioridade."""
+        fields = {
+            key: value
+            for key, value in (stream_data or {}).items()
+            if value is not None and value != ""
+        }
+
+        return {
+            "fields": fields,
+            "instruction": (
+                "Contexto de baixa prioridade: use título, categoria/jogo, tags, espectadores ou outros campos "
+                "apenas se encaixarem naturalmente na resposta. Não force o assunto da live, não cite como ficha "
+                "técnica e não deixe esse contexto se sobrepor à mensagem do usuário."
+            ),
+        }
+
+    def get_live_context(self, channel):
+        """Retorna contexto da live somente enquanto o canal está online."""
+        if not self.live_status.get(channel, False):
+            return None
+        return self.live_stream_context.get(channel)
+
+    def _format_live_context_for_prompt(self, live_context):
+        """Formata o contexto da live para prompts sem transformar em obrigação de resposta."""
+        if not live_context:
+            return ""
+
+        fields = live_context.get("fields", {})
+        context_lines = [
+            f"- {key}: {value}"
+            for key, value in fields.items()
+            if value is not None and value != ""
+        ]
+        if not context_lines:
+            return ""
+
+        return (
+            "\n\nContexto atual da live (baixa prioridade, use só se encaixar naturalmente):\n"
+            + "\n".join(context_lines)
+            + "\nNão force menções a esses dados; use apenas como pano de fundo.\n"
+        )
+
     def _monitor_live_status(self):
         """
         Thread secundário que verifica a cada 60s se os canais estão online.
@@ -1412,17 +1467,7 @@ class TwitchIRC:
                         is_live = current_stream is not None
 
                         if is_live:
-                            last_context = self.live_stream_context.get(channel, {})
-                            current_context = {
-                                "title": current_stream.get("title"),
-                                "category": current_stream.get("game_name"),
-                                "game_id": current_stream.get("game_id"),
-                                "started_at": current_stream.get("started_at"),
-                            }
-                            self.live_stream_context[channel] = {
-                                **last_context,
-                                **{key: value for key, value in current_context.items() if value},
-                            }
+                            self.live_stream_context[channel] = self._build_live_context(current_stream)
                         
                         if channel not in self.live_status_initialized:
                             self.live_status[channel] = is_live
@@ -1444,7 +1489,7 @@ class TwitchIRC:
                         if is_live and not was_live:
                             print(f"[Monitor] {channel} entrou AO VIVO!")
                             self.social_dynamics.reset_drama_state(channel, reason="new_stream")
-                            self._trigger_welcome_message(channel, self.live_stream_context.get(channel, {}))
+                            self._trigger_welcome_message(channel, self.get_live_context(channel))
                         elif not is_live and was_live:
                             print(f"[Monitor] {channel} ficou OFFLINE!")
                             last_context = self.live_stream_context.get(channel, {})
@@ -1481,29 +1526,13 @@ class TwitchIRC:
         Gera e envia uma mensagem de 'Boas Vindas' usando a IA.
         """
         try:
-            stream_context = stream_context or {}
-            context_lines = []
-            category = stream_context.get("category")
-            title = stream_context.get("title")
-
-            if category:
-                context_lines.append(f"Categoria atual: {category}")
-            if title:
-                context_lines.append(f"Título da live: {title}")
-
-            context_block = ""
-            if context_lines:
-                context_block = (
-                    "\n\nContexto da live:\n"
-                    + "\n".join(context_lines)
-                    + "\nUse essas informações de forma natural apenas se forem úteis; não force menções."
-                )
+            context_block = self._format_live_context_for_prompt(stream_context)
 
             prompt = (
                 f"O streamer @{channel} acabou de iniciar a live! "
-                "Como Glorpinia, mande uma mensagem curta, empolgada e fofa desejando uma ótima stream. "
-                "Diga que estava esperando ele(a) chegar. Use emotes."
                 f"{context_block}"
+                "Como Glorpinia, mande uma mensagem curta, empolgada e fofa desejando uma ótima stream. "
+                "Diga que estava esperando ele(a) chegar. Use detalhes da live só se combinarem naturalmente. Use emotes."
             )
 
             if self.gemini_client:
@@ -1542,31 +1571,15 @@ class TwitchIRC:
         Gera e envia uma mensagem de despedida quando a live cai.
         """
         try:
-            stream_context = stream_context or {}
-            context_lines = []
-            category = stream_context.get("category")
-            title = stream_context.get("title")
-
-            if category:
-                context_lines.append(f"Última categoria conhecida: {category}")
-            if title:
-                context_lines.append(f"Último título conhecido: {title}")
-
-            context_block = ""
-            if context_lines:
-                context_block = (
-                    "\n\nÚltimo contexto conhecido da live:\n"
-                    + "\n".join(context_lines)
-                    + "\nComente sobre a categoria ou o título somente se isso soar natural na despedida "
-                    "e se esses valores existirem no contexto. Não force menções nem invente categoria ou título."
-                )
+            context_block = self._format_live_context_for_prompt(stream_context)
 
             prompt = (
                 f"O streamer @{channel} acabou de encerrar a live! "
+                f"{context_block}"
                 "Como Glorpinia, mande uma mensagem de despedida para o chat. "
                 "Diga algo como 'finalmente paz', ou que vai voltar a consertar a nave/dormir. "
+                "Se usar detalhes da live encerrada, faça isso só se soar natural. "
                 "Seja fofa mas aliviada. Use emotes de sono ou despedida."
-                f"{context_block}"
             )
 
             if self.gemini_client:

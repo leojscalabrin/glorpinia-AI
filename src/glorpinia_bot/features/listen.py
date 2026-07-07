@@ -243,7 +243,8 @@ class Listen:
                 author="system",
                 memory_mgr=memory_mgr,
                 skip_search=True,
-                allow_cookie_actions=True
+                allow_cookie_actions=True,
+                live_context=self.bot.get_live_context(channel)
             )
             
             if 0 < len(comment) <= 200:

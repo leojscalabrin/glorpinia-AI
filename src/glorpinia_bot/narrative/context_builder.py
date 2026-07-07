@@ -58,6 +58,7 @@ def build_context_prompt(
     chat_message: str,
     mention_context: Optional[Dict[str, object]] = None,
     economy_context: Optional[Dict[str, object]] = None,
+    live_context: Optional[Dict[str, object]] = None,
 ) -> str:
     required_blocks = []
     auxiliary_blocks = []
@@ -126,6 +127,27 @@ def build_context_prompt(
             f"{instruction or 'Use saldo apenas quando for relevante para a mensagem.'}"
         )
         auxiliary_blocks.append(economy_block)
+
+    if live_context is not None:
+        fields = live_context.get("fields") if isinstance(live_context.get("fields"), dict) else live_context
+        field_lines = []
+        for key, value in fields.items():
+            if value is None or value == "":
+                continue
+            field_lines.append(f"{key}: {value}")
+
+        if field_lines:
+            instruction = (live_context.get("instruction") or "").strip()
+            live_block = (
+                "[SISTEMA: CONTEXTO DA LIVE ATUAL (PRIORIDADE BAIXA)]\n"
+                + "\n".join(field_lines)
+                + "\n"
+                + (
+                    instruction
+                    or "Use apenas como pano de fundo se combinar naturalmente com a conversa; não force assunto de live."
+                )
+            )
+            auxiliary_blocks.append(live_block)
 
     blocks = list(required_blocks)
     _append_auxiliary_blocks(blocks, auxiliary_blocks)

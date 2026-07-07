@@ -72,7 +72,8 @@ class TarotReader:
                 query=prompt,
                 channel=channel,
                 author="system", 
-                skip_search=True 
+                skip_search=True,
+                live_context=self.bot.get_live_context(channel)
             )
 
             if response:

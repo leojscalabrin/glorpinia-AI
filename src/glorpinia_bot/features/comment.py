@@ -141,6 +141,7 @@ class Comment:
                 allow_cookie_actions=True,
                 bypass_cookie_penalty_cooldown=True,
                 injection_context=injection_context,
+                live_context=self.bot.get_live_context(channel),
             )
 
             if 0 < len(comment) <= 350:
