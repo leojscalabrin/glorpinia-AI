@@ -169,6 +169,35 @@ class EmoteManager:
     def _normalize_token(self, token):
         return token.strip(".,!?;:()[]{}\"'`*_~").strip()
 
+    def load_from_seventv(self, channel, emotes_by_emotion):
+        """
+        Injeta emotes buscados/classificados via 7TV (emote_classifier.py)
+        nos mapas existentes
+
+        channel=None -> alimenta o mapa global (self.global_emote_map).
+        channel="nome" -> alimenta self.channel_emote_map[channel].
+        """
+        if channel is None:
+            target = self.global_emote_map
+        else:
+            normalized = channel.lower()
+            target = self.channel_emote_map.setdefault(normalized, {})
+
+        for emotion, names in emotes_by_emotion.items():
+            existing = target.setdefault(emotion, [])
+            seen = set(existing)
+            for name in names:
+                if name not in seen:
+                    existing.append(name)
+                    seen.add(name)
+
+        logging.info(
+            "[Emote][7TV] load_from_seventv channel=%s categorias=%s total_emotes=%s",
+            channel or "global",
+            len(emotes_by_emotion),
+            sum(len(v) for v in emotes_by_emotion.values()),
+        )
+
     def get_all_emotes(self):
         pool = set()
         for values in self.global_emote_map.values():

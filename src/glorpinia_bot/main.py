@@ -35,6 +35,7 @@ from .features.analysis import AnalysisMode
 from .features.tarot import TarotReader
 from .features.rpg_roll import RPGRollFeature
 from .features.seventv_emote import SevenTVEmote
+from .seventv_channel_sync import SevenTVChannelSync
 
 log_level_name = os.getenv("GLORPINIA_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -100,6 +101,7 @@ class TwitchIRC:
         self.cookie_system = CookieSystem(self)
         self.eight_ball_feature = EightBall(self)
         self.seventv_emote_feature = SevenTVEmote(self)
+        self.seventv_channel_sync = SevenTVChannelSync(self)
         self.fortune_cookie_feature = FortuneCookie(self)
         self.slots_feature = Slots(self)
         self.gemini_client.set_cookie_system(self.cookie_system)
@@ -127,6 +129,13 @@ class TwitchIRC:
         
         # Validação inicial do Token
         self.auth.validate_and_refresh_token()
+
+        # Sincroniza emotes 7TV
+        self.seventv_channel_sync.sync_global_async()
+        for ch in self.auth.channels:
+            self.seventv_channel_sync.sync_channel_async(ch)
+
+        signal.signal(signal.SIGINT, self.handle_exit)
         
         signal.signal(signal.SIGINT, self.handle_exit)
         signal.signal(signal.SIGTERM, self.handle_exit)
@@ -202,7 +211,6 @@ class TwitchIRC:
             "debt", "leaderboard", "fatking", "empire", "império", "imperio",
         }
         return any(term in normalized for term in economy_terms)
-
 
     def _parse_fatking_rows_from_env(self):
         """Lê dados do leaderboard a partir de uma planilha pública configurada no .env."""
@@ -1155,6 +1163,13 @@ class TwitchIRC:
                     self.send_message(channel, f"@{author}, uso: *transfer @alvo valor | (admin) *transfer @origem @destino valor")
                     return
 
+                if command_raw == "emotesync":
+                    if author.lower() not in self.admin_nicks:
+                        return
+                    self.seventv_channel_sync.sync_channel_async(channel, force=True)
+                    self.send_message(channel, "glorp Sincronizando emotes do 7TV...")
+                    return
+                
                 # COMANDOS DE ADMIN (Verificação)
                 admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "debug"]
                 
