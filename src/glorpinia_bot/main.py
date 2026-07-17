@@ -34,6 +34,7 @@ from .features.slots import Slots
 from .features.analysis import AnalysisMode
 from .features.tarot import TarotReader
 from .features.rpg_roll import RPGRollFeature
+from .features.seventv_emote import SevenTVEmote
 
 log_level_name = os.getenv("GLORPINIA_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -98,6 +99,7 @@ class TwitchIRC:
         self.training_logger = TrainingLogger(self)
         self.cookie_system = CookieSystem(self)
         self.eight_ball_feature = EightBall(self)
+        self.seventv_emote_feature = SevenTVEmote(self)
         self.fortune_cookie_feature = FortuneCookie(self)
         self.slots_feature = Slots(self)
         self.gemini_client.set_cookie_system(self.cookie_system)
@@ -763,6 +765,10 @@ class TwitchIRC:
                     self.eight_ball_feature.get_8ball_response(question, channel, author)
                     return
                 
+                if command_raw == "emote":
+                    self.seventv_emote_feature.get_random_emote(channel, author)
+                    return
+                
                 if command_raw == "cookie":
                     if self.fortune_cookie_feature:
                         self.fortune_cookie_feature.get_fortune(channel, author)
@@ -842,7 +848,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *emote, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -878,7 +884,8 @@ class TwitchIRC:
                         "fortune": "Tire uma leitura do seu arcano",
                         "roll": "Rolar um D20 para RPG com narração temática. Ex: *roll [ação desejada]",
                         "bald": "Mede o nível de calvície de alguém. Ex: *bald [nick]",
-                        "debt": "Veja os maiores devedores do império (quem deve mais cookies)."
+                        "debt": "Veja os maiores devedores do império (quem deve mais cookies).",
+                        "emote": "Puxa um emote aleatório do 7TV."
                     }
                     self.send_message(channel, help_msg.get(cmd_target, "glorp Comando desconhecido."))
                     return
