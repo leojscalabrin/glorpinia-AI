@@ -8,7 +8,8 @@ from .emote_classifier import classify_emote_name
 
 TWITCH_USERS_URL = "https://api.twitch.tv/helix/users"
 SEVENTV_USER_URL = "https://7tv.io/v3/users/twitch/{twitch_id}"
-SEVENTV_GLOBAL_SET_URL = "https://7tv.io/v3/emote-sets/62cdd34e72a832540de95857"
+SEVENTV_GLOBAL_ALIAS_URL = "https://7tv.io/v3/emote-sets/global"
+SEVENTV_GLOBAL_SET_FALLBACK_ID = "62cdd34e72a832540de95857"
 
 REFRESH_INTERVAL_SECONDS = 6 * 60 * 60  # 6h
 
@@ -72,8 +73,16 @@ class SevenTVChannelSync:
         return [e["name"] for e in emotes if e.get("name")]
 
     def _fetch_global_emote_names(self):
-        r = requests.get(SEVENTV_GLOBAL_SET_URL, timeout=10)
-        r.raise_for_status()
+        try:
+            r = requests.get(SEVENTV_GLOBAL_ALIAS_URL, timeout=10)
+            r.raise_for_status()
+        except requests.exceptions.HTTPError:
+            logging.info("[SevenTVSync] Alias 'global' falhou, tentando ID fixo de fallback.")
+            r = requests.get(
+                f"https://7tv.io/v3/emote-sets/{SEVENTV_GLOBAL_SET_FALLBACK_ID}", timeout=10
+            )
+            r.raise_for_status()
+
         data = r.json()
         emotes = data.get("emotes") or []
         return [e["name"] for e in emotes if e.get("name")]

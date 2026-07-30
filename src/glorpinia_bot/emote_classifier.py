@@ -22,7 +22,7 @@ ROOT_EMOTION_MAP = {
     "smiling": "happy", "joy": "happy",
     # sad
     "sad": "sad", "sadge": "sad", "cry": "sad", "crying": "sad",
-    "despair": "sad", "unhappy": "sad", "hands": "sad",  # "PepeHands"
+    "despair": "sad", "unhappy": "sad",
     # mockery
     "kappa": "mockery", "troll": "mockery", "trolling": "mockery",
     "smug": "mockery", "smirk": "mockery",
