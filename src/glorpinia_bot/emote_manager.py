@@ -172,7 +172,9 @@ class EmoteManager:
     def load_from_seventv(self, channel, emotes_by_emotion):
         """
         Injeta emotes buscados/classificados via 7TV (emote_classifier.py)
-        nos mapas existentes
+        nos mapas existentes, SEM apagar curadoria manual já carregada dos
+        .txt: a manual tem prioridade em caso de emote repetido, o 7TV só
+        preenche/expande as categorias.
 
         channel=None -> alimenta o mapa global (self.global_emote_map).
         channel="nome" -> alimenta self.channel_emote_map[channel].
@@ -217,7 +219,6 @@ class EmoteManager:
         t = (text or "").lower()
         score = defaultdict(int)
 
-        # Mapeamento completo por CONTEXTO de emote (emoção + ação/situação de chat).
         rule_map = {
             "angry": [r"\b(raiva|[óo]dio|irrit|burro|rid[íi]culo|palha[çc]ada|tilt|nervos[oa])\b"],
             "anime": [r"\b(anime|otaku|kawaii|senpai|waifu|ayaya)\b"],
@@ -316,8 +317,6 @@ class EmoteManager:
             channel_emotes = channel_map.get(key, [])
             global_emotes = self.global_emote_map.get(key, [])
 
-            # Se o canal tiver emotes para a emoção, usa apenas os do canal.
-            # Se o canal existir mas não tiver a emoção, cai no global para não ficar sem opção.
             if channel_emotes:
                 candidates.extend(channel_emotes)
             elif has_channel_config:
