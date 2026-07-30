@@ -35,6 +35,7 @@ from .features.analysis import AnalysisMode
 from .features.tarot import TarotReader
 from .features.rpg_roll import RPGRollFeature
 from .features.seventv_emote import SevenTVEmote
+from .features.steam_info import SteamInfo
 from .seventv_channel_sync import SevenTVChannelSync
 
 log_level_name = os.getenv("GLORPINIA_LOG_LEVEL", "INFO").upper()
@@ -101,6 +102,7 @@ class TwitchIRC:
         self.cookie_system = CookieSystem(self)
         self.eight_ball_feature = EightBall(self)
         self.seventv_emote_feature = SevenTVEmote(self)
+        self.steam_info_feature = SteamInfo(self)
         self.seventv_channel_sync = SevenTVChannelSync(self)
         self.fortune_cookie_feature = FortuneCookie(self)
         self.slots_feature = Slots(self)
@@ -130,13 +132,11 @@ class TwitchIRC:
         # Validação inicial do Token
         self.auth.validate_and_refresh_token()
 
-        # Sincroniza emotes 7TV
+        # Sincroniza emotes 7TV (roda em thread, não bloqueia o startup)
         self.seventv_channel_sync.sync_global_async()
         for ch in self.auth.channels:
             self.seventv_channel_sync.sync_channel_async(ch)
 
-        signal.signal(signal.SIGINT, self.handle_exit)
-        
         signal.signal(signal.SIGINT, self.handle_exit)
         signal.signal(signal.SIGTERM, self.handle_exit)
 
@@ -211,6 +211,7 @@ class TwitchIRC:
             "debt", "leaderboard", "fatking", "empire", "império", "imperio",
         }
         return any(term in normalized for term in economy_terms)
+
 
     def _parse_fatking_rows_from_env(self):
         """Lê dados do leaderboard a partir de uma planilha pública configurada no .env."""
@@ -776,7 +777,22 @@ class TwitchIRC:
                 if command_raw == "emote":
                     self.seventv_emote_feature.get_random_emote(channel, author)
                     return
-                
+
+                if command_raw == "steam":
+                    game_query = " ".join(parts[1:])
+                    if not game_query:
+                        self.send_message(channel, f"@{author}, diz o nome do jogo! *steam [nome] glorp")
+                        return
+                    self.steam_info_feature.lookup(channel, author, game_query)
+                    return
+
+                if command_raw == "emotesync":
+                    if author.lower() not in self.admin_nicks:
+                        return
+                    self.seventv_channel_sync.sync_channel_async(channel, force=True)
+                    self.send_message(channel, "glorp Sincronizando emotes do 7TV...")
+                    return
+
                 if command_raw == "cookie":
                     if self.fortune_cookie_feature:
                         self.fortune_cookie_feature.get_fortune(channel, author)
@@ -856,7 +872,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *emote, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *emote, *steam, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -873,6 +889,8 @@ class TwitchIRC:
                         "ticket": "glorp compre 1 ticket do sorteio por 100 cookies (pode ficar negativo).",
                         "sorteio": "glorp (oziell) *sorteio shuffle para sortear e *sorteio list para ver participantes/pote.",
                         "8ball": "glorp Pergunte ao oráculo! *8ball [pergunta].",
+                        "emote": "glorp Puxa um emote aleatório popular do 7TV. *emote.",
+                        "steam": "glorp Info de um jogo na Steam (preço, metacritic, reviews...). *steam [nome do jogo].",
                         "cookie": "glorp Pegue seu biscoito da sorte diário.",
                         "balance": "glorp Veja seu saldo ou de outro. *balance @nick.",
                         "empire": "glorp Veja o tamanho do cofre da Imperatriz Glorpinia.",
@@ -892,8 +910,7 @@ class TwitchIRC:
                         "fortune": "Tire uma leitura do seu arcano",
                         "roll": "Rolar um D20 para RPG com narração temática. Ex: *roll [ação desejada]",
                         "bald": "Mede o nível de calvície de alguém. Ex: *bald [nick]",
-                        "debt": "Veja os maiores devedores do império (quem deve mais cookies).",
-                        "emote": "Puxa um emote aleatório do 7TV."
+                        "debt": "Veja os maiores devedores do império (quem deve mais cookies)."
                     }
                     self.send_message(channel, help_msg.get(cmd_target, "glorp Comando desconhecido."))
                     return
@@ -1163,13 +1180,6 @@ class TwitchIRC:
                     self.send_message(channel, f"@{author}, uso: *transfer @alvo valor | (admin) *transfer @origem @destino valor")
                     return
 
-                if command_raw == "emotesync":
-                    if author.lower() not in self.admin_nicks:
-                        return
-                    self.seventv_channel_sync.sync_channel_async(channel, force=True)
-                    self.send_message(channel, "glorp Sincronizando emotes do 7TV...")
-                    return
-                
                 # COMANDOS DE ADMIN (Verificação)
                 admin_cmds = ["chat", "listen", "comment", "scan", "addcookie", "removecookie", "check", "debug"]
                 
@@ -1554,7 +1564,7 @@ class TwitchIRC:
             prompt = (
                 f"O streamer @{channel} acabou de iniciar a live! "
                 f"{context_block}"
-                "Como Glorpinia, mande uma mensagem curta, empolgada e fofa desejando uma ótima stream. "
+                "Como Glorpinia, mande uma mensagem curta, empolgada e fofa desejando uma ótima stream fazendo referência sobre a categoria da stream. "
                 "Diga que estava esperando ele(a) chegar. Use detalhes da live só se combinarem naturalmente. Use emotes."
             )
 
@@ -1567,7 +1577,7 @@ class TwitchIRC:
                     channel,
                     welcome_msg,
                     source="stream_welcome",
-                    context_text="inicio de stream welcome boa stream esperando chegar",
+                    context_text="inicio de stream welcome boa stream esperando chegar jogo da stream",
                 )
                 self.send_message(channel, welcome_msg)
             else:
@@ -1600,9 +1610,8 @@ class TwitchIRC:
                 f"O streamer @{channel} acabou de encerrar a live! "
                 f"{context_block}"
                 "Como Glorpinia, mande uma mensagem de despedida para o chat. "
-                "Diga algo como 'finalmente paz', ou que vai voltar a consertar a nave/dormir. "
                 "Se usar detalhes da live encerrada, faça isso só se soar natural. "
-                "Seja fofa mas aliviada. Use emotes de sono ou despedida."
+                "Seja fofa mas aliviada fazendo referência à categoria da stream. Use emotes de sono ou despedida."
             )
 
             if self.gemini_client:
@@ -1613,7 +1622,7 @@ class TwitchIRC:
                     channel,
                     goodbye_msg,
                     source="stream_goodbye",
-                    context_text="fim de stream despedida sono paz nave dormir",
+                    context_text="fim de stream despedida sono paz nave dormir jogo da stream",
                 )
                 self.send_message(channel, goodbye_msg)
             else:
