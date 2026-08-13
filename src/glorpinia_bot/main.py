@@ -468,26 +468,28 @@ class TwitchIRC:
     def prepare_final_bot_message(self, channel, response_text, mood=None, source="chat", context_text=None):
         """Normaliza saída, evita repetição e escolhe emote conforme contexto + mood."""
         original_text = (response_text or "").strip()
-        cleaned_text = self.emote_manager.remove_known_emotes(original_text)
+        message_body, cookie_feedback = self._split_cookie_feedback_suffix(original_text)
+        cleaned_text = self.emote_manager.remove_known_emotes(message_body)
         cleaned_text = self.emote_manager.strip_trailing_emote(cleaned_text)
         cleaned_text = self.emote_manager.strip_trailing_emotion_label(cleaned_text)
+        cleaned_text = self._clean_message_artifacts(cleaned_text)
 
         if not cleaned_text.strip():
             fallback_text = self.emote_manager.strip_trailing_emotion_label(
-                self.emote_manager.strip_trailing_emote(original_text)
+                self.emote_manager.strip_trailing_emote(message_body or original_text)
             ).strip()
-            cleaned_text = fallback_text or original_text or "..."
+            cleaned_text = self._clean_message_artifacts(fallback_text) or message_body or original_text or "..."
             logging.debug("[Main] cleaned_text_empty channel=%s source=%s fallback_applied=true", channel, source)
 
         unique_text = self.emote_manager.ensure_unique_phrase(channel, cleaned_text)
         selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood, context_text=context_text)
-        final_text = f"{unique_text} {selected_emote}".strip()
+        final_text = f"{unique_text} {selected_emote} {cookie_feedback}".strip()
 
         last = self.last_bot_message_by_channel.get(channel)
         if last and last == final_text:
             unique_text = self.emote_manager.ensure_unique_phrase(channel, f"{unique_text} ")
             selected_emote = self.emote_manager.choose_emote(channel, unique_text, mood=mood, context_text=context_text)
-            final_text = f"{unique_text} {selected_emote}".strip()
+            final_text = f"{unique_text} {selected_emote} {cookie_feedback}".strip()
 
         self.last_bot_message_by_channel[channel] = final_text
         emote_debug = self.emote_manager.get_debug_state(channel)
@@ -508,6 +510,26 @@ class TwitchIRC:
             final_text,
         )
         return final_text
+
+    def _split_cookie_feedback_suffix(self, text):
+        """Separa recibos de cookies para não serem tratados como emotes ou texto da IA."""
+        feedback_pattern = re.compile(r"(?:\s*\([+-]\d+\s*🍪(?:\s+para\s+[A-Za-z0-9_]+)?\))*\s*$")
+        match = feedback_pattern.search(text or "")
+        if not match or not match.group(0).strip():
+            return (text or "").strip(), ""
+        return (text[:match.start()].strip(), match.group(0).strip())
+
+    def _clean_message_artifacts(self, text):
+        """Remove sobras comuns do modelo após limpeza de tags/emotes."""
+        if not text:
+            return ""
+
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        cleaned = re.sub(r"(?:^|\s)([.?!])(?:\s+\1){1,}(?=\s|$)", r" \1", cleaned).strip()
+        cleaned = re.sub(r"(?:^|\s)([.?!])(?:\s+[.?!]){1,}(?=\s|$)", "", cleaned).strip()
+        cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+        cleaned = re.sub(r"([.?!])\1{2,}", r"\1\1\1", cleaned)
+        return cleaned.strip()
 
     def _format_admin_debug_message(self, channel):
         social_debug = self.social_dynamics.get_debug_snapshot(channel)
