@@ -12,6 +12,7 @@ SEVENTV_GLOBAL_ALIAS_URL = "https://7tv.io/v3/emote-sets/global"
 SEVENTV_GLOBAL_SET_FALLBACK_ID = "62cdd34e72a832540de95857"
 
 REFRESH_INTERVAL_SECONDS = 6 * 60 * 60  # 6h
+ZERO_WIDTH_FLAG = 1 << 8  # 256 -- bit da flag zero_width no 7TV v3
 
 
 class SevenTVChannelSync:
@@ -58,7 +59,8 @@ class SevenTVChannelSync:
         return data[0]["id"]
 
 
-    def _fetch_channel_emote_names(self, channel_login):
+    def _fetch_channel_emotes(self, channel_login):
+        """Retorna lista de dicts {name, flags} -- flags cru do 7TV, sem filtrar nada."""
         twitch_id = self._resolve_twitch_user_id(channel_login)
         r = requests.get(SEVENTV_USER_URL.format(twitch_id=twitch_id), timeout=10)
 
@@ -70,9 +72,13 @@ class SevenTVChannelSync:
         data = r.json()
         emote_set = data.get("emote_set") or {}
         emotes = emote_set.get("emotes") or []
-        return [e["name"] for e in emotes if e.get("name")]
+        return [
+            {"name": e["name"], "flags": e.get("flags") or 0}
+            for e in emotes if e.get("name")
+        ]
 
-    def _fetch_global_emote_names(self):
+    def _fetch_global_emotes(self):
+        """Retorna lista de dicts {name, flags} do set global."""
         try:
             r = requests.get(SEVENTV_GLOBAL_ALIAS_URL, timeout=10)
             r.raise_for_status()
@@ -85,32 +91,46 @@ class SevenTVChannelSync:
 
         data = r.json()
         emotes = data.get("emotes") or []
-        return [e["name"] for e in emotes if e.get("name")]
+        return [
+            {"name": e["name"], "flags": e.get("flags") or 0}
+            for e in emotes if e.get("name")
+        ]
+
+    @staticmethod
+    def _is_zero_width(emote_entry):
+        return bool(emote_entry.get("flags", 0) & ZERO_WIDTH_FLAG)
 
 
-    def _classify_names(self, names):
-        """emoção -> [nomes]; nomes sem classificação clara vão pra 'neutral'."""
+    def _classify_emotes(self, emote_entries):
+        """
+        emote_entries: lista de {name, flags}.
+        Retorna (by_emotion, zero_width_names).
+        """
         by_emotion = {}
-        for name in names:
+        zero_width_names = set()
+        for entry in emote_entries:
+            name = entry["name"]
             emotion = classify_emote_name(name) or "neutral"
             by_emotion.setdefault(emotion, []).append(name)
-        return by_emotion
+            if self._is_zero_width(entry):
+                zero_width_names.add(name)
+        return by_emotion, zero_width_names
 
     def _sync_channel(self, channel, force):
         normalized = channel.lower()
         if not force and self._recently_synced(normalized):
             return
         try:
-            names = self._fetch_channel_emote_names(normalized)
-            if not names:
+            emote_entries = self._fetch_channel_emotes(normalized)
+            if not emote_entries:
                 logging.info("[SevenTVSync] Nenhum emote 7TV encontrado pra #%s.", normalized)
                 return
-            by_emotion = self._classify_names(names)
-            self.bot.emote_manager.load_from_seventv(normalized, by_emotion)
+            by_emotion, zero_width_names = self._classify_emotes(emote_entries)
+            self.bot.emote_manager.load_from_seventv(normalized, by_emotion, zero_width_names=zero_width_names)
             self._last_sync[normalized] = time.time()
             logging.info(
-                "[SevenTVSync] #%s sincronizado: %s emotes em %s categorias.",
-                normalized, len(names), len(by_emotion),
+                "[SevenTVSync] #%s sincronizado: %s emotes em %s categorias (%s zero_width).",
+                normalized, len(emote_entries), len(by_emotion), len(zero_width_names),
             )
         except Exception as e:
             logging.error("[SevenTVSync] Falha ao sincronizar #%s: %s", normalized, e)
@@ -119,13 +139,13 @@ class SevenTVChannelSync:
         if not force and self._recently_synced("__global__"):
             return
         try:
-            names = self._fetch_global_emote_names()
-            by_emotion = self._classify_names(names)
-            self.bot.emote_manager.load_from_seventv(None, by_emotion)
+            emote_entries = self._fetch_global_emotes()
+            by_emotion, zero_width_names = self._classify_emotes(emote_entries)
+            self.bot.emote_manager.load_from_seventv(None, by_emotion, zero_width_names=zero_width_names)
             self._last_sync["__global__"] = time.time()
             logging.info(
-                "[SevenTVSync] Set global sincronizado: %s emotes em %s categorias.",
-                len(names), len(by_emotion),
+                "[SevenTVSync] Set global sincronizado: %s emotes em %s categorias (%s zero_width).",
+                len(emote_entries), len(by_emotion), len(zero_width_names),
             )
         except Exception as e:
             logging.error("[SevenTVSync] Falha ao sincronizar set global: %s", e)

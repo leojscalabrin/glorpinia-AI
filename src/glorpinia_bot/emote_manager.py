@@ -18,6 +18,7 @@ class EmoteManager:
         self.channel_emotion_history = defaultdict(lambda: deque(maxlen=history_size))
         self.last_selected_emote_by_channel = {}
         self.last_resolved_emotion_by_channel = {}
+        self.zero_width_emotes = set()
 
         self.global_emote_map = self._load_emote_map(os.path.join(self.base_path, "emotes_global.txt"))
         self.channel_emote_map = self._load_channel_maps(os.path.join(self.base_path, "emotes_channels.txt"))
@@ -169,7 +170,7 @@ class EmoteManager:
     def _normalize_token(self, token):
         return token.strip(".,!?;:()[]{}\"'`*_~").strip()
 
-    def load_from_seventv(self, channel, emotes_by_emotion):
+    def load_from_seventv(self, channel, emotes_by_emotion, zero_width_names=None):
         """
         Injeta emotes buscados/classificados via 7TV (emote_classifier.py)
         nos mapas existentes, SEM apagar curadoria manual já carregada dos
@@ -192,6 +193,9 @@ class EmoteManager:
                 if name not in seen:
                     existing.append(name)
                     seen.add(name)
+        
+        if zero_width_names:
+            self.zero_width_emotes.update(zero_width_names)
 
         logging.info(
             "[Emote][7TV] load_from_seventv channel=%s categorias=%s total_emotes=%s",
@@ -438,7 +442,32 @@ class EmoteManager:
             list(channel_hist),
             list(self.global_emote_history),
         )
+        
+        if chosen in self.zero_width_emotes:
+            companion = self._find_zero_width_companion(chosen, candidates)
+            if companion:
+                logging.debug("[Emote] %s é zero_width, emparelhado com %s", chosen, companion)
+                return f"{companion} {chosen}"
+            logging.debug("[Emote] %s é zero_width mas nenhum par disponível, usando sozinho", chosen)
+            
         return chosen
+    
+    def _find_zero_width_companion(self, chosen, candidates):
+        """
+        Escolhe um emote normal (não zero-width) pra acompanhar um emote
+        zero-width, garantindo que ele nunca seja enviado sozinho -- mesmo
+        que a flag zero_width do 7TV esteja errada pra algum emote, o pior
+        caso vira "dois emotes juntos" em vez de algo quebrado/invisível.
+        """
+        same_context = [e for e in candidates if e != chosen and e not in self.zero_width_emotes]
+        if same_context:
+            return random.choice(same_context)
+
+        fallback_pool = [e for e in self.get_all_emotes() if e != chosen and e not in self.zero_width_emotes]
+        if fallback_pool:
+            return random.choice(fallback_pool)
+
+        return None
 
     def get_debug_state(self, channel):
         normalized_channel = channel.lower()
