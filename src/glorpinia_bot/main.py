@@ -531,6 +531,34 @@ class TwitchIRC:
         cleaned = re.sub(r"([.?!])\1{2,}", r"\1\1\1", cleaned)
         return cleaned.strip()
 
+    def _ensure_streamer_name_in_lifecycle_message(self, channel, text, event_label):
+        """
+        Garante que mensagens automáticas de início/fim de live mantenham o nome do streamer.
+
+        O fluxo normal remove emotes conhecidos gerados pelo modelo; se o canal tiver nome igual
+        ou parecido com um emote, uma menção gerada pela IA podia sumir e deixar frases como
+        "o apareceu". Este fallback deixa o prompt menos frágil e reintroduz a menção quando a
+        resposta final da IA não contém o canal.
+        """
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return cleaned
+
+        streamer = (channel or "").strip().lstrip("@")
+        if not streamer:
+            return cleaned
+
+        if re.search(rf"@?{re.escape(streamer)}\b", cleaned, flags=re.IGNORECASE):
+            return cleaned
+
+        logging.debug(
+            "[Main] lifecycle_streamer_name_missing event=%s channel=%s text=%s",
+            event_label,
+            channel,
+            cleaned,
+        )
+        return f"@{streamer} {cleaned}"
+
     def _format_admin_debug_message(self, channel):
         social_debug = self.social_dynamics.get_debug_snapshot(channel)
         emote_debug = self.emote_manager.get_debug_state(channel)
@@ -1587,7 +1615,8 @@ class TwitchIRC:
                 f"O streamer @{channel} acabou de iniciar a live! "
                 f"{context_block}"
                 "Como Glorpinia, mande uma mensagem curta, empolgada e fofa desejando uma ótima stream fazendo referência sobre a categoria da stream. "
-                "Diga que estava esperando ele(a) chegar. Use detalhes da live só se combinarem naturalmente. Use emotes."
+                f"Mencione explicitamente @{channel}. Diga que estava esperando ele(a) chegar. "
+                "Use detalhes da live só se combinarem naturalmente. Use emotes."
             )
 
             if self.gemini_client:
@@ -1595,6 +1624,7 @@ class TwitchIRC:
                 
                 # Limpeza: remove a menção ao @system que o bot adiciona automaticamente
                 welcome_msg = response.replace("@system, ", "").strip()
+                welcome_msg = self._ensure_streamer_name_in_lifecycle_message(channel, welcome_msg, "stream_welcome")
                 welcome_msg = self.prepare_final_bot_message(
                     channel,
                     welcome_msg,
@@ -1632,6 +1662,7 @@ class TwitchIRC:
                 f"O streamer @{channel} acabou de encerrar a live! "
                 f"{context_block}"
                 "Como Glorpinia, mande uma mensagem de despedida para o chat. "
+                f"Mencione explicitamente @{channel}. "
                 "Se usar detalhes da live encerrada, faça isso só se soar natural. "
                 "Seja fofa mas aliviada fazendo referência à categoria da stream. Use emotes de sono ou despedida."
             )
@@ -1640,6 +1671,7 @@ class TwitchIRC:
                 response = self.gemini_client.get_response(prompt, channel, "system")
                 
                 goodbye_msg = response.replace("@system, ", "").strip()
+                goodbye_msg = self._ensure_streamer_name_in_lifecycle_message(channel, goodbye_msg, "stream_goodbye")
                 goodbye_msg = self.prepare_final_bot_message(
                     channel,
                     goodbye_msg,

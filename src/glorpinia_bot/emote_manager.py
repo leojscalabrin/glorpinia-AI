@@ -98,6 +98,8 @@ class EmoteManager:
         all_emotes = self.get_all_emotes()
         while tokens:
             last = tokens[-1]
+            if last.startswith("@"):
+                break
             normalized = self._normalize_token(last)
             if normalized in all_emotes:
                 tokens.pop()
@@ -113,7 +115,11 @@ class EmoteManager:
             return message
 
         all_emotes = self.get_all_emotes()
-        cleaned_tokens = [token for token in tokens if self._normalize_token(token) not in all_emotes]
+        cleaned_tokens = [
+            token
+            for token in tokens
+            if token.startswith("@") or self._normalize_token(token) not in all_emotes
+        ]
         cleaned = " ".join(cleaned_tokens).strip()
         return cleaned if cleaned else message.strip()
 
