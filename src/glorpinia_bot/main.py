@@ -939,7 +939,7 @@ class TwitchIRC:
                         "ticket": "glorp compre 1 ticket do sorteio por 100 cookies (pode ficar negativo).",
                         "sorteio": "glorp (oziell) *sorteio shuffle para sortear e *sorteio list para ver participantes/pote.",
                         "8ball": "glorp Pergunte ao oráculo! *8ball [pergunta].",
-                        "emote": "glorp Puxa um emote aleatório popular do 7TV. *emote.",
+                        "emote": "glorp Puxa um emote aleatório do trending atual do 7TV. *emote.",
                         "steam": "glorp Info de um jogo na Steam (preço, metacritic, reviews...). *steam [nome do jogo].",
                         "cookie": "glorp Pegue seu biscoito da sorte diário.",
                         "balance": "glorp Veja seu saldo ou de outro. *balance @nick.",

@@ -1,5 +1,4 @@
 import random
-import string
 import threading
 import logging
 
@@ -21,18 +20,17 @@ query SearchEmotes($query: String!, $page: Int, $limit: Int, $sort: Sort) {
 """
 
 PAGE_SIZE = 100
-MAX_PAGE = 100
-MAX_TENTATIVAS = 5
+TRENDING_PAGE_LIMIT = 5
 
-SORT_POPULAR = {"value": "popularity", "order": "DESCENDING"}
+SORT_TRENDING = {"value": "trending", "order": "DESCENDING"}
 
 
 class SevenTVEmote:
     """
-    Puxa um emote "aleatório" (ponderado por popularidade) da base do 7TV.
-    Gera um termo curto aleatório, busca quantos
-    resultados existem pra ele, sorteia uma página dentro desse total e
-    pega um item aleatório da página (sempre ordenado por popularidade).
+    Puxa um emote aleatório da lista de trending atual do 7TV.
+    A API GraphQL do 7TV expõe a busca de emotes com ordenação por
+    trending; o comando usa uma query vazia para pegar o ranking atual
+    e sorteia um item entre as primeiras páginas desse ranking.
     """
 
     def __init__(self, bot):
@@ -48,7 +46,7 @@ class SevenTVEmote:
         payload = {
             "operationName": "SearchEmotes",
             "query": SEARCH_QUERY,
-            "variables": {"query": query, "page": page, "limit": limit, "sort": SORT_POPULAR},
+            "variables": {"query": query, "page": page, "limit": limit, "sort": SORT_TRENDING},
         }
         r = requests.post(GQL_URL, json=payload, timeout=10)
         r.raise_for_status()
@@ -58,26 +56,21 @@ class SevenTVEmote:
         return data["data"]["emotes"]
 
     def _emote_aleatorio(self):
-        for _ in range(MAX_TENTATIVAS):
-            termo = "".join(random.choices(string.ascii_lowercase, k=random.randint(1, 2)))
+        primeiro = self._buscar("", 1, 1)
+        total = primeiro["count"]
+        if total == 0:
+            raise RuntimeError("Nenhum emote trending encontrado.")
 
-            primeiro = self._buscar(termo, 1, 1)
-            total = primeiro["count"]
-            if total == 0:
-                continue
+        last_page = min(TRENDING_PAGE_LIMIT, max(1, -(-total // PAGE_SIZE)))
+        page = random.randint(1, last_page)
 
-            last_page = min(MAX_PAGE, max(1, -(-total // PAGE_SIZE)))
-            page = random.randint(1, last_page)
+        items = self._buscar("", page, PAGE_SIZE)["items"]
+        if not items:
+            raise RuntimeError("Página de trending vazia no 7TV.")
 
-            items = self._buscar(termo, page, PAGE_SIZE)["items"]
-            if not items:
-                continue
-
-            emote = random.choice(items)
-            emote_url = self._humanize_link(f"https://7tv.app/emotes/{emote['id']}")
-            return emote["name"], emote_url, termo, total
-
-        raise RuntimeError("Nenhum emote encontrado após várias tentativas.")
+        emote = random.choice(items)
+        emote_url = self._humanize_link(f"https://7tv.app/emotes/{emote['id']}")
+        return emote["name"], emote_url
 
     def _humanize_link(self, url):
       """
@@ -92,7 +85,7 @@ class SevenTVEmote:
 
     def _fetch_and_send(self, channel, author):
         try:
-            nome, url, termo, total = self._emote_aleatorio()
+            nome, url = self._emote_aleatorio()
             self.bot.send_message(channel, f"@{author} glorp {nome} -> {url}")
         except Exception as e:
             logging.error(f"[SevenTVEmote] Falha ao buscar emote: {e}")
