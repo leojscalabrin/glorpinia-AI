@@ -307,7 +307,7 @@ class GeminiClient:
                 power = "iniciante" if profile.get("level", 1) < 10 else ("experiente" if profile.get("level", 1) < 40 else ("muito poderoso" if profile.get("level", 1) < 100 else "lendário"))
                 details = [f"progressão de poder: {power}"]
                 if profile.get("class_name"):
-                    details.append(f"arquétipo: {profile['class_name']}")
+                    details.append(f"arquétipo: {profile.get('evolved_class_name') if profile.get('evolved') else profile['class_name']}")
                     if profile.get("evolved"):
                         details.append("arquétipo já evoluído")
                 if profile.get("lore"):
