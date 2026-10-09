@@ -87,16 +87,20 @@ class UserRPGManager:
         with self._lock: return self._add_xp_locked(nick, amount, channel)
 
     def record_message(self, nick, channel, is_command=False):
-        if is_command or not self._nick(nick): return None
+        if not self._nick(nick): return None
         now, key = time.time(), self._nick(nick)
         day = time.strftime("%Y-%m-%d", time.gmtime(now))
         with self._lock:
+            p = self._ensure(key)
+            if p:
+                p["last_channel"], p["last_message_at"] = channel.lower().lstrip("#"), now
+            if is_command:
+                self._save()
+                return None
             last, daily_key = self._last_message_xp.get(key, 0), (key, day)
             daily = self._daily_message_xp.get(daily_key, 0)
             if now - last < self.MESSAGE_COOLDOWN_SECONDS or daily >= self.MAX_MESSAGE_XP_PER_DAY:
-                p = self._ensure(key)
                 if p:
-                    p["last_channel"], p["last_message_at"] = channel.lower().lstrip("#"), now
                     self._save()
                 return None
             self._last_message_xp[key] = now
