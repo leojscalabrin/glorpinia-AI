@@ -853,6 +853,8 @@ class TwitchIRC:
                         return
                     target = parts[1].replace("@", "").strip().lower()
                     tag_name = " ".join(parts[2:]).strip()
+                    if len(tag_name) >= 2 and tag_name[0] == tag_name[-1] and tag_name[0] in ('"', "'"):
+                        tag_name = tag_name[1:-1].strip()
                     if not target or target in self.IGNORED_NICKS:
                         self.send_message(channel, f"@{author}, usuário inválido.")
                         return
