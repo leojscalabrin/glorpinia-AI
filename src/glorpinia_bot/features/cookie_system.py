@@ -180,6 +180,22 @@ class CookieSystem:
             logging.error(f"[CookieSystem] Falha ao buscar leaderboard de dívidas: {e}")
             return []
 
+    def _award_rpg_cookie_xp(self, nick, amount, gained=True):
+        manager = getattr(self.bot, "user_rpg", None)
+        if not manager:
+            return
+        event = manager.record_cookie_change(nick, amount, gained=gained)
+        if not event or not event.get("leveled"):
+            return
+        profile = event.get("profile") or {}
+        channel = profile.get("last_channel")
+        if channel and self.bot.is_feature_enabled(channel, "comment"):
+            level = event["level"]
+            message = f"O @{nick} passou para o nível {level}! PogChamp"
+            if level == 10:
+                message += " Use *class para escolher sua classe!"
+            self.bot.send_message(channel, message)
+
     def add_cookies(self, nick: str, amount_to_add: int):
         """Adiciona cookies a um usuário."""
         if not self._is_nick_valid(nick): return 
@@ -192,9 +208,7 @@ class CookieSystem:
                 c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_add, nick))
                 conn.commit()
             logging.info(f"[CookieSystem] +{amount_to_add} cookies para {nick}.")
-            manager = getattr(self.bot, "user_rpg", None)
-            if manager:
-                manager.record_cookie_change(nick, amount_to_add, gained=True)
+            self._award_rpg_cookie_xp(nick, amount_to_add, gained=True)
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao adicionar cookies para {nick}: {e}")
 
@@ -220,9 +234,7 @@ class CookieSystem:
                 c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_remove, bot_nick))
                 conn.commit()
                 logging.info(f"[CookieSystem] Transferidos {amount_to_remove} cookies de {nick} para {bot_nick}. Saldo pode estar negativo.")
-            manager = getattr(self.bot, "user_rpg", None)
-            if manager:
-                manager.record_cookie_change(nick, amount_to_remove, gained=False)
+            self._award_rpg_cookie_xp(nick, amount_to_remove, gained=False)
                     
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao remover/transferir cookies de {nick}: {e}")
