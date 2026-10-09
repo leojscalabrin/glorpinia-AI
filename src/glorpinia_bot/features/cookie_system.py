@@ -272,6 +272,8 @@ class CookieSystem:
                 )
                 conn.commit()
             logging.info(f"[CookieSystem] Transferidos {amount} cookies de {from_nick} para {to_nick}.")
+            self._award_rpg_cookie_xp(from_nick, amount, gained=False)
+            self._award_rpg_cookie_xp(to_nick, amount, gained=True)
             return True
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao transferir cookies de {from_nick} para {to_nick}: {e}")
@@ -290,6 +292,7 @@ class CookieSystem:
                     ON CONFLICT(user_nick) DO UPDATE SET cookie_count = cookie_count + 1
                 """, (nick,))
                 conn.commit()
+            self._award_rpg_cookie_xp(nick, 1, gained=True)
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao dar cookie de interação para {nick}: {e}")
     
