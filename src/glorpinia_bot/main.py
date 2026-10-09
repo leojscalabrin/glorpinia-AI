@@ -857,14 +857,14 @@ class TwitchIRC:
                         if success and profile:
                             tags = self.user_tags.get_tags(author)
                             recent = list(self.recent_messages.get(channel, []))[-8:]
-                            interactions = "\\n".join(f"{m.get('author')}: {m.get('content')}" for m in recent if m.get('author','').lower() == author_lower)
+                            interactions = "\n".join(f"{m.get('author')}: {m.get('content')}" for m in recent if m.get('author','').lower() == author_lower)
                             lore_prompt = ("Escreva uma lore curta (2-3 frases) em português para um personagem de RPG de chat. "
                                 f"Usuário: @{author}. Classe: {profile['class_name']} — {profile.get('class_description','')}. "
                                 f"Tags/feitos: {', '.join(tags) if tags else 'ainda sem tags'}. Interações recentes: {interactions or 'poucas interações disponíveis'}. "
                                 "Use humor e detalhes específicos quando possível, sem inventar fatos biográficos reais. Retorne somente a lore.")
                             try:
                                 lore = self.gemini_client.get_response(lore_prompt, channel, "system", self.memory_mgr, live_context=self.get_live_context(channel))
-                                lore = re.sub(r"^@\\w+,\\s*", "", lore or "").strip()
+                                lore = re.sub(r"^@\w+,\s*", "", lore or "").strip()
                                 if lore: self.user_rpg.set_lore(author, lore)
                             except Exception as exc:
                                 logging.warning("[RPG] Falha ao gerar lore para %s: %s", author, exc)
