@@ -128,6 +128,10 @@ class UserRPGManager:
             if index not in range(len(options)): return False, "choice", dict(p)
             selected = options[index]
             p.update(class_name=selected["name"], class_description=selected["description"], class_options=[], lore=None)
+            if p.get("level", 1) >= 100:
+                p["evolved"] = True
+                p["evolved_class_name"] = p["class_name"] + " Ascendente"
+                p["evolved_description"] = "Uma forma desperta, mais rara e poderosa do seu arquétipo original."
             self._save()
             return True, "chosen", dict(p)
 
