@@ -37,6 +37,7 @@ from .features.rpg_roll import RPGRollFeature
 from .features.seventv_emote import SevenTVEmote
 from .features.steam_info import SteamInfo
 from .seventv_channel_sync import SevenTVChannelSync
+from .user_tags import UserTagManager
 
 log_level_name = os.getenv("GLORPINIA_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -125,6 +126,7 @@ class TwitchIRC:
         admin_nicks_str = os.getenv("ADMIN_NICKS") 
         self.admin_nicks = [nick.strip().lower() for nick in admin_nicks_str.split(',')] if admin_nicks_str else []
         print(f"[AUTH] Admins carregados: {self.admin_nicks}")
+        self.user_tags = UserTagManager()
 
         # Configuração do WebSocket e Shutdown
         self.ws = None
@@ -754,6 +756,21 @@ class TwitchIRC:
         )
 
 
+    def _process_ai_tag_markers(self, response_text, channel, author):
+        """Aplica tags sugeridas pela IA e remove os marcadores antes de publicar a resposta."""
+        marker_pattern = re.compile(r"\\[\\[USER_TAG:add:([A-Za-z0-9_]+):([^\\]]{1,80})\\]\\]", re.IGNORECASE)
+        def apply_marker(match):
+            target = match.group(1).lower()
+            tag_name = match.group(2).strip()
+            success, reason = self.user_tags.add_tag(target, tag_name)
+            if success:
+                logging.info("[Tags] IA adicionou tag user=%s tag=%s channel=%s", target, tag_name, channel)
+            elif reason not in ("exists", "limit"):
+                logging.debug("[Tags] Sugestão ignorada user=%s reason=%s", target, reason)
+            return ""
+        cleaned = marker_pattern.sub(apply_marker, response_text or "")
+        return re.sub(r"\\s{2,}", " ", cleaned).strip()
+
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
         if message.startswith("PING"):
@@ -814,6 +831,49 @@ class TwitchIRC:
 
                 if not command_raw:
                     return
+                if command_raw == "tag":
+                    target = parts[1].replace("@", "").strip().lower() if len(parts) > 1 else author_lower
+                    if not target or target in self.IGNORED_NICKS:
+                        self.send_message(channel, f"@{author}, usuário inválido.")
+                        return
+                    tags = self.user_tags.get_tags(target)
+                    if tags:
+                        self.send_message(channel, f"Tags de @{target}: " + " | ".join(tags))
+                    else:
+                        self.send_message(channel, f"@{author}, @{target} ainda não tem tags.")
+                    return
+
+                if command_raw in ("addtag", "removetag"):
+                    if author_lower not in self.admin_nicks:
+                        self.send_message(channel, f"@{author}, esse comando é exclusivo dos admins.")
+                        return
+                    if len(parts) < 3:
+                        usage = "*addtag [usuário] [nome da tag]" if command_raw == "addtag" else "*removetag [usuário] [nome da tag]"
+                        self.send_message(channel, f"Uso: {usage}")
+                        return
+                    target = parts[1].replace("@", "").strip().lower()
+                    tag_name = " ".join(parts[2:]).strip()
+                    if not target or target in self.IGNORED_NICKS:
+                        self.send_message(channel, f"@{author}, usuário inválido.")
+                        return
+                    if command_raw == "addtag":
+                        success, reason = self.user_tags.add_tag(target, tag_name)
+                        messages = {
+                            "added": f"Tag '{tag_name}' adicionada a @{target}.",
+                            "exists": f"@{target} já possui essa tag.",
+                            "limit": f"@{target} já atingiu o limite de 5 tags.",
+                            "invalid": "Nome de tag inválido (use de 1 a 40 caracteres).",
+                        }
+                    else:
+                        success, reason = self.user_tags.remove_tag(target, tag_name)
+                        messages = {
+                            "removed": f"Tag '{tag_name}' removida de @{target}.",
+                            "missing": f"@{target} não possui essa tag.",
+                            "invalid": "Nome de tag inválido.",
+                        }
+                    self.send_message(channel, messages.get(reason, "Não foi possível atualizar as tags."))
+                    return
+
 
                 if command_raw == "8ball":
                     self.social_dynamics.add_memory_loop(channel=channel, topic="previsões duvidosas do 8ball", users=[author_lower], weight=0.45)
@@ -922,7 +982,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Comandos: *analysis, *8ball, *emote, *steam, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp Tags: *tag [usuário] (ou *tag para suas tags), *addtag [usuário] [tag] e *removetag [usuário] [tag]. Comandos: *analysis, *8ball, *emote, *steam, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -1308,6 +1368,8 @@ class TwitchIRC:
                         }
                         allow_cookie_actions = self._is_economy_related(content)
                         injection_context = self.social_dynamics.get_injection_payload(channel, author=author)
+                        injection_context["user_tags"] = self.user_tags.get_tags(author)
+                        injection_context["mentioned_user_tags"] = {nick: self.user_tags.get_tags(nick) for nick in explicit_mentions if self.user_tags.get_tags(nick)}
                         live_context = self.get_live_context(channel)
                         response_text = self.gemini_client.get_response(
                             query=content,
@@ -1323,6 +1385,7 @@ class TwitchIRC:
                         )
                         
                         if response_text:
+                            response_text = self._process_ai_tag_markers(response_text, channel, author)
                             current_mood = (injection_context or {}).get("mood")
                             final_text = self.prepare_final_bot_message(
                                 channel=channel,
