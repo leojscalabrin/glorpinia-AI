@@ -842,6 +842,19 @@ class TwitchIRC:
 
                 if not command_raw:
                     return
+                if command_raw == "ranking":
+                    top = self.user_rpg.get_ranking(5)
+                    if not top:
+                        self.send_message(channel, "Ainda não há aventureiros no ranking!")
+                    else:
+                        entries = []
+                        for idx, (nick, profile) in enumerate(top, start=1):
+                            class_name = profile.get("evolved_class_name") if profile.get("evolved") else profile.get("class_name")
+                            label = f" ({class_name})" if class_name else ""
+                            entries.append(f"#{idx} {nick} — nível {profile.get('level', 1)}{label}")
+                        self.send_long_message(channel, "Ranking RPG: " + " | ".join(entries))
+                    return
+
                 if command_raw == "level":
                     target = parts[1].replace("@", "").strip().lower() if len(parts) > 1 else author_lower
                     profile = self.user_rpg.get_profile(target)
@@ -1049,7 +1062,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "Comandos públicos: level, class, tag, addtag, removetag, analysis, 8ball, emote, steam, cookie, balance, empire, leaderboard, fatking, debt, slots, duel, ticket, sorteio, transfer, fortune, roll, bald, check, help.")
+                    self.send_message(channel, "Comandos públicos: level, class, ranking, tag, addtag, removetag, analysis, 8ball, emote, steam, cookie, balance, empire, leaderboard, fatking, debt, slots, duel, ticket, sorteio, transfer, fortune, roll, bald, check, help.")
                     return
                 
                 if command_raw == "help":
@@ -1061,6 +1074,7 @@ class TwitchIRC:
                     
                     help_msg = {
                         "level": "Veja seu nível ou o de alguém. Ex: *level @nick.",
+                        "ranking": "Mostra os 5 usuários com maiores níveis e suas classes, quando tiverem.",
                         "class": "Veja a classe/lore ou escolha sua classe ao alcançar nível 10. Use *class, *class @nick ou *class 1/2/3.",
                         "check": "glorp checa status das features.",
                         "slots": "glorp aposte cookies! *slots [valor] (min 10).",
