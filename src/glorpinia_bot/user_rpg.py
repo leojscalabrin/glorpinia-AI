@@ -142,3 +142,22 @@ class UserRPGManager:
             p["lore"] = (lore or "").strip()[:900]
             self._save()
             return True
+
+
+    def get_ranking(self, limit=5):
+        """Return profiles ordered by level, then total XP, descending."""
+        try:
+            limit = max(0, int(limit))
+        except (TypeError, ValueError):
+            limit = 5
+        with self._lock:
+            ordered = sorted(
+                self._users.items(),
+                key=lambda item: (
+                    int(item[1].get("level", 1)),
+                    int(item[1].get("xp", 0)),
+                    item[0],
+                ),
+                reverse=True,
+            )
+            return [(nick, dict(profile)) for nick, profile in ordered[:limit]]
