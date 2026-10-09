@@ -758,7 +758,7 @@ class TwitchIRC:
 
     def _process_ai_tag_markers(self, response_text, channel, author):
         """Aplica tags sugeridas pela IA e remove os marcadores antes de publicar a resposta."""
-        marker_pattern = re.compile(r"\\[\\[USER_TAG:add:([A-Za-z0-9_]+):([^\\]]{1,80})\\]\\]", re.IGNORECASE)
+        marker_pattern = re.compile(r"\[\[USER_TAG:add:([A-Za-z0-9_]+):([^\]]{1,80})\]\]", re.IGNORECASE)
         def apply_marker(match):
             target = match.group(1).lower()
             tag_name = match.group(2).strip()
@@ -769,7 +769,7 @@ class TwitchIRC:
                 logging.debug("[Tags] Sugestão ignorada user=%s reason=%s", target, reason)
             return ""
         cleaned = marker_pattern.sub(apply_marker, response_text or "")
-        return re.sub(r"\\s{2,}", " ", cleaned).strip()
+        return re.sub(r"\s{2,}", " ", cleaned).strip()
 
     def on_message(self, ws, message):
         """Handler de mensagens IRC (usa o cliente LLM)."""
