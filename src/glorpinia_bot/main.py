@@ -38,6 +38,7 @@ from .features.seventv_emote import SevenTVEmote
 from .features.steam_info import SteamInfo
 from .seventv_channel_sync import SevenTVChannelSync
 from .user_tags import UserTagManager
+from .user_rpg import UserRPGManager
 
 log_level_name = os.getenv("GLORPINIA_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -127,6 +128,7 @@ class TwitchIRC:
         self.admin_nicks = [nick.strip().lower() for nick in admin_nicks_str.split(',')] if admin_nicks_str else []
         print(f"[AUTH] Admins carregados: {self.admin_nicks}")
         self.user_tags = UserTagManager()
+        self.user_rpg = UserRPGManager()
 
         # Configuração do WebSocket e Shutdown
         self.ws = None
@@ -819,6 +821,15 @@ class TwitchIRC:
             )
             self._maybe_register_recurring_memory_loop(channel, author, content)
 
+            # XP por mensagens: cooldown global por usuário evita duplicidade entre canais.
+            xp_event = self.user_rpg.record_message(author, channel, is_command=content.startswith("*"))
+            if xp_event and xp_event.get("leveled") and self.is_feature_enabled(channel, "comment"):
+                new_level = xp_event["level"]
+                notice = f"O @{author} passou para o nível {new_level}! PogChamp"
+                if new_level == 10:
+                    notice += " Use *class para escolher sua classe!"
+                self.send_message(channel, notice)
+
             # PROCESSA COMANDOS E TRIGGERS
 
             if content_lower == 'glorp':
@@ -831,6 +842,60 @@ class TwitchIRC:
 
                 if not command_raw:
                     return
+                if command_raw == "level":
+                    target = parts[1].replace("@", "").strip().lower() if len(parts) > 1 else author_lower
+                    profile = self.user_rpg.get_profile(target)
+                    if not profile:
+                        self.send_message(channel, f"@{author}, usuário inválido.")
+                    else:
+                        self.send_message(channel, f"@{author}, @{target} está no nível {profile.get('level', 1)} ({profile.get('xp', 0)} XP).")
+                    return
+
+                if command_raw == "class":
+                    if len(parts) > 1 and parts[1].isdigit() and author_lower not in self.IGNORED_NICKS:
+                        success, reason, profile = self.user_rpg.choose_class(author, parts[1])
+                        if success and profile:
+                            tags = self.user_tags.get_tags(author)
+                            recent = list(self.recent_messages.get(channel, []))[-8:]
+                            interactions = "\n".join(f"{m.get('author')}: {m.get('content')}" for m in recent if m.get('author','').lower() in {author_lower, self.auth.bot_nick.lower()} or f"@{author_lower}" in (m.get('content') or "").lower())
+                            lore_prompt = ("Escreva uma lore curta (2-3 frases) em português para um personagem de RPG de chat. "
+                                f"Usuário: @{author}. Classe: {profile['class_name']} — {profile.get('class_description','')}. "
+                                f"Tags/feitos: {', '.join(tags) if tags else 'ainda sem tags'}. Interações recentes: {interactions or 'poucas interações disponíveis'}. "
+                                "Use humor e detalhes específicos quando possível, sem inventar fatos biográficos reais. Retorne somente a lore.")
+                            try:
+                                lore = self.gemini_client.get_response(lore_prompt, channel, "system", self.memory_mgr, live_context=self.get_live_context(channel))
+                                lore = re.sub(r"^@\w+,\s*", "", lore or "").strip()
+                                if lore: self.user_rpg.set_lore(author, lore)
+                            except Exception as exc:
+                                logging.warning("[RPG] Falha ao gerar lore para %s: %s", author, exc)
+                            profile = self.user_rpg.get_profile(author) or profile
+                            lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
+                            self.send_message(channel, f"@{author} escolheu {profile['class_name']}! {lore}")
+                        elif reason == "level":
+                            self.send_message(channel, f"@{author}, você precisa alcançar o nível 10 para escolher uma classe.")
+                        elif reason == "chosen":
+                            self.send_message(channel, f"@{author}, sua classe já é {profile.get('class_name')}.")
+                        else:
+                            self.send_message(channel, f"@{author}, escolha 1, 2 ou 3 após *class.")
+                        return
+                    target = parts[1].replace("@", "").strip().lower() if len(parts) > 1 and not parts[1].isdigit() else author_lower
+                    profile = self.user_rpg.get_profile(target)
+                    if not profile:
+                        self.send_message(channel, f"@{author}, usuário inválido.")
+                        return
+                    options = profile.get("class_options") or []
+                    if options and not profile.get("class_name"):
+                        choices = " | ".join(f"{i}. {item['name']} — {item['description']}" for i, item in enumerate(options, 1))
+                        self.send_message(channel, f"@{author}, @{target} precisa escolher uma classe: {choices}. Use *class 1, *class 2 ou *class 3 para escolher a sua.")
+                    elif profile.get("class_name"):
+                        lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
+                        class_display = profile.get("evolved_class_name") if profile.get("evolved") else profile["class_name"]
+                        class_description = profile.get("evolved_description") if profile.get("evolved") else profile.get("class_description")
+                        self.send_long_message(channel, f"Classe de @{target}: {class_display}. {class_description or ''} Lore: {lore}")
+                    else:
+                        self.send_message(channel, f"@{author}, @{target} ainda não desbloqueou uma classe. No nível 10 poderá escolher uma.")
+                    return
+
                 if command_raw == "tag":
                     target = parts[1].replace("@", "").strip().lower() if len(parts) > 1 else author_lower
                     if not target or target in self.IGNORED_NICKS:
@@ -984,7 +1049,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Tags: *tag [usuário] (ou *tag para suas tags), *addtag [usuário] [tag] e *removetag [usuário] [tag]. Comandos: *analysis, *8ball, *emote, *steam, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "Comandos públicos: level, class, tag, addtag, removetag, analysis, 8ball, emote, steam, cookie, balance, empire, leaderboard, fatking, debt, slots, duel, ticket, sorteio, transfer, fortune, roll, bald, check, help.")
                     return
                 
                 if command_raw == "help":
@@ -995,6 +1060,8 @@ class TwitchIRC:
                         return
                     
                     help_msg = {
+                        "level": "Veja seu nível ou o de alguém. Ex: *level @nick.",
+                        "class": "Veja a classe/lore ou escolha sua classe ao alcançar nível 10. Use *class, *class @nick ou *class 1/2/3.",
                         "check": "glorp checa status das features.",
                         "slots": "glorp aposte cookies! *slots [valor] (min 10).",
                         "duel": "glorp desafie alguém por cookies. *duel @nick [valor] (min 10).",
