@@ -857,7 +857,7 @@ class TwitchIRC:
                         if success and profile:
                             tags = self.user_tags.get_tags(author)
                             recent = list(self.recent_messages.get(channel, []))[-8:]
-                            interactions = "\n".join(f"{m.get('author')}: {m.get('content')}" for m in recent if m.get('author','').lower() == author_lower)
+                            interactions = "\n".join(f"{m.get('author')}: {m.get('content')}" for m in recent if m.get('author','').lower() in {author_lower, self.auth.bot_nick.lower()} or f"@{author_lower}" in (m.get('content') or "").lower())
                             lore_prompt = ("Escreva uma lore curta (2-3 frases) em português para um personagem de RPG de chat. "
                                 f"Usuário: @{author}. Classe: {profile['class_name']} — {profile.get('class_description','')}. "
                                 f"Tags/feitos: {', '.join(tags) if tags else 'ainda sem tags'}. Interações recentes: {interactions or 'poucas interações disponíveis'}. "
