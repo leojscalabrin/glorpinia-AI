@@ -192,6 +192,9 @@ class CookieSystem:
                 c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_add, nick))
                 conn.commit()
             logging.info(f"[CookieSystem] +{amount_to_add} cookies para {nick}.")
+            manager = getattr(self.bot, "user_rpg", None)
+            if manager:
+                manager.record_cookie_change(nick, amount_to_add, gained=True)
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao adicionar cookies para {nick}: {e}")
 
