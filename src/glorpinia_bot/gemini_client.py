@@ -464,7 +464,8 @@ class GeminiClient:
         if not matches:
             return generated_text
 
-        key = (channel.lower(), author.lower())
+        # Penalty cooldown is global per user, not per channel, to prevent cross-chat duplicate punishments.
+        key = author.lower()
         now = time.time()
         state = self._cookie_guard_state.get(
             key,
