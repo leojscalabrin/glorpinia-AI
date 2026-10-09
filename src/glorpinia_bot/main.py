@@ -1529,7 +1529,7 @@ class TwitchIRC:
                 self.send_message(channel, f"Status: peepoChat Chat {c_st} | glorp 📡 Listen {l_st} | peepoTalk Comment {cm_st}")
                 return
             elif command_name == "commands":
-                self.send_message(channel, "glorp Comandos: 8ball, cookie, balance, empire, leaderboard, fatking, slots, duel, ticket, sorteio, help, fortune, analysis, roll, (ADMIN): chat/listen/comment [on/off], addcookie/removecookie [nick] [valor], transfer [origem] [destino] [valor], check, scan, debug")
+                self.send_message(channel, "glorp level, class, ranking, tag, analysis, 8ball, emote , steam, cookie, balance, empire, leaderboard, fatking , debt, slots, duel, ticket, sorteio, transfer, fortune, roll, bald , check. Use *help [comando]")
                 return
             elif command_name == "scan" and self.listen_feature:
                 self.listen_feature.trigger_manual_scan(channel)
