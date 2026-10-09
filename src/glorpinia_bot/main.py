@@ -1049,7 +1049,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp RPG: *level [usuário], *class [usuário] e *class 1/2/3 para escolher. Tags: *tag [usuário], *addtag [usuário] [tag] e *removetag [usuário] [tag]. Comandos: *analysis, *8ball, *emote, *steam, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "Comandos públicos: level, class, tag, addtag, removetag, analysis, 8ball, emote, steam, cookie, balance, empire, leaderboard, fatking, debt, slots, duel, ticket, sorteio, transfer, fortune, roll, bald, check, help.")
                     return
                 
                 if command_raw == "help":
