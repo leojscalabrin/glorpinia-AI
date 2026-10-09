@@ -220,6 +220,9 @@ class CookieSystem:
                 c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_remove, bot_nick))
                 conn.commit()
                 logging.info(f"[CookieSystem] Transferidos {amount_to_remove} cookies de {nick} para {bot_nick}. Saldo pode estar negativo.")
+            manager = getattr(self.bot, "user_rpg", None)
+            if manager:
+                manager.record_cookie_change(nick, amount_to_remove, gained=False)
                     
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao remover/transferir cookies de {nick}: {e}")
