@@ -319,6 +319,20 @@ class GeminiClient:
                     tag_context_parts.append(f"Situação econômica de @{author}: {'endividado' if balance < 0 else 'saldo positivo' if balance > 0 else 'sem saldo'} (saldo numérico: {balance}).")
             except Exception:
                 pass
+            # Considere também os perfis de quem foi explicitamente mencionado na mensagem.
+            mentioned_nicks = {n.lower() for n in re.findall(r"@([A-Za-z0-9_]+)", query or "") if n.lower() != author.lower()}
+            for mentioned_nick in mentioned_nicks:
+                other = rpg_manager.get_profile(mentioned_nick)
+                if not other:
+                    continue
+                other_power = "iniciante" if other.get("level", 1) < 10 else ("experiente" if other.get("level", 1) < 40 else ("muito poderoso" if other.get("level", 1) < 100 else "lendário"))
+                other_class = other.get("evolved_class_name") if other.get("evolved") else other.get("class_name")
+                summary = f"progressão de poder: {other_power}"
+                if other_class:
+                    summary += f"; arquétipo: {other_class}"
+                if other.get("lore"):
+                    summary += f"; lore: {other['lore']}"
+                tag_context_parts.append(f"Perfil implícito de @{mentioned_nick}: {summary}")
         if tag_context_parts:
             tag_context_parts.append("Use tags, poder de RPG e situação econômica apenas para calibrar intimidade, respeito, confiança e brincadeiras de modo sutil. NÃO cite nível, nome da classe, XP ou saldo exato espontaneamente. Saldo negativo não autoriza grosseria automática nem novas punições: não continue tirando cookies em sequência; só proponha/performe perda quando a interação atual justificar claramente, respeitando os cooldowns e regras da economia.")
             rag_context = "\n\n".join(part for part in [rag_context, "**CONTEXTO SOCIAL, TAGS, RPG E ECONOMIA (não recitar):**\n" + "\n".join(tag_context_parts)] if part.strip())
