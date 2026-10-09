@@ -299,7 +299,7 @@ class GeminiClient:
             if tags:
                 tag_context_parts.append(f"Tags persistentes de @{nick}: " + ", ".join(str(tag) for tag in tags))
         if tag_context_parts:
-            rag_context = "\\n\\n".join(part for part in [rag_context, "**TAGS DE USUÁRIOS (contexto para personalizar a interação):**\\n" + "\\n".join(tag_context_parts)] if part.strip())
+            rag_context = "\n\n".join(part for part in [rag_context, "**TAGS DE USUÁRIOS (contexto para personalizar a interação):**\n" + "\n".join(tag_context_parts)] if part.strip())
         logging.debug(
             "[Gemini] Contextos montados channel=%s author=%s chat=%s memory=%s web=%s total_chars=%s",
             channel,
