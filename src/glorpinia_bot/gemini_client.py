@@ -181,6 +181,8 @@ class GeminiClient:
         [[COOKIE:TAKE:nick:quantidade]]
         A tag de cookie deve ser o ÚLTIMO conteúdo da resposta, sem texto depois.
         Nunca explique o comando, nunca use blocos de código, e nunca escreva variações cruas como COOKIE:GIVE fora da tag.
+        Tags de usuários são títulos/contextos persistentes e podem conter espaços. Ao sugerir uma tag, use exatamente [[USER_TAG:add:nick:Nome da tag]], sem aspas no marcador. O marcador é metadado interno e será removido antes da mensagem chegar ao chat. Leve tags existentes em conta com bom senso, sem reduzir a pessoa a elas.
+        Quando a conversa revelar claramente uma conquista, função ou contexto duradouro relevante de um usuário, você pode sugerir UMA tag nova usando exatamente [[USER_TAG:add:nick:Nome da tag]]. O marcador é metadado interno e será removido antes da mensagem chegar ao chat. Não invente fatos; nunca sugira tags ofensivas ou sensíveis. Não sugira tags em toda resposta. O sistema limita cada usuário a 5 tags.
         </runtime_rules>
         """
 
@@ -288,6 +290,16 @@ class GeminiClient:
             logging.warning("[Gemini] Falha na busca web channel=%s author=%s error=%s", channel, author, e)
 
         rag_context = "\n\n".join([ctx for ctx in [chat_context_str, memory_context, web_context] if ctx.strip()])
+        user_tags = (injection_context or {}).get("user_tags") or []
+        mentioned_user_tags = (injection_context or {}).get("mentioned_user_tags") or {}
+        tag_context_parts = []
+        if user_tags:
+            tag_context_parts.append(f"Tags persistentes de @{author}: " + ", ".join(str(tag) for tag in user_tags))
+        for nick, tags in mentioned_user_tags.items():
+            if tags:
+                tag_context_parts.append(f"Tags persistentes de @{nick}: " + ", ".join(str(tag) for tag in tags))
+        if tag_context_parts:
+            rag_context = "\n\n".join(part for part in [rag_context, "**TAGS DE USUÁRIOS (contexto para personalizar a interação):**\n" + "\n".join(tag_context_parts)] if part.strip())
         logging.debug(
             "[Gemini] Contextos montados channel=%s author=%s chat=%s memory=%s web=%s total_chars=%s",
             channel,
