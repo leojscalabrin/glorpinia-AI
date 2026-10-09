@@ -78,7 +78,10 @@ class UserRPGManager:
             p["last_message_at"] = time.time()
         if p["level"] >= 10 and old < 10 and not p.get("class_name") and not p.get("class_options"):
             p["class_options"] = [{"name": n, "description": d} for n, d in random.sample(CLASS_POOL, 3)]
-        if p["level"] >= 100 and p.get("class_name"): p["evolved"] = True
+        if p["level"] >= 100 and p.get("class_name") and not p.get("evolved"):
+            p["evolved"] = True
+            p["evolved_class_name"] = p["class_name"] + " Ascendente"
+            p["evolved_description"] = "Uma forma desperta, mais rara e poderosa do seu arquétipo original."
         self._save()
         return {"old_level": old, "level": p["level"], "leveled": p["level"] > old, "profile": dict(p)}
 
