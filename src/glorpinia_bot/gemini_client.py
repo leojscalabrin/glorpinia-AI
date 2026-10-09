@@ -298,8 +298,30 @@ class GeminiClient:
         for nick, tags in mentioned_user_tags.items():
             if tags:
                 tag_context_parts.append(f"Tags persistentes de @{nick}: " + ", ".join(str(tag) for tag in tags))
+
+        # RPG e cookies são contexto implícito de personalidade, nunca texto para recitar ao usuário.
+        rpg_manager = getattr(getattr(self.cookie_system, "bot", None), "user_rpg", None)
+        if rpg_manager:
+            profile = rpg_manager.get_profile(author)
+            if profile:
+                power = "iniciante" if profile.get("level", 1) < 10 else ("experiente" if profile.get("level", 1) < 40 else ("muito poderoso" if profile.get("level", 1) < 100 else "lendário"))
+                details = [f"progressão de poder: {power}"]
+                if profile.get("class_name"):
+                    details.append(f"arquétipo: {profile['class_name']}")
+                    if profile.get("evolved"):
+                        details.append("arquétipo já evoluído")
+                if profile.get("lore"):
+                    details.append(f"lore: {profile['lore']}")
+                tag_context_parts.append(f"Perfil implícito de @{author}: " + "; ".join(details))
+            try:
+                balance = self.cookie_system.get_cookies(author) if self.cookie_system else None
+                if balance is not None:
+                    tag_context_parts.append(f"Situação econômica de @{author}: {'endividado' if balance < 0 else 'saldo positivo' if balance > 0 else 'sem saldo'} (saldo numérico: {balance}).")
+            except Exception:
+                pass
         if tag_context_parts:
-            rag_context = "\n\n".join(part for part in [rag_context, "**TAGS DE USUÁRIOS (contexto para personalizar a interação):**\n" + "\n".join(tag_context_parts)] if part.strip())
+            tag_context_parts.append("Use tags, poder de RPG e situação econômica apenas para calibrar intimidade, respeito, confiança e brincadeiras de modo sutil. NÃO cite nível, nome da classe, XP ou saldo exato espontaneamente. Saldo negativo não autoriza grosseria automática nem novas punições: não continue tirando cookies em sequência; só proponha/performe perda quando a interação atual justificar claramente, respeitando os cooldowns e regras da economia.")
+            rag_context = "\n\n".join(part for part in [rag_context, "**CONTEXTO SOCIAL, TAGS, RPG E ECONOMIA (não recitar):**\n" + "\n".join(tag_context_parts)] if part.strip())
         logging.debug(
             "[Gemini] Contextos montados channel=%s author=%s chat=%s memory=%s web=%s total_chars=%s",
             channel,
