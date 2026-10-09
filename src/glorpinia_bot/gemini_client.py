@@ -181,7 +181,7 @@ class GeminiClient:
         [[COOKIE:TAKE:nick:quantidade]]
         A tag de cookie deve ser o ÚLTIMO conteúdo da resposta, sem texto depois.
         Nunca explique o comando, nunca use blocos de código, e nunca escreva variações cruas como COOKIE:GIVE fora da tag.
-        Tags de usuários são títulos/contextos persistentes: leve-as em conta com bom senso, sem reduzir a pessoa a elas.
+        Tags de usuários são títulos/contextos persistentes e podem conter espaços. Ao sugerir uma tag, use exatamente [[USER_TAG:add:nick:Nome da tag]], sem aspas no marcador. O marcador é metadado interno e será removido antes da mensagem chegar ao chat. Leve tags existentes em conta com bom senso, sem reduzir a pessoa a elas.
         Quando a conversa revelar claramente uma conquista, função ou contexto duradouro relevante de um usuário, você pode sugerir UMA tag nova usando exatamente [[USER_TAG:add:nick:Nome da tag]]. O marcador é metadado interno e será removido antes da mensagem chegar ao chat. Não invente fatos; nunca sugira tags ofensivas ou sensíveis. Não sugira tags em toda resposta. O sistema limita cada usuário a 5 tags.
         </runtime_rules>
         """
