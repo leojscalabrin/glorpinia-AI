@@ -889,8 +889,9 @@ class TwitchIRC:
                         self.send_message(channel, f"@{author}, @{target} precisa escolher uma classe: {choices}. Use *class 1, *class 2 ou *class 3 para escolher a sua.")
                     elif profile.get("class_name"):
                         lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
-                        evolution = " (forma evoluída)" if profile.get("evolved") else ""
-                        self.send_long_message(channel, f"Classe de @{target}: {profile['class_name']}{evolution}. {profile.get('class_description') or ''} Lore: {lore}")
+                        class_display = profile.get("evolved_class_name") if profile.get("evolved") else profile["class_name"]
+                        class_description = profile.get("evolved_description") if profile.get("evolved") else profile.get("class_description")
+                        self.send_long_message(channel, f"Classe de @{target}: {class_display}. {class_description or ''} Lore: {lore}")
                     else:
                         self.send_message(channel, f"@{author}, @{target} ainda não desbloqueou uma classe. No nível 10 poderá escolher uma.")
                     return
@@ -1048,7 +1049,7 @@ class TwitchIRC:
                     return
                 
                 if command_raw == "commands":
-                    self.send_message(channel, "glorp Tags: *tag [usuário] (ou *tag para suas tags), *addtag [usuário] [tag] e *removetag [usuário] [tag]. Comandos: *analysis, *8ball, *emote, *steam, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
+                    self.send_message(channel, "glorp RPG: *level [usuário], *class [usuário] e *class 1/2/3 para escolher. Tags: *tag [usuário], *addtag [usuário] [tag] e *removetag [usuário] [tag]. Comandos: *analysis, *8ball, *emote, *steam, *cookie, *balance, *empire, *leaderboard, *fatking, *debt, *slots, *duel, *ticket, *sorteio, *transfer, *fortune, *roll, *bald, *check, *scan, *chat, *listen, *comment (Use *help [comando] para detalhes)")
                     return
                 
                 if command_raw == "help":
@@ -1059,6 +1060,8 @@ class TwitchIRC:
                         return
                     
                     help_msg = {
+                        "level": "Veja seu nível ou o de alguém. Ex: *level @nick.",
+                        "class": "Veja a classe/lore ou escolha sua classe ao alcançar nível 10. Use *class, *class @nick ou *class 1/2/3.",
                         "check": "glorp checa status das features.",
                         "slots": "glorp aposte cookies! *slots [valor] (min 10).",
                         "duel": "glorp desafie alguém por cookies. *duel @nick [valor] (min 10).",
