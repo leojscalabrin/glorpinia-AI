@@ -144,6 +144,15 @@ class UserRPGManager:
             return True
 
 
+    def get_profile(self, nick):
+        """Return a copy of a user RPG profile, or None if the user has no profile yet."""
+        key = self._nick(nick)
+        if not key:
+            return None
+        with self._lock:
+            profile = self._users.get(key)
+            return dict(profile) if profile is not None else None
+
     def get_ranking(self, limit=5):
         """Return profiles ordered by level, then total XP, descending."""
         try:
