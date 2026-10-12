@@ -1076,6 +1076,7 @@ class TwitchIRC:
                         "level": "Veja seu nível ou o de alguém. Ex: *level @nick.",
                         "ranking": "Mostra os 5 usuários com maiores níveis e suas classes, quando tiverem.",
                         "class": "Veja a classe/lore ou escolha sua classe ao alcançar nível 10. Use *class, *class @nick ou *class 1/2/3.",
+                        "tag": "Veja suas tags ou as de outro usuário. Ex: *tag ou *tag @nick.",
                         "check": "glorp checa status das features.",
                         "slots": "glorp aposte cookies! *slots [valor] (min 10).",
                         "duel": "glorp desafie alguém por cookies. *duel @nick [valor] (min 10).",
