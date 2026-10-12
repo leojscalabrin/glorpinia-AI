@@ -859,9 +859,9 @@ class TwitchIRC:
                     target = parts[1].replace("@", "").strip().lower() if len(parts) > 1 else author_lower
                     profile = self.user_rpg.get_profile(target)
                     if not profile:
-                        self.send_message(channel, f"@{author}, usuário inválido.")
+                        self.send_message(channel, "Usuário inválido.")
                     else:
-                        self.send_message(channel, f"@{author}, @{target} está no nível {profile.get('level', 1)} ({profile.get('xp', 0)} XP).")
+                        self.send_message(channel, f"Nível de @{target}: {profile.get('level', 1)} ({profile.get('xp', 0)} XP).")
                     return
 
                 if command_raw == "class":
@@ -885,40 +885,40 @@ class TwitchIRC:
                             lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
                             self.send_message(channel, f"@{author} escolheu {profile['class_name']}! {lore}")
                         elif reason == "level":
-                            self.send_message(channel, f"@{author}, você precisa alcançar o nível 10 para escolher uma classe.")
+                            self.send_message(channel, "Você precisa alcançar o nível 10 para escolher uma classe.")
                         elif reason == "chosen":
-                            self.send_message(channel, f"@{author}, sua classe já é {profile.get('class_name')}.")
+                            self.send_message(channel, f"Sua classe já é {profile.get('class_name')}.")
                         else:
-                            self.send_message(channel, f"@{author}, escolha 1, 2 ou 3 após *class.")
+                            self.send_message(channel, "Escolha 1, 2 ou 3 após *class.")
                         return
                     target = parts[1].replace("@", "").strip().lower() if len(parts) > 1 and not parts[1].isdigit() else author_lower
                     profile = self.user_rpg.get_profile(target)
                     if not profile:
-                        self.send_message(channel, f"@{author}, usuário inválido.")
+                        self.send_message(channel, "Usuário inválido.")
                         return
                     options = profile.get("class_options") or []
                     if options and not profile.get("class_name"):
                         choices = " | ".join(f"{i}. {item['name']} — {item['description']}" for i, item in enumerate(options, 1))
-                        self.send_message(channel, f"@{author}, @{target} precisa escolher uma classe: {choices}. Use *class 1, *class 2 ou *class 3 para escolher a sua.")
+                        self.send_message(channel, f"@{target} precisa escolher uma classe: {choices}. Use *class 1, *class 2 ou *class 3 para escolher a sua.")
                     elif profile.get("class_name"):
                         lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
                         class_display = profile.get("evolved_class_name") if profile.get("evolved") else profile["class_name"]
                         class_description = profile.get("evolved_description") if profile.get("evolved") else profile.get("class_description")
                         self.send_long_message(channel, f"Classe de @{target}: {class_display}. {class_description or ''} Lore: {lore}")
                     else:
-                        self.send_message(channel, f"@{author}, @{target} ainda não desbloqueou uma classe. No nível 10 poderá escolher uma.")
+                        self.send_message(channel, f"@{target} ainda não desbloqueou uma classe. No nível 10 poderá escolher uma.")
                     return
 
                 if command_raw == "tag":
                     target = parts[1].replace("@", "").strip().lower() if len(parts) > 1 else author_lower
                     if not target or target in self.IGNORED_NICKS:
-                        self.send_message(channel, f"@{author}, usuário inválido.")
+                        self.send_message(channel, "Usuário inválido.")
                         return
                     tags = self.user_tags.get_tags(target)
                     if tags:
                         self.send_message(channel, f"Tags de @{target}: " + " | ".join(tags))
                     else:
-                        self.send_message(channel, f"@{author}, @{target} ainda não tem tags.")
+                        self.send_message(channel, f"@{target} ainda não tem tags.")
                     return
 
                 if command_raw in ("addtag", "removetag"):
@@ -934,7 +934,7 @@ class TwitchIRC:
                     if len(tag_name) >= 2 and tag_name[0] == tag_name[-1] and tag_name[0] in ('"', "'"):
                         tag_name = tag_name[1:-1].strip()
                     if not target or target in self.IGNORED_NICKS:
-                        self.send_message(channel, f"@{author}, usuário inválido.")
+                        self.send_message(channel, "Usuário inválido.")
                         return
                     if command_raw == "addtag":
                         success, reason = self.user_tags.add_tag(target, tag_name)
