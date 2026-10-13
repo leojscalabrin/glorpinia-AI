@@ -821,7 +821,7 @@ class TwitchIRC:
             )
             self._maybe_register_recurring_memory_loop(channel, author, content)
 
-            # XP por mensagens: cooldown global por usuário evita duplicidade entre canais.
+            # XP por mensagens: cada mensagem normal concede 1 XP, sem cooldown nem teto diário.
             xp_event = self.user_rpg.record_message(author, channel, is_command=content.startswith("*"))
             if xp_event and xp_event.get("leveled") and self.is_feature_enabled(channel, "comment"):
                 new_level = xp_event["level"]
@@ -1405,8 +1405,8 @@ class TwitchIRC:
                 if self.cookie_system:
                     self.cookie_system.handle_interaction(author.lower())
 
-                # Interação direta com a Glorpinia concede XP mesmo se o cooldown de chat estiver ativo.
-                interaction_xp = self.user_rpg.add_xp(author_lower, 12, channel)
+                # Interação direta com a Glorpinia concede XP adicional.
+                interaction_xp = self.user_rpg.add_xp(author_lower, 12, channel, reason="menção direta à Glorpinia")
                 if interaction_xp and interaction_xp.get("leveled") and self.is_feature_enabled(channel, "comment"):
                     new_level = interaction_xp["level"]
                     notice = f"O @{author} passou para o nível {new_level}! PogChamp"

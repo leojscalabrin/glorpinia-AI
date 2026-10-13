@@ -175,7 +175,7 @@ class Comment:
                         nick = active_by_nick.get(target)
                         if not nick or target == self.bot.auth.bot_nick.lower() or target in self.bot.IGNORED_NICKS:
                             continue
-                        xp_event = rpg_manager.add_xp(nick, 8, channel)
+                        xp_event = rpg_manager.add_xp(nick, 8, channel, reason="menção em comentário aleatório")
                         if xp_event and xp_event.get("leveled") and self.bot.is_feature_enabled(channel, "comment"):
                             level = xp_event["level"]
                             notice = f"O @{nick} passou para o nível {level}! PogChamp"

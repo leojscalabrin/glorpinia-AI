@@ -18,7 +18,7 @@ CLASS_POOL = [
 
 class UserRPGManager:
     DEFAULT_FILE = "user_rpg.json"
-    MESSAGE_XP = 5
+    MESSAGE_XP = 1
     MAX_COOKIE_XP_PER_EVENT = 25
 
     def __init__(self, path=None):
@@ -70,12 +70,18 @@ class UserRPGManager:
             level += 1
         return level
 
-    def _add_xp_locked(self, nick, amount, channel=None):
+    def _add_xp_locked(self, nick, amount, channel=None, reason="recompensa RPG"):
         p = self._ensure(nick)
         if not p: return None
         old = int(p.get("level", 1))
-        p["xp"] = max(0, int(p.get("xp", 0)) + int(amount))
+        xp_before = int(p.get("xp", 0))
+        p["xp"] = max(0, xp_before + int(amount))
         p["level"] = self._level_for_xp(p["xp"])
+        applied = p["xp"] - xp_before
+        logging.debug(
+            "[RPG][XP] nick=%s motivo=%s solicitado=%+d aplicado=%+d xp=%d->%d level=%d->%d",
+            self._nick(nick), reason, int(amount), applied, xp_before, p["xp"], old, p["level"]
+        )
         if channel:
             p["last_channel"] = channel.lower().lstrip("#")
             p["last_message_at"] = time.time()
@@ -88,9 +94,9 @@ class UserRPGManager:
         self._save()
         return {"old_level": old, "level": p["level"], "leveled": p["level"] > old, "profile": dict(p)}
 
-    def add_xp(self, nick, amount, channel=None):
+    def add_xp(self, nick, amount, channel=None, reason="recompensa RPG"):
         if not nick or not amount: return None
-        with self._lock: return self._add_xp_locked(nick, amount, channel)
+        with self._lock: return self._add_xp_locked(nick, amount, channel, reason)
 
     def record_message(self, nick, channel, is_command=False):
         if not self._nick(nick): return None
@@ -103,14 +109,16 @@ class UserRPGManager:
                 self._save()
                 return None
             # Cada mensagem normal concede XP; não há cooldown nem limite diário.
-            return self._add_xp_locked(key, self.MESSAGE_XP, channel)
+            return self._add_xp_locked(key, self.MESSAGE_XP, channel, reason="mensagem no chat")
 
     def record_cookie_change(self, nick, amount, gained=True):
         try: amount = max(0, int(amount))
         except (TypeError, ValueError): return None
         if not amount: return None
         points = min(self.MAX_COOKIE_XP_PER_EVENT, max(1, int(math.log2(amount + 1) * 2.5)))
-        return self.add_xp(nick, points if gained else -max(1, points // 2))
+        delta = points if gained else -max(1, points // 2)
+        reason = f"cookies {'ganhos' if gained else 'perdidos'} ({amount})"
+        return self.add_xp(nick, delta, reason=reason)
 
     def choose_class(self, nick, choice):
         with self._lock:
