@@ -165,7 +165,7 @@ class Comment:
                 if rpg_manager:
                     mentioned_targets = {
                         match.lower()
-                        for match in re.findall(r"(?<!\\w)@([A-Za-z0-9_]+)", final_message)
+                        for match in re.findall(r"(?<!\w)@([A-Za-z0-9_]+)", final_message)
                     }
                     drama_target = (drama_trigger or {}).get("target")
                     if drama_target:
