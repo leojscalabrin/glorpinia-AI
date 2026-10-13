@@ -18,9 +18,9 @@ CLASS_POOL = [
 
 class UserRPGManager:
     DEFAULT_FILE = "user_rpg.json"
-    MESSAGE_XP = 2
-    MESSAGE_COOLDOWN_SECONDS = 60
-    MAX_MESSAGE_XP_PER_DAY = 120
+    MESSAGE_XP = 5
+    MESSAGE_COOLDOWN_SECONDS = 30
+    MAX_MESSAGE_XP_PER_DAY = 300
     MAX_COOKIE_XP_PER_EVENT = 25
 
     def __init__(self, path=None):
@@ -50,8 +50,11 @@ class UserRPGManager:
 
     @staticmethod
     def xp_to_next(level):
-        if level < 100: return int(80 + level * 24 + level ** 1.35 * 3)
-        return int(2800 + (level - 99) ** 1.55 * 115)
+        """XP necessário para o próximo nível: curva acessível até 99 e forte escalada após 100."""
+        level = max(1, int(level))
+        if level < 100:
+            return int(25 + level * 3 + level ** 1.25 * 1.5)
+        return int(900 + (level - 99) ** 1.7 * 90)
 
     def _ensure(self, nick):
         nick = self._nick(nick)

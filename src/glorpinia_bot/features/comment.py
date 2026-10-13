@@ -159,6 +159,30 @@ class Comment:
                     context_text=f"{topic} {context_str}",
                 )
                 self.bot.send_message(channel, formatted_message)
+
+                # XP vai apenas para usuários envolvidos diretamente no comentário aleatório.
+                rpg_manager = getattr(self.bot, "user_rpg", None)
+                if rpg_manager:
+                    mentioned_targets = {
+                        match.lower()
+                        for match in re.findall(r"(?<!\w)@([A-Za-z0-9_]+)", final_message)
+                    }
+                    drama_target = (drama_trigger or {}).get("target")
+                    if drama_target:
+                        mentioned_targets.add(str(drama_target).lower())
+                    active_by_nick = {nick.lower(): nick for nick in active_users if nick}
+                    for target in mentioned_targets:
+                        nick = active_by_nick.get(target)
+                        if not nick or target == self.bot.auth.bot_nick.lower() or target in self.bot.IGNORED_NICKS:
+                            continue
+                        xp_event = rpg_manager.add_xp(nick, 8, channel)
+                        if xp_event and xp_event.get("leveled") and self.bot.is_feature_enabled(channel, "comment"):
+                            level = xp_event["level"]
+                            notice = f"O @{nick} passou para o nível {level}! PogChamp"
+                            if level == 10:
+                                notice += " Use *class para escolher sua classe!"
+                            self.bot.send_message(channel, notice)
+
                 logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:80]}...")
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
