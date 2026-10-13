@@ -1406,7 +1406,7 @@ class TwitchIRC:
                     self.cookie_system.handle_interaction(author.lower())
 
                 # Interação direta com a Glorpinia concede XP adicional.
-                interaction_xp = self.user_rpg.add_xp(author_lower, 12, channel, reason="menção direta à Glorpinia")
+                interaction_xp = self.user_rpg.add_xp(author_lower, self.user_rpg.DIRECT_MENTION_XP, channel, reason="menção direta à Glorpinia")
                 if interaction_xp and interaction_xp.get("leveled") and self.is_feature_enabled(channel, "comment"):
                     new_level = interaction_xp["level"]
                     notice = f"O @{author} passou para o nível {new_level}! PogChamp"
