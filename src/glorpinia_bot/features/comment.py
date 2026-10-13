@@ -159,6 +159,21 @@ class Comment:
                     context_text=f"{topic} {context_str}",
                 )
                 self.bot.send_message(channel, formatted_message)
+
+                # Usuários que participaram do contexto recebem XP quando a Glorpinia comenta aleatoriamente.
+                rpg_manager = getattr(self.bot, "user_rpg", None)
+                if rpg_manager:
+                    for nick in set(active_users):
+                        if not nick or nick.lower() == self.bot.auth.bot_nick.lower() or nick.lower() in self.bot.IGNORED_NICKS:
+                            continue
+                        xp_event = rpg_manager.add_xp(nick, 8, channel)
+                        if xp_event and xp_event.get("leveled") and self.bot.is_feature_enabled(channel, "comment"):
+                            level = xp_event["level"]
+                            notice = f"O @{nick} passou para o nível {level}! PogChamp"
+                            if level == 10:
+                                notice += " Use *class para escolher sua classe!"
+                            self.bot.send_message(channel, notice)
+
                 logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:80]}...")
         except Exception as e:
             logging.error(f"[Comment] Falha ao gerar comentario: {e}")
