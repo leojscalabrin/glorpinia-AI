@@ -301,8 +301,16 @@ class GeminiClient:
 
         # RPG e cookies são contexto implícito de personalidade, nunca texto para recitar ao usuário.
         rpg_manager = getattr(getattr(self.cookie_system, "bot", None), "user_rpg", None)
+        # Compatibilidade defensiva: uma instância antiga carregada no servidor pode
+        # ainda não expor get_profile. O contexto RPG não deve derrubar a resposta do Gemini.
+        get_rpg_profile = getattr(rpg_manager, "get_profile", None) if rpg_manager else None
+        if rpg_manager and not callable(get_rpg_profile):
+            logging.error(
+                "[RPG] UserRPGManager sem get_profile; módulo carregado: %s",
+                getattr(type(rpg_manager), "__module__", "desconhecido"),
+            )
         if rpg_manager:
-            profile = rpg_manager.get_profile(author)
+            profile = get_rpg_profile(author) if callable(get_rpg_profile) else None
             if profile:
                 power = "iniciante" if profile.get("level", 1) < 10 else ("experiente" if profile.get("level", 1) < 40 else ("muito poderoso" if profile.get("level", 1) < 100 else "lendário"))
                 details = [f"progressão de poder: {power}"]
@@ -322,7 +330,7 @@ class GeminiClient:
             # Considere também os perfis de quem foi explicitamente mencionado na mensagem.
             mentioned_nicks = {n.lower() for n in re.findall(r"@([A-Za-z0-9_]+)", query or "") if n.lower() != author.lower()}
             for mentioned_nick in mentioned_nicks:
-                other = rpg_manager.get_profile(mentioned_nick)
+                other = get_rpg_profile(mentioned_nick) if callable(get_rpg_profile) else None
                 if not other:
                     continue
                 other_power = "iniciante" if other.get("level", 1) < 10 else ("experiente" if other.get("level", 1) < 40 else ("muito poderoso" if other.get("level", 1) < 100 else "lendário"))
