@@ -19,6 +19,8 @@ CLASS_POOL = [
 class UserRPGManager:
     DEFAULT_FILE = "user_rpg.json"
     MESSAGE_XP = 1
+    DIRECT_MENTION_XP = 3
+    COMMENT_MENTION_XP = 2
     MAX_COOKIE_XP_PER_EVENT = 25
 
     def __init__(self, path=None):
@@ -46,15 +48,16 @@ class UserRPGManager:
 
     @staticmethod
     def xp_to_next(level):
-        """XP para o próximo nível; são necessários exatamente 500 XP para chegar ao nível 10."""
+        """XP para o próximo nível; curva ajustada para cookies com conversão de 1:1."""
         level = max(1, int(level))
-        early_levels = (30, 35, 40, 45, 50, 55, 65, 80, 100)
+        # Total de 1.200 XP do nível 1 ao 10; valores maiores amortecem bônus grandes de cookies.
+        early_levels = (60, 70, 80, 100, 120, 140, 170, 210, 250)
         if level <= 9:
             return early_levels[level - 1]
         if level < 100:
             distance = level - 10
-            return int(100 + distance * 8 + distance ** 1.5 * 0.3)
-        return int(1000 + (level - 99) ** 1.7 * 90)
+            return int(250 + distance * 18 + distance ** 1.5 * 0.6)
+        return int(2500 + (level - 99) ** 1.7 * 90)
 
     def _ensure(self, nick):
         nick = self._nick(nick)
@@ -78,7 +81,8 @@ class UserRPGManager:
         p["xp"] = max(0, xp_before + int(amount))
         p["level"] = self._level_for_xp(p["xp"])
         applied = p["xp"] - xp_before
-        logging.debug(
+        # INFO para aparecer no journal mesmo quando o serviço não habilita DEBUG.
+        logging.info(
             "[RPG][XP] nick=%s motivo=%s solicitado=%+d aplicado=%+d xp=%d->%d level=%d->%d",
             self._nick(nick), reason, int(amount), applied, xp_before, p["xp"], old, p["level"]
         )
@@ -115,9 +119,11 @@ class UserRPGManager:
         try: amount = max(0, int(amount))
         except (TypeError, ValueError): return None
         if not amount: return None
+        # Ganhos de cookies convertem 1:1 em XP, sem teto por evento.
+        # Perdas mantêm a penalidade reduzida anterior para não zerar XP por uma transferência.
         points = min(self.MAX_COOKIE_XP_PER_EVENT, max(1, int(math.log2(amount + 1) * 2.5)))
-        delta = points if gained else -max(1, points // 2)
-        reason = f"cookies {'ganhos' if gained else 'perdidos'} ({amount})"
+        delta = amount if gained else -max(1, points // 2)
+        reason = f"cookies {'ganhos' if gained else 'perdidos'} ({amount}; conversão {'1:1' if gained else 'penalidade reduzida'})"
         return self.add_xp(nick, delta, reason=reason)
 
     def choose_class(self, nick, choice):
