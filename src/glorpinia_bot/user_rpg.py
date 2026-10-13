@@ -19,16 +19,12 @@ CLASS_POOL = [
 class UserRPGManager:
     DEFAULT_FILE = "user_rpg.json"
     MESSAGE_XP = 5
-    MESSAGE_COOLDOWN_SECONDS = 30
-    MAX_MESSAGE_XP_PER_DAY = 300
     MAX_COOKIE_XP_PER_EVENT = 25
 
     def __init__(self, path=None):
         self.path = path or os.getenv("USER_RPG_FILE", self.DEFAULT_FILE)
         self._lock = threading.RLock()
         self._users = {}
-        self._last_message_xp = {}
-        self._daily_message_xp = {}
         self._load()
 
     @staticmethod
@@ -50,11 +46,15 @@ class UserRPGManager:
 
     @staticmethod
     def xp_to_next(level):
-        """XP necessário para o próximo nível: curva acessível até 99 e forte escalada após 100."""
+        """XP para o próximo nível; são necessários exatamente 500 XP para chegar ao nível 10."""
         level = max(1, int(level))
+        early_levels = (30, 35, 40, 45, 50, 55, 65, 80, 100)
+        if level <= 9:
+            return early_levels[level - 1]
         if level < 100:
-            return int(25 + level * 3 + level ** 1.25 * 1.5)
-        return int(900 + (level - 99) ** 1.7 * 90)
+            distance = level - 10
+            return int(100 + distance * 8 + distance ** 1.5 * 0.3)
+        return int(1000 + (level - 99) ** 1.7 * 90)
 
     def _ensure(self, nick):
         nick = self._nick(nick)
@@ -94,23 +94,15 @@ class UserRPGManager:
 
     def record_message(self, nick, channel, is_command=False):
         if not self._nick(nick): return None
-        now, key = time.time(), self._nick(nick)
-        day = time.strftime("%Y-%m-%d", time.gmtime(now))
+        key = self._nick(nick)
         with self._lock:
             p = self._ensure(key)
             if p:
-                p["last_channel"], p["last_message_at"] = channel.lower().lstrip("#"), now
+                p["last_channel"], p["last_message_at"] = channel.lower().lstrip("#"), time.time()
             if is_command:
                 self._save()
                 return None
-            last, daily_key = self._last_message_xp.get(key, 0), (key, day)
-            daily = self._daily_message_xp.get(daily_key, 0)
-            if now - last < self.MESSAGE_COOLDOWN_SECONDS or daily >= self.MAX_MESSAGE_XP_PER_DAY:
-                if p:
-                    self._save()
-                return None
-            self._last_message_xp[key] = now
-            self._daily_message_xp[daily_key] = daily + self.MESSAGE_XP
+            # Cada mensagem normal concede XP; não há cooldown nem limite diário.
             return self._add_xp_locked(key, self.MESSAGE_XP, channel)
 
     def record_cookie_change(self, nick, amount, gained=True):
