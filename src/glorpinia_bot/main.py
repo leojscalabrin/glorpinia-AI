@@ -1405,6 +1405,15 @@ class TwitchIRC:
                 if self.cookie_system:
                     self.cookie_system.handle_interaction(author.lower())
 
+                # Interação direta com a Glorpinia concede XP mesmo se o cooldown de chat estiver ativo.
+                interaction_xp = self.user_rpg.add_xp(author_lower, 12, channel)
+                if interaction_xp and interaction_xp.get("leveled") and self.is_feature_enabled(channel, "comment"):
+                    new_level = interaction_xp["level"]
+                    notice = f"O @{author} passou para o nível {new_level}! PogChamp"
+                    if new_level == 10:
+                        notice += " Use *class para escolher sua classe!"
+                    self.send_message(channel, notice)
+
                 try:
                     # Convertendo Deque para List para a IA poder ler
                     recent_history_list = list(self.recent_messages.get(channel, []))
@@ -1547,10 +1556,10 @@ class TwitchIRC:
                 val = int(parts[2])
                 if val <= 0: raise ValueError
                 if command_name == "addcookie":
-                    self.cookie_system.add_cookies(target, val)
+                    self.cookie_system.add_cookies(target, val, award_xp=False)
                     self.send_message(channel, f"glorp +{val} 🍪  para {target}.")
                 elif command_name == "removecookie":
-                    self.cookie_system.remove_cookies(target, val)
+                    self.cookie_system.remove_cookies(target, val, award_xp=False)
                     self.send_message(channel, f"glorp -{val} 🍪  de {target}.")
                 return
             except ValueError:
