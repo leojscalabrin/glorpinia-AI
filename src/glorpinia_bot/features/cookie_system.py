@@ -196,8 +196,8 @@ class CookieSystem:
                 message += " Use *class para escolher sua classe!"
             self.bot.send_message(channel, message)
 
-    def add_cookies(self, nick: str, amount_to_add: int):
-        """Adiciona cookies a um usuário."""
+    def add_cookies(self, nick: str, amount_to_add: int, award_xp: bool = True):
+        """Adiciona cookies a um usuário; award_xp=False para ajustes administrativos."""
         if not self._is_nick_valid(nick): return 
         
         nick = nick.lower()
@@ -208,14 +208,15 @@ class CookieSystem:
                 c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_add, nick))
                 conn.commit()
             logging.info(f"[CookieSystem] +{amount_to_add} cookies para {nick}.")
-            self._award_rpg_cookie_xp(nick, amount_to_add, gained=True)
+            if award_xp:
+                self._award_rpg_cookie_xp(nick, amount_to_add, gained=True)
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao adicionar cookies para {nick}: {e}")
 
-    def remove_cookies(self, nick: str, amount_to_remove: int):
+    def remove_cookies(self, nick: str, amount_to_remove: int, award_xp: bool = True):
         """
-        Remove cookies de um usuário (podendo deixá-lo negativo/em dívida) 
-        e TRANSFERE para a conta do bot.
+        Remove cookies de um usuário (podendo deixá-lo negativo/em dívida)
+        e TRANSFERE para a conta do bot. award_xp=False desativa XP para ajustes administrativos.
         """
         if not self._is_nick_valid(nick): return 
         
@@ -234,7 +235,8 @@ class CookieSystem:
                 c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_remove, bot_nick))
                 conn.commit()
                 logging.info(f"[CookieSystem] Transferidos {amount_to_remove} cookies de {nick} para {bot_nick}. Saldo pode estar negativo.")
-            self._award_rpg_cookie_xp(nick, amount_to_remove, gained=False)
+            if award_xp:
+                self._award_rpg_cookie_xp(nick, amount_to_remove, gained=False)
                     
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao remover/transferir cookies de {nick}: {e}")
