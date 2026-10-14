@@ -177,11 +177,7 @@ class Comment:
                             continue
                         xp_event = rpg_manager.add_xp(nick, rpg_manager.COMMENT_MENTION_XP, channel, reason="menção em comentário aleatório")
                         if xp_event and xp_event.get("leveled") and self.bot.is_feature_enabled(channel, "comment"):
-                            level = xp_event["level"]
-                            notice = f"O @{nick} passou para o nível {level}! PogChamp"
-                            if level == 10:
-                                notice += " Use *class para escolher sua classe!"
-                            self.bot.send_message(channel, notice)
+                            self.bot.send_level_up_notice(channel, nick, xp_event["level"])
 
                 logging.debug(f"[Comment] Comentario enviado em {channel}: {final_message[:80]}...")
         except Exception as e:

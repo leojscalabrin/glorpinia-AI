@@ -190,11 +190,7 @@ class CookieSystem:
         profile = event.get("profile") or {}
         channel = profile.get("last_channel")
         if channel and self.bot.is_feature_enabled(channel, "comment"):
-            level = event["level"]
-            message = f"O @{nick} passou para o nível {level}! PogChamp"
-            if level == 10:
-                message += " Use *class para escolher sua classe!"
-            self.bot.send_message(channel, message)
+            self.bot.send_level_up_notice(channel, nick, event["level"])
 
     def add_cookies(self, nick: str, amount_to_add: int, award_xp: bool = True):
         """Adiciona cookies a um usuário; award_xp=False para ajustes administrativos."""
