@@ -25,6 +25,9 @@ TWITCH_REFRESH_TOKEN=your_refresh_token
 TWITCH_CHANNELS=channel_to_join
 ADMIN_NICKS=admin_nick
 
+-Optional: delay (in seconds) applied to level up notifications when the bot is not VIP/mod in the channel, to avoid collisions with other bot messages (Default: 4, 0 disables)
+LEVELUP_NOTICE_DELAY_SEC=4
+
 Obtain tokens from:
 - Twitch: [Twitch Token Generator](https://twitchtokengenerator.com) (scopes: `chat:read`, `chat:edit`)
 
