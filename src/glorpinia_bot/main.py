@@ -118,6 +118,11 @@ class TwitchIRC:
         self.processed_message_ids = deque(maxlen=500)
         self.recent_messages = {channel: deque(maxlen=100) for channel in self.auth.channels}
         self.last_bot_message_by_channel = {}
+
+        # Status do bot por canal (VIP/mod/broadcaster), atualizado via USERSTATE.
+        # Sem VIP/mod, mensagens enviadas em sequência podem ser descartadas pela Twitch.
+        self.bot_privileged_channels = {}
+        self.levelup_notice_delay_sec = float(os.getenv("LEVELUP_NOTICE_DELAY_SEC", "4"))
         
         # Cooldown timer para o trigger "oziell"
         self.last_oziell_time = 0
@@ -381,6 +386,40 @@ class TwitchIRC:
             self.social_dynamics.register_bot_message(channel)
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
+
+    def _update_bot_privileges(self, raw):
+        """Lê as badges do bot no USERSTATE e guarda se ele é VIP/mod/broadcaster no canal."""
+        try:
+            tags_part = raw.split(" ", 1)[0]
+            channel = raw.split("USERSTATE #", 1)[1].split()[0].strip().lower()
+            tags = dict(t.split("=", 1) for t in tags_part.lstrip("@").split(";") if "=" in t)
+            badges = {b.split("/")[0] for b in tags.get("badges", "").split(",") if b}
+            privileged = bool(badges & {"vip", "moderator", "broadcaster"})
+            if self.bot_privileged_channels.get(channel) != privileged:
+                print(f"[AUTH] Bot em #{channel}: privilegiado (VIP/mod)={privileged} badges={sorted(badges)}")
+            self.bot_privileged_channels[channel] = privileged
+        except Exception as e:
+            print(f"[ERROR] Falha ao interpretar USERSTATE: {e}")
+
+    def is_bot_privileged(self, channel):
+        """True se o bot é VIP/mod/broadcaster no canal. Desconhecido conta como não-VIP."""
+        return self.bot_privileged_channels.get(channel.lower(), False)
+
+    def send_level_up_notice(self, channel, author, new_level):
+        """Avisa o level up. Se o bot não for VIP/mod, atrasa o envio para não colidir
+        com outra mensagem do bot (que faria a Twitch descartar uma delas)."""
+        notice = f"@{author} passou para o nível {new_level}! PogChamp"
+        if new_level == 10:
+            notice += " Use *class para escolher sua classe!"
+
+        delay = 0 if self.is_bot_privileged(channel) else self.levelup_notice_delay_sec
+        if delay <= 0:
+            self.send_message(channel, notice)
+            return
+
+        logging.debug("[Main] levelup_notice_delayed channel=%s author=%s delay=%.1fs", channel, author, delay)
+        t = threading.Thread(target=self._send_message_part, args=(channel, notice, delay), daemon=True)
+        t.start()
 
     def _register_recent_message(self, channel, author, content):
         if channel not in self.recent_messages:
@@ -779,6 +818,10 @@ class TwitchIRC:
             ws.send("PONG :tmi.twitch.tv\r\n")
             return
 
+        if " USERSTATE #" in message and "PRIVMSG" not in message:
+            self._update_bot_privileges(message)
+            return
+
         if " JOIN #" in message:
             try:
                 channel_joined = message.split("#")[1].strip()
@@ -824,11 +867,7 @@ class TwitchIRC:
             # XP por mensagens: cada mensagem normal concede 1 XP, sem cooldown nem teto diário.
             xp_event = self.user_rpg.record_message(author, channel, is_command=content.startswith("*"))
             if xp_event and xp_event.get("leveled") and self.is_feature_enabled(channel, "comment"):
-                new_level = xp_event["level"]
-                notice = f"O @{author} passou para o nível {new_level}! PogChamp"
-                if new_level == 10:
-                    notice += " Use *class para escolher sua classe!"
-                self.send_message(channel, notice)
+                self.send_level_up_notice(channel, author, xp_event["level"])
 
             # PROCESSA COMANDOS E TRIGGERS
 
@@ -1408,11 +1447,7 @@ class TwitchIRC:
                 # Interação direta com a Glorpinia concede XP adicional.
                 interaction_xp = self.user_rpg.add_xp(author_lower, self.user_rpg.DIRECT_MENTION_XP, channel, reason="menção direta à Glorpinia")
                 if interaction_xp and interaction_xp.get("leveled") and self.is_feature_enabled(channel, "comment"):
-                    new_level = interaction_xp["level"]
-                    notice = f"O @{author} passou para o nível {new_level}! PogChamp"
-                    if new_level == 10:
-                        notice += " Use *class para escolher sua classe!"
-                    self.send_message(channel, notice)
+                    self.send_level_up_notice(channel, author, interaction_xp["level"])
 
                 try:
                     # Convertendo Deque para List para a IA poder ler
@@ -1615,7 +1650,7 @@ class TwitchIRC:
         """Handler para quando a conexao WebSocket é aberta."""
         token_for_send = self.auth.access_token
         
-        ws.send("CAP REQ :twitch.tv/membership twitch.tv/tags\r\n")
+        ws.send("CAP REQ :twitch.tv/membership twitch.tv/tags twitch.tv/commands\r\n")
         
         ws.send(f"PASS oauth:{token_for_send}\r\n")
         ws.send(f"NICK {self.auth.bot_nick}\r\n")
