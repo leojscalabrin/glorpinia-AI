@@ -38,7 +38,8 @@ from .features.seventv_emote import SevenTVEmote
 from .features.steam_info import SteamInfo
 from .seventv_channel_sync import SevenTVChannelSync
 from .user_tags import UserTagManager
-from .user_rpg import UserRPGManager
+from .user_rpg import UserRPGManager, CLASS_POOL
+from . import class_options
 
 log_level_name = os.getenv("GLORPINIA_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -134,6 +135,14 @@ class TwitchIRC:
         print(f"[AUTH] Admins carregados: {self.admin_nicks}")
         self.user_tags = UserTagManager()
         self.user_rpg = UserRPGManager()
+
+        # Opções de classe personalizadas (geradas pela IA antes do nível 10).
+        self.class_ai_enabled = os.getenv("CLASS_OPTIONS_AI_ENABLED", "1") != "0"
+        self.class_gen_retry_sec = float(os.getenv("CLASS_GEN_RETRY_SEC", "600"))
+        self._class_gen_lock = threading.Lock()
+        self._class_gen_inflight = set()
+        self._class_gen_last_attempt = {}
+        self.user_rpg.class_options_hook = self.schedule_class_options
 
         # Configuração do WebSocket e Shutdown
         self.ws = None
@@ -386,6 +395,95 @@ class TwitchIRC:
             self.social_dynamics.register_bot_message(channel)
         else:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
+
+    def schedule_class_options(self, nick, channel):
+        """Agenda (sem bloquear) a geração das opções de classe de `nick`.
+
+        Chamado pelo UserRPGManager a cada XP de quem está na faixa de preparo e ainda não tem opções.
+        Evita duplicidade com um conjunto de 'em andamento' e com um intervalo mínimo entre tentativas.
+        """
+        key = (nick or "").strip().lower()
+        if not key:
+            return False
+        if not self.class_ai_enabled:
+            self.user_rpg.assign_fallback_class_options(key)
+            return False
+
+        # Quem já desbloqueou a escolha (nível 10+) ignora o intervalo entre tentativas.
+        profile = self.user_rpg.get_profile(key)
+        unlocked = bool(profile and int(profile.get("level", 1)) >= self.user_rpg.CLASS_UNLOCK_LEVEL)
+
+        now = time.time()
+        with self._class_gen_lock:
+            if key in self._class_gen_inflight:
+                return False
+            if not unlocked and now - self._class_gen_last_attempt.get(key, 0) < self.class_gen_retry_sec:
+                return False
+            self._class_gen_inflight.add(key)
+            self._class_gen_last_attempt[key] = now
+
+        threading.Thread(target=self._class_options_worker, args=(key, channel), daemon=True).start()
+        return True
+
+    def _class_options_worker(self, nick, channel):
+        try:
+            profile = self.user_rpg.get_profile(nick)
+            if not profile or profile.get("class_name") or profile.get("class_options"):
+                return
+            channel = (profile.get("last_channel") or channel or "").lower().lstrip("#")
+
+            options = None
+            try:
+                options = self._request_ai_class_options(nick, channel, profile)
+            except Exception as exc:
+                logging.error("[RPG][Classes] Falha ao gerar opções para %s: %s", nick, exc)
+
+            if options and self.user_rpg.set_class_options(nick, options, "ai"):
+                logging.info("[RPG][Classes] Opções personalizadas prontas para %s", nick)
+                return
+
+            # Quem já desbloqueou a escolha (nível 10+) nunca pode ficar sem opções.
+            if self.user_rpg.assign_fallback_class_options(nick):
+                logging.warning("[RPG][Classes] IA indisponível para %s; usando a pool fixa.", nick)
+            else:
+                logging.info("[RPG][Classes] Sem opções para %s ainda; nova tentativa em %.0fs.", nick, self.class_gen_retry_sec)
+        finally:
+            with self._class_gen_lock:
+                self._class_gen_inflight.discard(nick)
+
+    def _collect_class_context(self, nick, channel):
+        """Reúne tudo que o bot sabe sobre a pessoa. Cada fonte falha isoladamente."""
+        def safe(fn, default):
+            try:
+                return fn()
+            except Exception as exc:
+                logging.debug("[RPG][Classes] fonte de contexto indisponível: %s", exc)
+                return default
+
+        tags = safe(lambda: self.user_tags.get_tags(nick), [])
+        cookies = safe(lambda: self.cookie_system.get_cookies(nick), 0)
+        memories, messages, social = [], [], None
+        if channel:
+            memories = [m[:220] for m in safe(lambda: self.memory_mgr.get_user_memory_samples(channel, nick, 12), [])]
+            social = safe(lambda: self.social_dynamics.get_user_social_summary(channel, nick), None)
+            history = safe(lambda: list(self.recent_messages.get(channel, [])), [])
+            messages = [str(m.get("content", ""))[:160] for m in history
+                        if str(m.get("author", "")).lower() == nick][-10:]
+        return tags, memories, messages, social, cookies
+
+    def _request_ai_class_options(self, nick, channel, profile):
+        tags, memories, messages, social, cookies = self._collect_class_context(nick, channel)
+        prompt = class_options.build_prompt(
+            nick, profile.get("level", 1), tags, memories, messages, social, cookies,
+            random.sample(CLASS_POOL, 4),
+        )
+        raw = self.gemini_client.request_pure_analysis(
+            prompt, generation_config={"temperature": 0.9, "response_mime_type": "application/json"}
+        )
+        options = class_options.parse_options(raw)
+        if not options:
+            logging.warning("[RPG][Classes] Resposta da IA inválida para %s: %.200r", nick, raw)
+        return options
 
     def _update_bot_privileges(self, raw):
         """Lê as badges do bot no USERSTATE e guarda se ele é VIP/mod/broadcaster no canal."""
@@ -927,6 +1025,9 @@ class TwitchIRC:
                             self.send_message(channel, "Você precisa alcançar o nível 10 para escolher uma classe.")
                         elif reason == "chosen":
                             self.send_message(channel, f"Sua classe já é {profile.get('class_name')}.")
+                        elif reason == "no_options":
+                            self.schedule_class_options(author_lower, channel)
+                            self.send_message(channel, f"@{author} estou preparando suas opções de classe. Tente *class de novo em instantes.")
                         else:
                             self.send_message(channel, "Escolha 1, 2 ou 3 após *class.")
                         return
@@ -936,9 +1037,16 @@ class TwitchIRC:
                         self.send_message(channel, "Usuário inválido.")
                         return
                     options = profile.get("class_options") or []
-                    if options and not profile.get("class_name"):
+                    unlocked = int(profile.get("level", 1)) >= self.user_rpg.CLASS_UNLOCK_LEVEL
+                    if options and unlocked and not profile.get("class_name"):
                         choices = " | ".join(f"{i}. {item['name']} — {item['description']}" for i, item in enumerate(options, 1))
-                        self.send_message(channel, f"@{target} precisa escolher uma classe: {choices}. Use *class 1, *class 2 ou *class 3 para escolher a sua.")
+                        self.send_long_message(channel, f"@{target} precisa escolher uma classe: {choices}. Use *class 1, *class 2 ou *class 3 para escolher a sua.")
+                    elif unlocked and not profile.get("class_name"):
+                        if target == author_lower:
+                            self.schedule_class_options(target, channel)
+                            self.send_message(channel, f"@{target} estou preparando suas opções de classe. Tente *class de novo em instantes.")
+                        else:
+                            self.send_message(channel, f"@{target} ainda não tem opções de classe prontas.")
                     elif profile.get("class_name"):
                         lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
                         class_display = profile.get("evolved_class_name") if profile.get("evolved") else profile["class_name"]

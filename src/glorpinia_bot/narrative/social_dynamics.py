@@ -174,6 +174,14 @@ class SocialDynamicsEngine:
         logging.debug("[SocialDynamics] injection_payload channel=%s payload=%s", channel, payload)
         return payload
 
+    def get_user_social_summary(self, channel: str, author: Optional[str]) -> Optional[str]:
+        """Resumo social de um usuário, somente leitura (não altera loops nem pesos)."""
+        try:
+            return self._build_social_memory_summary(self._get_channel_state(channel), author)
+        except Exception as exc:
+            logging.debug("[SocialDynamics] resumo social indisponível para %s: %s", author, exc)
+            return None
+
     def _roll_memory_loop(self, state: ChannelSocialState):
         state.active_loop_for_message = None
         if not state.memory_loops:

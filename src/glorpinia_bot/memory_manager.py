@@ -221,6 +221,40 @@ class MemoryManager:
             ]
         )
 
+    def get_user_memory_samples(self, channel, user, limit=12):
+        """Retorna até `limit` memórias textuais do usuário, sem depender de uma query de busca.
+
+        SQLite: as mais recentes. FAISS: as últimas indexadas. Em falha, retorna lista vazia.
+        """
+        try:
+            limit = max(0, int(limit))
+        except (TypeError, ValueError):
+            limit = 12
+        if not limit:
+            return []
+
+        try:
+            if not self._use_faiss:
+                conn = sqlite3.connect(self.db_path)
+                c = conn.cursor()
+                c.execute(
+                    "SELECT query, response FROM interactions WHERE channel=? AND user=? ORDER BY ts DESC LIMIT ?",
+                    (channel, user, limit),
+                )
+                rows = c.fetchall()
+                conn.close()
+                return [self._format_memory_document(channel, user, q, r) for q, r in rows]
+
+            key = self._memory_key(channel, user)
+            vectorstore = self._vectorstores.get(key) or self.load_user_memory(channel, user)
+            if vectorstore is None:
+                return []
+            docs = list(vectorstore.docstore._dict.values())
+            return [doc.page_content for doc in docs[-limit:]]
+        except Exception as e:
+            logging.error(f"[GLORP-MEMORY] Erro ao listar memórias de {user}: {e}")
+            return []
+
     def search_memory(self, channel, user, query, k=3):
         """
         Busca memórias relevantes no banco vetorial (RAG).
