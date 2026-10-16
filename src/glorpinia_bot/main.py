@@ -38,7 +38,7 @@ from .features.seventv_emote import SevenTVEmote
 from .features.steam_info import SteamInfo
 from .seventv_channel_sync import SevenTVChannelSync
 from .user_tags import UserTagManager
-from .user_rpg import UserRPGManager, CLASS_POOL
+from .user_rpg import UserRPGManager, CLASS_POOL, effective_class, current_class_name, current_class_description
 from . import class_options
 
 log_level_name = os.getenv("GLORPINIA_LOG_LEVEL", "INFO").upper()
@@ -397,7 +397,7 @@ class TwitchIRC:
             print(f"[ERROR] WebSocket nao conectado. Nao foi possivel enviar: {message}")
 
     def schedule_class_options(self, nick, channel):
-        """Agenda (sem bloquear) a geração das opções de classe de `nick`.
+        """Agenda (sem bloquear) a geração das opções pendentes de `nick` (classe ou evolução).
 
         Chamado pelo UserRPGManager a cada XP de quem está na faixa de preparo e ainda não tem opções.
         Evita duplicidade com um conjunto de 'em andamento' e com um intervalo mínimo entre tentativas.
@@ -406,12 +406,14 @@ class TwitchIRC:
         if not key:
             return False
         if not self.class_ai_enabled:
-            self.user_rpg.assign_fallback_class_options(key)
+            self.user_rpg.assign_fallback_options(key)
             return False
 
-        # Quem já desbloqueou a escolha (nível 10+) ignora o intervalo entre tentativas.
-        profile = self.user_rpg.get_profile(key)
-        unlocked = bool(profile and int(profile.get("level", 1)) >= self.user_rpg.CLASS_UNLOCK_LEVEL)
+        request = self.user_rpg.get_options_request(key)
+        if not request:
+            return False
+        # Quem já desbloqueou a escolha (nível 10 / 40 / 70) ignora o intervalo entre tentativas.
+        unlocked = request["unlocked"]
 
         now = time.time()
         with self._class_gen_lock:
@@ -427,24 +429,30 @@ class TwitchIRC:
 
     def _class_options_worker(self, nick, channel):
         try:
+            request = self.user_rpg.get_options_request(nick)
             profile = self.user_rpg.get_profile(nick)
-            if not profile or profile.get("class_name") or profile.get("class_options"):
+            if not request or not profile:
                 return
             channel = (profile.get("last_channel") or channel or "").lower().lstrip("#")
+            is_evolution = request["kind"] == "evolution"
 
             options = None
             try:
-                options = self._request_ai_class_options(nick, channel, profile)
+                if is_evolution:
+                    options = self._request_ai_evolution_options(nick, channel, profile, request)
+                else:
+                    options = self._request_ai_class_options(nick, channel, profile)
             except Exception as exc:
-                logging.error("[RPG][Classes] Falha ao gerar opções para %s: %s", nick, exc)
+                logging.error("[RPG][Classes] Falha ao gerar opções (%s) para %s: %s", request["kind"], nick, exc)
 
-            if options and self.user_rpg.set_class_options(nick, options, "ai"):
-                logging.info("[RPG][Classes] Opções personalizadas prontas para %s", nick)
+            store = self.user_rpg.set_evolution_options if is_evolution else self.user_rpg.set_class_options
+            if options and store(nick, options, "ai"):
+                logging.info("[RPG][Classes] Opções personalizadas (%s) prontas para %s", request["kind"], nick)
                 return
 
-            # Quem já desbloqueou a escolha (nível 10+) nunca pode ficar sem opções.
-            if self.user_rpg.assign_fallback_class_options(nick):
-                logging.warning("[RPG][Classes] IA indisponível para %s; usando a pool fixa.", nick)
+            # Quem já desbloqueou a escolha (nível 10 / 40 / 70) nunca pode ficar sem opções.
+            if self.user_rpg.assign_fallback_options(nick):
+                logging.warning("[RPG][Classes] IA indisponível para %s; usando a reserva (%s).", nick, request["kind"])
             else:
                 logging.info("[RPG][Classes] Sem opções para %s ainda; nova tentativa em %.0fs.", nick, self.class_gen_retry_sec)
         finally:
@@ -485,6 +493,51 @@ class TwitchIRC:
             logging.warning("[RPG][Classes] Resposta da IA inválida para %s: %.200r", nick, raw)
         return options
 
+    def _request_ai_evolution_options(self, nick, channel, profile, request):
+        tags, memories, messages, social, cookies = self._collect_class_context(nick, channel)
+        path = [profile.get("class_name")] + [e.get("name") for e in (profile.get("evolutions") or [])]
+        prompt = class_options.build_evolution_prompt(
+            nick, profile.get("level", 1), request["stage"],
+            current_class_name(profile), current_class_description(profile), path,
+            profile.get("lore"), tags, memories, messages, social, cookies,
+        )
+        raw = self.gemini_client.request_pure_analysis(
+            prompt, generation_config={"temperature": 0.9, "response_mime_type": "application/json"}
+        )
+        options = class_options.parse_options(raw, exclude=path)
+        if not options:
+            logging.warning("[RPG][Classes] Resposta da IA inválida (evolução) para %s: %.200r", nick, raw)
+        return options
+
+    def _generate_rpg_lore(self, author, channel, profile, evolution=False):
+        """Gera e grava a lore após escolher classe ou evolução. Falha de IA não interrompe o fluxo."""
+        author_lower = author.lower()
+        tags = self.user_tags.get_tags(author)
+        recent = list(self.recent_messages.get(channel, []))[-8:]
+        interactions = "\n".join(f"{m.get('author')}: {m.get('content')}" for m in recent if m.get('author','').lower() in {author_lower, self.auth.bot_nick.lower()} or f"@{author_lower}" in (m.get('content') or "").lower())
+        context = (f"Tags/feitos: {', '.join(tags) if tags else 'ainda sem tags'}. "
+                   f"Interações recentes: {interactions or 'poucas interações disponíveis'}. ")
+        if evolution:
+            history = profile.get("lore_history") or []
+            previous_lore = history[-1].get("lore") if history else None
+            previous_class = ((profile.get("evolutions") or [{}])[-1]).get("from")
+            lore_prompt = ("Escreva a PRÓXIMA FASE da lore (2-3 frases) em português de um personagem de RPG de chat que acabou de evoluir de classe. "
+                f"Usuário: @{author}. Classe anterior: {previous_class}. "
+                f"Nova classe: {current_class_name(profile)} — {current_class_description(profile) or ''}. "
+                f"Lore anterior: {previous_lore or 'ainda não escrita'}. " + context +
+                "Mostre a transformação e mantenha a continuidade da lore anterior. Use humor e detalhes específicos quando possível, "
+                "sem inventar fatos biográficos reais. Retorne somente a lore.")
+        else:
+            lore_prompt = ("Escreva uma lore curta (2-3 frases) em português para um personagem de RPG de chat. "
+                f"Usuário: @{author}. Classe: {profile['class_name']} — {profile.get('class_description','')}. " + context +
+                "Use humor e detalhes específicos quando possível, sem inventar fatos biográficos reais. Retorne somente a lore.")
+        try:
+            lore = self.gemini_client.get_response(lore_prompt, channel, "system", self.memory_mgr, live_context=self.get_live_context(channel))
+            lore = re.sub(r"^@\w+,\s*", "", lore or "").strip()
+            if lore: self.user_rpg.set_lore(author, lore)
+        except Exception as exc:
+            logging.warning("[RPG] Falha ao gerar lore para %s: %s", author, exc)
+
     def _update_bot_privileges(self, raw):
         """Lê as badges do bot no USERSTATE e guarda se ele é VIP/mod/broadcaster no canal."""
         try:
@@ -507,8 +560,12 @@ class TwitchIRC:
         """Avisa o level up. Se o bot não for VIP/mod, atrasa o envio para não colidir
         com outra mensagem do bot (que faria a Twitch descartar uma delas)."""
         notice = f"@{author} passou para o nível {new_level}! PogChamp"
-        if new_level == 10:
+        rpg = getattr(self, "user_rpg", None)
+        profile = (rpg.get_profile(author) if rpg else None) or {}
+        if new_level == 10 and not profile.get("class_name"):
             notice += " Use *class para escolher sua classe!"
+        elif rpg and profile.get("class_name") and new_level == rpg.next_evolution_level(profile):
+            notice += " Use *class para escolher sua evolução!"
 
         delay = 0 if self.is_bot_privileged(channel) else self.levelup_notice_delay_sec
         if delay <= 0:
@@ -986,7 +1043,7 @@ class TwitchIRC:
                     else:
                         entries = []
                         for idx, (nick, profile) in enumerate(top, start=1):
-                            class_name = profile.get("evolved_class_name") if profile.get("evolved") else profile.get("class_name")
+                            class_name = effective_class(profile)[0]
                             label = f" ({class_name})" if class_name else ""
                             entries.append(f"#{idx} {nick} — nível {profile.get('level', 1)}{label}")
                         self.send_long_message(channel, "Ranking RPG: " + " | ".join(entries))
@@ -1005,29 +1062,28 @@ class TwitchIRC:
                     if len(parts) > 1 and parts[1].isdigit() and author_lower not in self.IGNORED_NICKS:
                         success, reason, profile = self.user_rpg.choose_class(author, parts[1])
                         if success and profile:
-                            tags = self.user_tags.get_tags(author)
-                            recent = list(self.recent_messages.get(channel, []))[-8:]
-                            interactions = "\n".join(f"{m.get('author')}: {m.get('content')}" for m in recent if m.get('author','').lower() in {author_lower, self.auth.bot_nick.lower()} or f"@{author_lower}" in (m.get('content') or "").lower())
-                            lore_prompt = ("Escreva uma lore curta (2-3 frases) em português para um personagem de RPG de chat. "
-                                f"Usuário: @{author}. Classe: {profile['class_name']} — {profile.get('class_description','')}. "
-                                f"Tags/feitos: {', '.join(tags) if tags else 'ainda sem tags'}. Interações recentes: {interactions or 'poucas interações disponíveis'}. "
-                                "Use humor e detalhes específicos quando possível, sem inventar fatos biográficos reais. Retorne somente a lore.")
-                            try:
-                                lore = self.gemini_client.get_response(lore_prompt, channel, "system", self.memory_mgr, live_context=self.get_live_context(channel))
-                                lore = re.sub(r"^@\w+,\s*", "", lore or "").strip()
-                                if lore: self.user_rpg.set_lore(author, lore)
-                            except Exception as exc:
-                                logging.warning("[RPG] Falha ao gerar lore para %s: %s", author, exc)
+                            evolved = reason == "evolved"
+                            self._generate_rpg_lore(author, channel, profile, evolution=evolved)
                             profile = self.user_rpg.get_profile(author) or profile
                             lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
-                            self.send_message(channel, f"@{author} escolheu {profile['class_name']}! {lore}")
+                            if evolved:
+                                self.send_long_message(channel, f"@{author} evoluiu para {current_class_name(profile)}! {lore}")
+                            else:
+                                self.send_message(channel, f"@{author} escolheu {profile['class_name']}! {lore}")
+                            # Se já houver outra escolha pendente (ex.: nível 70 logo após o 40), começa a preparar.
+                            self.schedule_class_options(author_lower, channel)
                         elif reason == "level":
                             self.send_message(channel, "Você precisa alcançar o nível 10 para escolher uma classe.")
+                        elif reason == "evolution_level":
+                            self.send_message(channel, f"Você precisa alcançar o nível {self.user_rpg.next_evolution_level(profile)} para evoluir.")
                         elif reason == "chosen":
-                            self.send_message(channel, f"Sua classe já é {profile.get('class_name')}.")
+                            next_level = self.user_rpg.next_evolution_level(profile)
+                            hint = f" Próxima evolução no nível {next_level}." if next_level else ""
+                            self.send_message(channel, f"Sua classe já é {effective_class(profile)[0]}.{hint}")
                         elif reason == "no_options":
                             self.schedule_class_options(author_lower, channel)
-                            self.send_message(channel, f"@{author} estou preparando suas opções de classe. Tente *class de novo em instantes.")
+                            what = "evolução" if profile and profile.get("class_name") else "classe"
+                            self.send_message(channel, f"@{author} estou preparando suas opções de {what}. Tente *class de novo em instantes.")
                         else:
                             self.send_message(channel, "Escolha 1, 2 ou 3 após *class.")
                         return
@@ -1048,10 +1104,21 @@ class TwitchIRC:
                         else:
                             self.send_message(channel, f"@{target} ainda não tem opções de classe prontas.")
                     elif profile.get("class_name"):
-                        lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
-                        class_display = profile.get("evolved_class_name") if profile.get("evolved") else profile["class_name"]
-                        class_description = profile.get("evolved_description") if profile.get("evolved") else profile.get("class_description")
-                        self.send_long_message(channel, f"Classe de @{target}: {class_display}. {class_description or ''} Lore: {lore}")
+                        evolution_level = self.user_rpg.next_evolution_level(profile)
+                        evolution_due = evolution_level is not None and int(profile.get("level", 1)) >= evolution_level
+                        evolution_options = profile.get("evolution_options") or []
+                        if evolution_due and evolution_options:
+                            choices = " | ".join(f"{i}. {item['name']} — {item['description']}" for i, item in enumerate(evolution_options, 1))
+                            self.send_long_message(channel, f"@{target} pode evoluir de {current_class_name(profile)}: {choices}. Use *class 1, *class 2 ou *class 3 para escolher a sua evolução.")
+                        elif evolution_due and target == author_lower:
+                            self.schedule_class_options(target, channel)
+                            self.send_message(channel, f"@{target} estou preparando suas opções de evolução. Tente *class de novo em instantes.")
+                        else:
+                            lore = profile.get("lore") or "Sua história ainda está sendo escrita nas estrelas."
+                            class_display, class_description = effective_class(profile)
+                            path = [profile["class_name"]] + [e.get("name") for e in (profile.get("evolutions") or [])]
+                            path_text = f" Caminho: {' → '.join(path)}." if len(path) > 1 else ""
+                            self.send_long_message(channel, f"Classe de @{target}: {class_display}. {class_description or ''}{path_text} Lore: {lore}")
                     else:
                         self.send_message(channel, f"@{target} ainda não desbloqueou uma classe. No nível 10 poderá escolher uma.")
                     return

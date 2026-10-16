@@ -37,6 +37,9 @@ CLASS_PREP_LEVEL=8
 -Optional: minimum seconds between AI generation attempts for the same user before level 10 (Default: 600)
 CLASS_GEN_RETRY_SEC=600
 
+-Optional: how many levels before an evolution unlock (levels 40 and 70) its 3 options start being prepared, from 0 to 10 (Default: 2). The final ascension at level 100 stays automatic
+EVOLUTION_PREP_AHEAD=2
+
 Obtain tokens from:
 - Twitch: [Twitch Token Generator](https://twitchtokengenerator.com) (scopes: `chat:read`, `chat:edit`)
 

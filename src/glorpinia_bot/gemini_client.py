@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from .features.search import SearchTool
 from .narrative.context_builder import build_context_prompt
 from .narrative.memory_extractor import extract_user_memory, is_persistable_memory
+from .user_rpg import effective_class
 
 load_dotenv()
 
@@ -315,8 +316,8 @@ class GeminiClient:
                 power = "iniciante" if profile.get("level", 1) < 10 else ("experiente" if profile.get("level", 1) < 40 else ("muito poderoso" if profile.get("level", 1) < 100 else "lendário"))
                 details = [f"progressão de poder: {power}"]
                 if profile.get("class_name"):
-                    details.append(f"arquétipo: {profile.get('evolved_class_name') if profile.get('evolved') else profile['class_name']}")
-                    if profile.get("evolved"):
+                    details.append(f"arquétipo: {effective_class(profile)[0]}")
+                    if profile.get("evolved") or profile.get("evolution_stage"):
                         details.append("arquétipo já evoluído")
                 if profile.get("lore"):
                     details.append(f"lore: {profile['lore']}")
@@ -334,7 +335,7 @@ class GeminiClient:
                 if not other:
                     continue
                 other_power = "iniciante" if other.get("level", 1) < 10 else ("experiente" if other.get("level", 1) < 40 else ("muito poderoso" if other.get("level", 1) < 100 else "lendário"))
-                other_class = other.get("evolved_class_name") if other.get("evolved") else other.get("class_name")
+                other_class = effective_class(other)[0]
                 summary = f"progressão de poder: {other_power}"
                 if other_class:
                     summary += f"; arquétipo: {other_class}"

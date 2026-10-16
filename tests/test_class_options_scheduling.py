@@ -103,6 +103,7 @@ class ClassOptionsSchedulingTests(unittest.TestCase):
             self.assertEqual(thread.call_count, 1)
 
     def test_schedule_ignores_retry_window_once_level_10_is_reached(self):
+        self.bot.user_rpg.class_options_hook = lambda nick, ch: None  # como em produção: sem sorteio síncrono
         self._set_level("ana", 10)
         self.bot._class_gen_last_attempt["ana"] = __import__("time").time()
         with mock.patch("glorpinia_bot.main.threading.Thread") as thread:
