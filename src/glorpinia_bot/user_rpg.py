@@ -22,11 +22,17 @@ class UserRPGManager:
     DIRECT_MENTION_XP = 3
     COMMENT_MENTION_XP = 2
     MAX_COOKIE_XP_PER_EVENT = 25
+    CLASS_OPTION_COUNT = 3
+    CLASS_UNLOCK_LEVEL = 10
+    # Nível a partir do qual as opções de classe começam a ser preparadas (antes do desbloqueio).
+    CLASS_PREP_LEVEL = max(1, min(10, int(os.getenv("CLASS_PREP_LEVEL", "8"))))
 
     def __init__(self, path=None):
         self.path = path or os.getenv("USER_RPG_FILE", self.DEFAULT_FILE)
         self._lock = threading.RLock()
         self._users = {}
+        # Callable(nick, channel) chamado, sem bloquear, quando alguém precisa de opções de classe.
+        self.class_options_hook = None
         self._load()
 
     @staticmethod
@@ -89,8 +95,14 @@ class UserRPGManager:
         if channel:
             p["last_channel"] = channel.lower().lstrip("#")
             p["last_message_at"] = time.time()
-        if p["level"] >= 10 and old < 10 and not p.get("class_name") and not p.get("class_options"):
-            p["class_options"] = [{"name": n, "description": d} for n, d in random.sample(CLASS_POOL, 3)]
+        if p["level"] >= self.CLASS_PREP_LEVEL and not p.get("class_name") and not p.get("class_options"):
+            hook = self.class_options_hook
+            if hook:
+                # O gancho só agenda o trabalho em outra thread; nunca bloqueia o fluxo de XP.
+                try: hook(self._nick(nick), p.get("last_channel"))
+                except Exception as exc: logging.error("[RPG] Falha no gancho de opções de classe: %s", exc)
+            elif p["level"] >= self.CLASS_UNLOCK_LEVEL and old < self.CLASS_UNLOCK_LEVEL:
+                self._store_class_options_locked(p, self._pool_options(), "pool")
         if p["level"] >= 100 and p.get("class_name") and not p.get("evolved"):
             p["evolved"] = True
             p["evolved_class_name"] = p["class_name"] + " Ascendente"
@@ -134,15 +146,58 @@ class UserRPGManager:
             try: index = int(choice) - 1
             except (TypeError, ValueError): return False, "choice", dict(p)
             options = p.get("class_options") or []
+            if not options: return False, "no_options", dict(p)
             if index not in range(len(options)): return False, "choice", dict(p)
             selected = options[index]
             p.update(class_name=selected["name"], class_description=selected["description"], class_options=[], lore=None)
+            p.pop("class_options_source", None)
             if p.get("level", 1) >= 100:
                 p["evolved"] = True
                 p["evolved_class_name"] = p["class_name"] + " Ascendente"
                 p["evolved_description"] = "Uma forma desperta, mais rara e poderosa do seu arquétipo original."
             self._save()
             return True, "chosen", dict(p)
+
+    @classmethod
+    def _pool_options(cls):
+        return [{"name": n, "description": d} for n, d in random.sample(CLASS_POOL, cls.CLASS_OPTION_COUNT)]
+
+    def _store_class_options_locked(self, p, options, source):
+        p["class_options"] = options
+        p["class_options_source"] = source
+        self._save()
+        logging.info("[RPG][Classes] opções definidas (fonte=%s): %s", source, [o["name"] for o in options])
+
+    def needs_class_options(self, nick):
+        """True se a pessoa já está na faixa de preparo, não tem classe e não tem opções."""
+        with self._lock:
+            p = self._users.get(self._nick(nick))
+            return bool(p and int(p.get("level", 1)) >= self.CLASS_PREP_LEVEL
+                        and not p.get("class_name") and not p.get("class_options"))
+
+    def set_class_options(self, nick, options, source="ai"):
+        """Grava opções prontas. Nunca sobrescreve opções existentes nem classe já escolhida."""
+        try:
+            clean = [{"name": str(o["name"]).strip(), "description": str(o["description"]).strip()} for o in options]
+        except (TypeError, KeyError):
+            return False
+        if len(clean) != self.CLASS_OPTION_COUNT or not all(o["name"] and o["description"] for o in clean):
+            return False
+        with self._lock:
+            p = self._users.get(self._nick(nick))
+            if not p or p.get("class_name") or p.get("class_options"): return False
+            if int(p.get("level", 1)) < self.CLASS_PREP_LEVEL: return False
+            self._store_class_options_locked(p, clean, source)
+            return True
+
+    def assign_fallback_class_options(self, nick):
+        """Sorteia 3 classes da pool fixa. Só vale para quem já desbloqueou a escolha (nível 10+)."""
+        with self._lock:
+            p = self._users.get(self._nick(nick))
+            if not p or int(p.get("level", 1)) < self.CLASS_UNLOCK_LEVEL: return False
+            if p.get("class_name") or p.get("class_options"): return False
+            self._store_class_options_locked(p, self._pool_options(), "pool")
+            return True
 
     def set_lore(self, nick, lore):
         with self._lock:
