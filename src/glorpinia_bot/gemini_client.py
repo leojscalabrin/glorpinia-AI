@@ -726,14 +726,17 @@ class GeminiClient:
 
         return generated.strip()
     
-    def request_pure_analysis(self, prompt):
+    def request_pure_analysis(self, prompt, generation_config=None):
         """
         Realiza uma solicitação ao modelo de análise
         """
         try:
             logging.info("[Analysis] Solicitando análise (Modo Livre)...")
             
-            response = self.analysis_model.generate_content(prompt)
+            if generation_config:
+                response = self.analysis_model.generate_content(prompt, generation_config=generation_config)
+            else:
+                response = self.analysis_model.generate_content(prompt)
 
             if not response.candidates:
                 return "MrDestructoid **GL-0RP5:** Sem resposta. Comentário adicional: sem comentários"
