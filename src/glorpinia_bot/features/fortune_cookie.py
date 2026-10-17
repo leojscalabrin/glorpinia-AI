@@ -52,8 +52,8 @@ class FortuneCookie:
 
     @staticmethod
     def _format_cookie_gain(amount: int) -> str:
-        """Texto do ganho exibido ao usuário: '🍪 +1 cookie' / '🍪 +4 cookies'."""
-        return f"🍪 +{amount} {'cookie' if amount == 1 else 'cookies'}"
+        """Texto do ganho exibido ao usuário, no formato padrão do bot: '+4🍪'."""
+        return f"+{amount}🍪"
 
     @staticmethod
     def _strip_comment(text: str) -> str:

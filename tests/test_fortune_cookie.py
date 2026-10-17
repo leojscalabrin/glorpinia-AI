@@ -54,7 +54,7 @@ class FortuneCookieTests(unittest.TestCase):
 
     def test_final_message_has_sorted_hyphenated_numbers(self):
         bot = self._run(PROVERB)
-        self.assertEqual(bot.sent_long, [PROVERB + " | 🍀 Números da sorte: [01-02-05-13-41-60] | 🍪 +4 cookies"])
+        self.assertEqual(bot.sent_long, [PROVERB + " | 🍀 Números da sorte: [01-02-05-13-41-60] | +4🍪"])
         self.assertNotIn(" - ", bot.sent_long[0])
         self.assertEqual(bot.cookies, [("ana", 4)])
 
@@ -70,7 +70,7 @@ class FortuneCookieTests(unittest.TestCase):
 
     def test_comment_is_removed_even_if_the_model_ignores_the_prompt(self):
         bot = self._run(OLD_STYLE)
-        self.assertEqual(bot.sent_long, [PROVERB + " | 🍀 Números da sorte: [01-02-05-13-41-60] | 🍪 +4 cookies"])
+        self.assertEqual(bot.sent_long, [PROVERB + " | 🍀 Números da sorte: [01-02-05-13-41-60] | +4🍪"])
         self.assertNotIn("Tofu", bot.sent_long[0])
 
     def test_strip_comment_handles_separator_variants(self):
@@ -100,7 +100,7 @@ class FortuneCookieTests(unittest.TestCase):
     def test_api_failure_still_reports_the_cookies_already_credited(self):
         bot = self._run(None, gain=7)
         self.assertEqual(bot.sent_long, [])
-        self.assertEqual(bot.sent, ["@ana, os espíritos silenciaram... (Erro na API) Sadge | 🍪 +7 cookies"])
+        self.assertEqual(bot.sent, ["@ana, os espíritos silenciaram... (Erro na API) Sadge | +7🍪"])
         self.assertEqual(bot.cookies, [("ana", 7)])
 
     def test_api_failure_message_is_unchanged_when_nothing_was_credited(self):
@@ -108,14 +108,15 @@ class FortuneCookieTests(unittest.TestCase):
         self.assertEqual(bot.sent, ["@ana, os espíritos silenciaram... (Erro na API) Sadge"])
 
     # ---- ganho de cookies ----
-    def test_gain_text_uses_singular_and_plural(self):
-        self.assertEqual(FortuneCookie._format_cookie_gain(1), "🍪 +1 cookie")
-        self.assertEqual(FortuneCookie._format_cookie_gain(2), "🍪 +2 cookies")
-        self.assertEqual(FortuneCookie._format_cookie_gain(10), "🍪 +10 cookies")
+    def test_gain_text_uses_the_standard_compact_format(self):
+        # Mesmo formato do resto do bot (saldo, transferência, duelo): +N🍪, sem espaço e sem palavra "cookie(s)".
+        for amount in (1, 2, 4, 10):
+            self.assertEqual(FortuneCookie._format_cookie_gain(amount), f"+{amount}🍪")
 
-    def test_message_shows_singular_when_user_won_one_cookie(self):
+    def test_message_shows_the_same_format_for_a_single_cookie(self):
         bot = self._run(PROVERB, gain=1)
-        self.assertTrue(bot.sent_long[0].endswith("[01-02-05-13-41-60] | 🍪 +1 cookie"))
+        self.assertTrue(bot.sent_long[0].endswith("[01-02-05-13-41-60] | +1🍪"))
+        self.assertNotIn("cookie", bot.sent_long[0].lower())
 
     def test_gain_is_not_shown_when_credit_was_not_confirmed(self):
         bot = self._run(PROVERB, credited=False)
