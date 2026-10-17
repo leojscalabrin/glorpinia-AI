@@ -192,22 +192,28 @@ class CookieSystem:
         if channel and self.bot.is_feature_enabled(channel, "comment"):
             self.bot.send_level_up_notice(channel, nick, event["level"])
 
-    def add_cookies(self, nick: str, amount_to_add: int, award_xp: bool = True):
-        """Adiciona cookies a um usuário; award_xp=False para ajustes administrativos."""
-        if not self._is_nick_valid(nick): return 
+    def add_cookies(self, nick: str, amount_to_add: int, award_xp: bool = True) -> bool:
+        """Adiciona cookies a um usuário; award_xp=False para ajustes administrativos.
+
+        Retorna True se os cookies foram creditados (mesmo que o XP associado falhe) e False caso contrário.
+        """
+        if not self._is_nick_valid(nick): return False
         
         nick = nick.lower()
         self._check_or_create_user(nick)
+        credited = False
         try:
             with sqlite3.connect(self.db_path) as conn:
                 c = conn.cursor()
                 c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_add, nick))
                 conn.commit()
+            credited = True
             logging.info(f"[CookieSystem] +{amount_to_add} cookies para {nick}.")
             if award_xp:
                 self._award_rpg_cookie_xp(nick, amount_to_add, gained=True)
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao adicionar cookies para {nick}: {e}")
+        return credited
 
     def remove_cookies(self, nick: str, amount_to_remove: int, award_xp: bool = True):
         """

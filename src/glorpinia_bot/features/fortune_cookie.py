@@ -1,7 +1,11 @@
+import re
 import threading
 import logging
 from datetime import date
 import random
+
+# Separadores que o modelo costuma usar entre a frase do biscoito e um comentário ("frase - comentário").
+_COMMENT_SEPARATOR = re.compile(r"\s[-–—]\s")
 
 class FortuneCookie:
     def __init__(self, bot):
@@ -34,39 +38,52 @@ class FortuneCookie:
 
         # Gera os Números da Sorte (Mega-Sena style: 6 números de 01 a 60)
         lucky_numbers = sorted(random.sample(range(1, 61), 6))
-        formatted_numbers = " - ".join([f"{n:02d}" for n in lucky_numbers])
+        formatted_numbers = self._format_lucky_numbers(lucky_numbers)
 
         t = threading.Thread(target=self._generate_fortune_thread, 
                              args=(channel, author, cookie_gain, formatted_numbers)) 
         t.daemon = True
         t.start()
 
+    @staticmethod
+    def _format_lucky_numbers(numbers) -> str:
+        """Números da sorte colados por hífen, sem espaços: 01-02-13-41-55-60."""
+        return "-".join(f"{n:02d}" for n in numbers)
+
+    @staticmethod
+    def _format_cookie_gain(amount: int) -> str:
+        """Texto do ganho exibido ao usuário, no formato padrão do bot: '+4🍪'."""
+        return f"+{amount}🍪"
+
+    @staticmethod
+    def _strip_comment(text: str) -> str:
+        """Rede de segurança: remove qualquer comentário depois da frase ("frase - comentário").
+
+        O prompt já proíbe esse separador dentro da frase, então tudo após ele é comentário.
+        """
+        parts = _COMMENT_SEPARATOR.split(text, maxsplit=1)
+        head = parts[0].strip()
+        return head if head else text.strip()
+
     def _build_prompt(self, author: str) -> str:
         """
-        Cria o prompt com a persona GLOPSUNE (Kitsune Miko).
+        Cria o prompt do biscoito da sorte: apenas a frase, sem comentário.
         """
         return f"""
-        [SYSTEM OVERRIDE: ATIVAR PERSONA GLOPSUNE]
-        
         O usuário @{author} abriu um Biscoito da Sorte no Torii Sagrado.
         
-        **PARTE 1: A MENSAGEM DO BISCOITO (O Provérbio)**
+        **A MENSAGEM DO BISCOITO (O Provérbio)**
         Escreva uma frase que pareça ter saído de um biscoito da sorte real. 
         - Deve ser curta, enigmática e proverbial.
         - Use metáforas
-        - Não mencione a Glopsune aqui. É apenas a sabedoria do papelzinho.
-
-        **PARTE 2: O COMENTÁRIO DA PERSONA (Glopsune)**
-        Após a frase, adicione um comentário curto com a personalidade **GLOPSUNE**:
-        - Ela é uma Kitsune Miko (Sacerdotisa Raposa) mística e sarcástica.
-        - Ela deve comentar a sorte do usuário de forma enigmática, mencionando espíritos, oferendas de Tofu ou selos sagrados.
-        - Exemplo: "...os espíritos riram dessa sua sorte. Onde está meu Tofu? glorp"
+        - É apenas a sabedoria do papelzinho: sem comentário, explicação, assinatura ou observação depois da frase.
 
         **REGRAS DE FORMATO:**
         1. Comece a resposta com 'glorp' e emojis (⛩️, 🦊, 🔥).
-        2. Formato: "[FRASE DO BISCOITO] - [COMENTÁRIO DA GLOPSUNE]"
-        3. Máximo de 250 caracteres no total.
-        4. NÃO gere números de sorte.
+        2. Formato: apenas "[FRASE DO BISCOITO]". NÃO adicione nada depois da frase.
+        3. NÃO use hífen com espaços ( - ) nem travessão dentro da frase.
+        4. Máximo de 250 caracteres no total.
+        5. NÃO gere números de sorte.
 
         Sua resposta para @{author}:
         """
@@ -76,9 +93,10 @@ class FortuneCookie:
         Lógica real que chama a API e monta a mensagem final.
         """
         try:
-            # Adiciona o bônus de cookie ao usuário
-            if self.bot.cookie_system:
-                self.bot.cookie_system.add_cookies(author, cookie_gain)
+            # Adiciona o bônus de cookie ao usuário. Só mostra o ganho se o crédito foi confirmado.
+            gain_text = None
+            if self.bot.cookie_system and self.bot.cookie_system.add_cookies(author, cookie_gain):
+                gain_text = self._format_cookie_gain(cookie_gain)
 
             self.bot.training_logger.log_interaction(channel, author, "*cookie", None)
 
@@ -95,13 +113,19 @@ class FortuneCookie:
             )
 
             if response:
-                clean_response = response.replace("Glopsune:", "").replace("Sorte:", "").strip()
+                clean_response = self._strip_comment(response.replace("Glopsune:", "").replace("Sorte:", "").strip())
                 
                 final_msg = f"{clean_response} | 🍀 Números da sorte: [{lucky_numbers}]"
+                if gain_text:
+                    final_msg += f" | {gain_text}"
                 
                 self.bot.send_long_message(channel, final_msg)
             else:
-                self.bot.send_message(channel, f"@{author}, os espíritos silenciaram... (Erro na API) Sadge")
+                error_msg = f"@{author}, os espíritos silenciaram... (Erro na API) Sadge"
+                if gain_text:
+                    # Os cookies já foram creditados antes da chamada à IA; avisa para não ganhar em silêncio.
+                    error_msg += f" | {gain_text}"
+                self.bot.send_message(channel, error_msg)
         
         except Exception as e:
             logging.error(f"[FortuneCookie] Falha ao gerar sorte: {e}")
