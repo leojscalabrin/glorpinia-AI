@@ -95,7 +95,7 @@ class FortuneCookie:
         try:
             # Adiciona o bônus de cookie ao usuário. Só mostra o ganho se o crédito foi confirmado.
             gain_text = None
-            if self.bot.cookie_system and self.bot.cookie_system.add_cookies(author, cookie_gain):
+            if self.bot.cookie_system and self.bot.cookie_system.add_cookies(author, cookie_gain, award_xp=True):
                 gain_text = self._format_cookie_gain(cookie_gain)
 
             self.bot.training_logger.log_interaction(channel, author, "*cookie", None)

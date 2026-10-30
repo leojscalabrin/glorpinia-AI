@@ -62,7 +62,7 @@ class Comment:
             
             # Premiação (Cookies)
             if self.bot.cookie_system:
-                self.bot.cookie_system.add_cookies(author, 10)
+                self.bot.cookie_system.add_cookies(author, 10, award_xp=True)
                 logging.info(f"[Comment] {author} ganhou 10 cookies pelo trigger!")
             
             # Coleta de Contexto
