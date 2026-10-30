@@ -226,7 +226,8 @@ class CookieSystem:
     def remove_cookies(self, nick: str, amount_to_remove: int, award_xp: bool = False):
         """
         Remove cookies de um usuário (podendo deixá-lo negativo/em dívida)
-        e TRANSFERE para a conta do bot. award_xp=False desativa XP para ajustes administrativos.
+        e TRANSFERE para a conta do bot. Perdas nunca concedem XP; award_xp é mantido
+        apenas por compatibilidade com chamadas antigas.
         """
         if not self._is_nick_valid(nick): return 
         
