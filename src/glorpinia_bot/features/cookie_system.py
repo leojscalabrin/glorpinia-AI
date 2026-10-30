@@ -93,10 +93,15 @@ class CookieSystem:
                 try:
                     with sqlite3.connect(self.db_path) as conn:
                         c = conn.cursor()
+                        c.execute("SELECT user_nick FROM user_cookies")
+                        bonus_users = [row[0] for row in c.fetchall()]
                         c.execute("UPDATE user_cookies SET cookie_count = cookie_count + 5")
                         conn.commit()
+                    for bonus_nick in bonus_users:
+                        if bonus_nick != self.bot.auth.bot_nick.lower() and self._is_nick_valid(bonus_nick):
+                            self._award_rpg_cookie_xp(bonus_nick, 5, gained=True)
                     self.last_bonus_time = now
-                    logging.info("[CookieSystem] Bônus diário aplicado com sucesso.")
+                    logging.info("[CookieSystem] Bônus diário aplicado (+5 cookies e +5 XP por usuário elegível).")
                 except Exception as e:
                     logging.error(f"[CookieSystem] Falha ao aplicar bônus diário: {e}")
 
@@ -192,8 +197,11 @@ class CookieSystem:
         if channel and self.bot.is_feature_enabled(channel, "comment"):
             self.bot.send_level_up_notice(channel, nick, event["level"])
 
-    def add_cookies(self, nick: str, amount_to_add: int, award_xp: bool = True) -> bool:
-        """Adiciona cookies a um usuário; award_xp=False para ajustes administrativos.
+    def add_cookies(self, nick: str, amount_to_add: int, award_xp: bool = False) -> bool:
+        """Adiciona cookies a um usuário.
+
+        XP é desativado por padrão. Use award_xp=True somente em recompensas
+        confiáveis do bot (ex.: *cookie e presentes emitidos pelo próprio bot).
 
         Retorna True se os cookies foram creditados (mesmo que o XP associado falhe) e False caso contrário.
         """
@@ -215,7 +223,7 @@ class CookieSystem:
             logging.error(f"[CookieSystem] Falha ao adicionar cookies para {nick}: {e}")
         return credited
 
-    def remove_cookies(self, nick: str, amount_to_remove: int, award_xp: bool = True):
+    def remove_cookies(self, nick: str, amount_to_remove: int, award_xp: bool = False):
         """
         Remove cookies de um usuário (podendo deixá-lo negativo/em dívida)
         e TRANSFERE para a conta do bot. award_xp=False desativa XP para ajustes administrativos.
@@ -237,8 +245,7 @@ class CookieSystem:
                 c.execute("UPDATE user_cookies SET cookie_count = cookie_count + ? WHERE user_nick = ?", (amount_to_remove, bot_nick))
                 conn.commit()
                 logging.info(f"[CookieSystem] Transferidos {amount_to_remove} cookies de {nick} para {bot_nick}. Saldo pode estar negativo.")
-            if award_xp:
-                self._award_rpg_cookie_xp(nick, amount_to_remove, gained=False)
+            # Perdas de cookies não concedem XP.
                     
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao remover/transferir cookies de {nick}: {e}")
@@ -276,8 +283,7 @@ class CookieSystem:
                 )
                 conn.commit()
             logging.info(f"[CookieSystem] Transferidos {amount} cookies de {from_nick} para {to_nick}.")
-            self._award_rpg_cookie_xp(from_nick, amount, gained=False)
-            self._award_rpg_cookie_xp(to_nick, amount, gained=True)
+            # Transferências entre usuários apenas movimentam saldo; não são recompensas.
             return True
         except Exception as e:
             logging.error(f"[CookieSystem] Falha ao transferir cookies de {from_nick} para {to_nick}: {e}")
@@ -325,7 +331,8 @@ class CookieSystem:
                     amount = MAX_TRANSACTION
                 
                 if action == "GIVE":
-                    self.add_cookies(user, amount)
+                    # Recompensa emitida pelo bot: conversão 1:1 em XP.
+                    self.add_cookies(user, amount, award_xp=True)
                     sign = "+"
                 elif action == "TAKE":
                     self.remove_cookies(user, amount)
