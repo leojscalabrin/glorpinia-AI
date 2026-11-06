@@ -52,7 +52,7 @@ class RPGRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             manager = UserRPGManager(path=os.path.join(directory, "rpg.json"))
             manager.ensure_profile("viewer")
-            manager.add_xp("viewer", 500)
+            manager.add_xp("viewer", 315)  # nível 8: já pode preparar a classe definitiva.
 
             provisional = [
                 {"name": "Explorador", "description": "Explora caminhos."},
@@ -70,6 +70,7 @@ class RPGRegressionTests(unittest.TestCase):
             self.assertEqual(manager.get_class_options("viewer", "provisional"), provisional)
             self.assertEqual(manager.get_class_options("viewer", "definitive"), definitive)
 
+            manager.add_xp("viewer", 185)  # nível 10: opções antecipadas permanecem disponíveis.
             success, reason, profile = manager.choose_class("viewer", 1)
             self.assertTrue(success)
             self.assertEqual(reason, "chosen")
