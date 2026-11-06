@@ -34,6 +34,7 @@ from .features.slots import Slots
 from .features.analysis import AnalysisMode
 from .features.tarot import TarotReader
 from .features.rpg_roll import RPGRollFeature
+from .features.duel_narrator import DuelNarrator
 from .features.seventv_emote import SevenTVEmote
 from .features.steam_info import SteamInfo
 from .seventv_channel_sync import SevenTVChannelSync
@@ -112,6 +113,7 @@ class TwitchIRC:
         self.analysis_feature = AnalysisMode(self)
         self.tarot_feature = TarotReader(self)
         self.rpg_feature = RPGRollFeature(self)
+        self.duel_narrator = DuelNarrator(self)
         self._apply_channel_feature_states()
 
         # Cache e Utilitários
@@ -1261,9 +1263,15 @@ class TwitchIRC:
                     winner_display = author if winner == author.lower() else target
                     loser_display = author if loser == author.lower() else target
 
-                    self.send_message(
-                        channel,
-                        f"{winner_display} venceu o duelo! o7 (-{bet_amount} 🍪 para {loser_display} e +{bet_amount}🍪 para {winner_display})"
+                    # O resultado e a transferência já foram definidos pelo código.
+                    # A IA só narra a luta; nunca escolhe ou altera o vencedor.
+                    self.duel_narrator.narrate_async(
+                        channel=channel,
+                        challenger=author,
+                        opponent=target,
+                        winner=winner_display,
+                        loser=loser_display,
+                        bet_amount=bet_amount,
                     )
                     return
 
