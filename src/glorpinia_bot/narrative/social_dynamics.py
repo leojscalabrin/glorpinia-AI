@@ -441,6 +441,11 @@ class SocialDynamicsEngine:
         style = style_fragments.get(profile.teasing_style, style_fragments["neutral"])
         return f"@{user_key} {style}, {tone} Última emoção percebida: {profile.last_emotion}."
 
+    def get_user_social_summary(self, channel: str, author: str) -> Optional[str]:
+        """Expõe apenas o resumo social do usuário solicitado para geração contextual."""
+        state = self._get_channel_state(channel)
+        return self._build_social_memory_summary(state, author)
+
     def add_memory_loop(self, channel: str, topic: str, users: Optional[List[str]] = None, weight: float = 0.5, loop_type: str = "running_joke", examples: Optional[List[str]] = None):
         state = self._get_channel_state(channel)
         normalized_topic = (topic or "").strip()

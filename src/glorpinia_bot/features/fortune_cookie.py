@@ -70,8 +70,8 @@ class FortuneCookie:
 
     @staticmethod
     def _format_cookie_gain(amount: int) -> str:
-        """Texto do ganho sem emojis."""
-        return f"+{amount} cookies"
+        """Formato único de recompensa exibido no chat."""
+        return f"( +{amount} 🍪)"
 
     @staticmethod
     def _strip_comment(text: str) -> str:
@@ -81,13 +81,21 @@ class FortuneCookie:
         return head if head else text.strip()
 
     @staticmethod
-    def _clean_generated_text(text: str) -> str:
-        """Remove prefixos duplicados, emojis e espaços indesejados."""
+    def _clean_generated_text(text: str, author: str = None) -> str:
+        """Retorna somente o provérbio; prefixo, menção e recompensa são do sistema."""
         clean = (text or "").replace("Glopsune:", "").replace("Sorte:", "").strip()
         clean = FortuneCookie._strip_comment(clean)
         clean = _EMOJI_PATTERN.sub("", clean)
-        clean = re.sub(r"^(?:glorp\s*)+", "", clean, flags=re.IGNORECASE)
-        return re.sub(r"\s+", " ", clean).strip()
+        clean = re.sub(r"^(?:glorp\b[\s,:-]*)+", "", clean, flags=re.IGNORECASE)
+        if author:
+            clean = re.sub(
+                rf"^@?{re.escape(author)}\b[\s,:-]*",
+                "",
+                clean,
+                flags=re.IGNORECASE,
+            )
+        clean = re.sub(r"^(?:glorp\b[\s,:-]*)+", "", clean, flags=re.IGNORECASE)
+        return re.sub(r"\s+", " ", clean).strip(" ,:-")
 
     def _build_prompt(self, author: str) -> str:
         """Cria um prompt de biscoito da sorte variado e opcionalmente personalizado."""
@@ -114,8 +122,8 @@ class FortuneCookie:
         - Seja espirituoso, ambíguo ou levemente irônico quando combinar.
 
         **REGRAS DE FORMATO**
-        1. Comece a resposta exatamente com "glorp".
-        2. Depois de "glorp", escreva somente o provérbio, sem emojis.
+        1. Escreva somente o provérbio, sem prefixo, menção ou nome do usuário.
+        2. Depois escreva somente o provérbio, sem emojis.
         3. Não inclua comentário, explicação, assinatura, saudação ou observação adicional.
         4. Não use hífen com espaços nem travessão para separar um comentário.
         5. Máximo de 250 caracteres no total.
@@ -144,15 +152,16 @@ class FortuneCookie:
             )
 
             if response:
-                clean_response = self._clean_generated_text(response)
+                clean_response = self._clean_generated_text(response, author=author)
                 if not clean_response:
                     clean_response = "A sorte favorece quem percebe a oportunidade antes que ela passe."
 
-                final_msg = f"glorp {clean_response} | Números da sorte: [{lucky_numbers}]"
+                # Prefixo, menção, números e cookies são montados uma única vez pelo código.
+                final_msg = f"glorp @{author}, {clean_response} | Números da sorte: [{lucky_numbers}]"
                 if gain_text:
                     final_msg += f" | {gain_text}"
-
-                self.bot.send_long_message(channel, final_msg)
+                final_msg = re.sub(r"\s+", " ", final_msg).strip()[:450]
+                self.bot.send_message(channel, final_msg)
             else:
                 error_msg = f"glorp @{author}, a sorte não trouxe uma mensagem desta vez (erro na API)."
                 if gain_text:

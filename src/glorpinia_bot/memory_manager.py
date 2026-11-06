@@ -221,6 +221,32 @@ class MemoryManager:
             ]
         )
 
+    def get_user_memory_samples(self, channel, user, limit=5):
+        """Retorna interações recentes do usuário para enriquecer tarefas de RPG."""
+        try:
+            limit = max(1, min(10, int(limit)))
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT query, response, ts
+                    FROM interactions
+                    WHERE channel=? AND user=?
+                    ORDER BY ts DESC
+                    LIMIT ?
+                    """,
+                    (channel, user, limit),
+                ).fetchall()
+            return "\n".join(
+                f"- {self._format_memory_document(channel, user, query, response)}"
+                for query, response, _ in reversed(rows)
+            )
+        except Exception as exc:
+            logging.warning(
+                "[GLORP-MEMORY] Falha ao recuperar amostras de %s em %s: %s",
+                user, channel, exc,
+            )
+            return ""
+
     def search_memory(self, channel, user, query, k=3):
         """
         Busca memórias relevantes no banco vetorial (RAG).

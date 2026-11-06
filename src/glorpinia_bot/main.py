@@ -137,6 +137,12 @@ class TwitchIRC:
         print(f"[AUTH] Admins carregados: {self.admin_nicks}")
         self.user_tags = UserTagManager()
         self.user_rpg = UserRPGManager()
+        self.class_options_ai_enabled = os.getenv("CLASS_OPTIONS_AI_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+        self.class_prep_level = max(8, int(os.getenv("CLASS_PREP_LEVEL", "8")))
+        self.class_gen_retry_sec = max(60, int(os.getenv("CLASS_GEN_RETRY_SEC", "3600")))
+        self._class_options_lock = threading.Lock()
+        self._class_options_inflight = set()
+        self._class_options_last_attempt = {}
 
         # Configuração do WebSocket e Shutdown
         self.ws = None
@@ -152,7 +158,7 @@ class TwitchIRC:
         signal.signal(signal.SIGINT, self.handle_exit)
         signal.signal(signal.SIGTERM, self.handle_exit)
 
-    def _generate_class_options(self, nick, channel, stage):
+    def _generate_class_options(self, nick, channel, stage, allow_fallback=True):
         """Generate three contextual class options without creating their lore yet."""
         tags = self.user_tags.get_tags(nick) if self.user_tags else []
         recent = list(self.recent_messages.get(channel, []))[-30:]
@@ -163,11 +169,24 @@ class TwitchIRC:
             or f"@{nick.lower()}" in (m.get("content") or "").lower()
         ][-12:]
         memory = ""
+        social_summary = ""
         try:
-            self.memory_mgr.load_user_memory(channel, nick)
-            memory = self.memory_mgr.search_memory(channel, nick, "personalidade, interesses, acontecimentos e histórico do usuário") or ""
+            sample_loader = getattr(self.memory_mgr, "get_user_memory_samples", None)
+            if callable(sample_loader):
+                memory = sample_loader(channel, nick, limit=5) or ""
+            if not memory:
+                self.memory_mgr.load_user_memory(channel, nick)
+                memory = self.memory_mgr.search_memory(
+                    channel, nick, "personalidade, interesses, acontecimentos e histórico do usuário"
+                ) or ""
         except Exception as exc:
             logging.debug("[RPG] Sem memória adicional para classe de %s: %s", nick, exc)
+        try:
+            summary_loader = getattr(self.social_dynamics, "get_user_social_summary", None)
+            if callable(summary_loader):
+                social_summary = summary_loader(channel, nick) or ""
+        except Exception as exc:
+            logging.debug("[RPG] Sem resumo social para classe de %s: %s", nick, exc)
 
         stage_label = "provisória e básica" if stage == "provisional" else "definitiva"
         prompt = f"""
@@ -180,41 +199,123 @@ MENSAGENS RELEVANTES:
 {chr(10).join(relevant) if relevant else "Sem mensagens recentes disponíveis."}
 MEMÓRIA DISPONÍVEL:
 {memory[:1800] if memory else "Nenhuma memória recuperada."}
+RESUMO SOCIAL:
+{social_summary[:500] if social_summary else "Sem perfil social consolidado."}
 
 REGRAS:
 - As três classes devem ser distintas e combinar com sinais reais do contexto.
 - Na etapa provisória, use arquétipos simples, iniciais e flexíveis; não crie lore nem poderes exagerados.
 - Na etapa definitiva, crie classes mais específicas, com identidade de RPG.
 - Não invente fatos biográficos, características sensíveis ou eventos que não aparecem no contexto.
-- Cada descrição deve ter no máximo 100 caracteres.
+- Cada descrição deve ter no máximo 65 caracteres.
 - Não use o nome do usuário como nome da classe.
 - Retorne SOMENTE JSON válido neste formato:
 {{"classes":[{{"name":"Nome","description":"Descrição curta"}},{{"name":"Nome","description":"Descrição curta"}},{{"name":"Nome","description":"Descrição curta"}}]}}
 """
-        try:
-            raw = self.gemini_client.request_rpg_narration(prompt) or ""
-            match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-            payload = json.loads(match.group(0)) if match else {}
-            options = payload.get("classes", [])
-            if isinstance(options, list) and len(options) == 3:
-                normalized = []
-                for item in options:
-                    if not isinstance(item, dict):
-                        raise ValueError("opção de classe inválida")
-                    name = re.sub(r"[\r\n]+", " ", str(item.get("name") or "")).strip()[:60]
-                    description = re.sub(r"[\r\n]+", " ", str(item.get("description") or "")).strip()[:180]
-                    if not name or not description:
-                        raise ValueError("nome ou descrição vazios")
-                    normalized.append({"name": name, "description": description})
-                if self.user_rpg.set_class_options(nick, normalized, stage):
-                    return normalized
-        except Exception as exc:
-            logging.warning("[RPG] Falha ao gerar opções %s para %s: %s", stage, nick, exc)
+        if self.class_options_ai_enabled:
+            try:
+                raw = self.gemini_client.request_rpg_narration(prompt) or ""
+                match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+                payload = json.loads(match.group(0)) if match else {}
+                options = payload.get("classes", [])
+                if isinstance(options, list) and len(options) == 3:
+                    normalized = []
+                    seen_names = set()
+                    for item in options:
+                        if not isinstance(item, dict):
+                            raise ValueError("opção de classe inválida")
+                        name = self._sanitize_class_option_text(item.get("name"), 35)
+                        description = self._sanitize_class_option_text(item.get("description"), 65)
+                        if not name or not description or name.lower() in seen_names:
+                            raise ValueError("nome/descrição vazios ou classes duplicadas")
+                        seen_names.add(name.lower())
+                        normalized.append({"name": name, "description": description})
+                    if self.user_rpg.set_class_options(nick, normalized, stage):
+                        return normalized
+            except Exception as exc:
+                logging.warning("[RPG] Falha ao gerar opções %s para %s: %s", stage, nick, exc)
 
+        if not allow_fallback:
+            return []
         fallback = random.sample(CLASS_POOL, 3)
         options = [{"name": name, "description": description} for name, description in fallback]
         self.user_rpg.set_class_options(nick, options, stage)
         return options
+
+    def _schedule_definitive_class_options(self, nick, channel):
+        """Prepara as classes definitivas em segundo plano, sem bloquear o processamento do chat."""
+        if not self.class_options_ai_enabled:
+            return
+        if not self.user_rpg.needs_class_options(
+            nick, stage="definitive", minimum_level=self.class_prep_level
+        ):
+            return
+
+        now = time.time()
+        key = nick.lower()
+        with self._class_options_lock:
+            if key in self._class_options_inflight:
+                return
+            # Revalida sob o lock para evitar duas gerações concorrentes no mesmo nick.
+            if not self.user_rpg.needs_class_options(
+                nick, stage="definitive", minimum_level=self.class_prep_level
+            ):
+                return
+            last_attempt = self._class_options_last_attempt.get(nick.lower(), 0)
+            if now - last_attempt < self.class_gen_retry_sec:
+                return
+            self._class_options_inflight.add(key)
+            self._class_options_last_attempt[nick.lower()] = now
+
+        worker = threading.Thread(
+            target=self._prepare_definitive_class_options,
+            args=(nick, channel, key),
+            daemon=True,
+            name=f"class-options-{nick.lower()}",
+        )
+        worker.start()
+
+    def _prepare_definitive_class_options(self, nick, channel, key):
+        try:
+            options = self._generate_class_options(
+                nick, channel, "definitive", allow_fallback=False
+            )
+            if options:
+                logging.info(
+                    "[RPG][CLASS] opções definitivas pré-geradas nick=%s channel=%s count=%s",
+                    nick, channel, len(options),
+                )
+            else:
+                logging.warning(
+                    "[RPG][CLASS] pré-geração sem resultado nick=%s; nova tentativa em %ss",
+                    nick, self.class_gen_retry_sec,
+                )
+        except Exception:
+            logging.exception("[RPG][CLASS] falha na pré-geração definitiva nick=%s", nick)
+        finally:
+            with self._class_options_lock:
+                self._class_options_inflight.discard(key)
+
+    @staticmethod
+    def _sanitize_class_option_text(value, limit):
+        """Remove menções, links e marcadores operacionais das opções geradas."""
+        clean = str(value or "")
+        clean = re.sub(r"https?://\S+", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"@\w+", "", clean)
+        clean = re.sub(r"\[\[.*?\]\]", "", clean)
+        clean = re.sub(r"(?<!\w)[*!/][A-Za-z_][\w-]*", "", clean)
+        clean = re.sub(r"[\r\n]+", " ", clean)
+        clean = re.sub(r"\s+", " ", clean).strip(" ,;:-")
+        return clean[:limit].strip()
+
+    @staticmethod
+    def _limit_chat_text(text, limit=450):
+        """Limita uma mensagem RPG abaixo do teto de 500 caracteres da Twitch."""
+        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+        if len(normalized) <= limit:
+            return normalized
+        shortened = normalized[: max(0, limit - 1)].rsplit(" ", 1)[0].rstrip(" ,;:-")
+        return (shortened or normalized[: limit - 1].rstrip()) + "…"
 
     def _generate_class_lore(self, nick, channel, profile, previous_lore=None):
         """Create a concise, formal character chronicle in third person."""
@@ -239,7 +340,8 @@ LORE ANTERIOR (se houver):
 {previous_lore or "Nenhuma."}
 
 ESTILO OBRIGATÓRIO:
-- Escreva 2 ou 3 frases em português, em terceira pessoa.
+- Escreva no máximo 2 frases curtas em português, em terceira pessoa.
+- A lore deve ter no máximo 240 caracteres; priorize concisão.
 - Tom descritivo, formal e narrativo, como uma entrada de crônica ou bestiário.
 - Descreva a origem, traços e reputação do personagem; não converse com o usuário.
 - Não use vocativos, perguntas, conselhos, comentários sobre a própria escrita ou frases como "sua jornada começa".
@@ -252,11 +354,13 @@ ESTILO OBRIGATÓRIO:
             lore = re.sub(r"\s+", " ", lore).strip().strip('"')
             lore = re.sub(r"^(lore|história|crônica)\s*:\s*", "", lore, flags=re.IGNORECASE)
             if lore:
-                self.user_rpg.set_lore(nick, lore[:900])
-                return lore[:900]
+                lore = self._limit_chat_text(lore, 240)
+                self.user_rpg.set_lore(nick, lore)
+                return lore
         except Exception as exc:
             logging.warning("[RPG] Falha ao gerar lore para %s: %s", nick, exc)
-        return previous_lore or f"@{nick} integra o arquétipo {profile.get('class_name')}, cuja trajetória ainda não foi registrada."
+        fallback = previous_lore or f"@{nick} integra o arquétipo {profile.get('class_name')}, com trajetória ainda não registrada."
+        return self._limit_chat_text(fallback, 240)
 
     def _default_feature_states(self):
         return {
@@ -975,6 +1079,8 @@ ESTILO OBRIGATÓRIO:
 
             # XP por mensagens: cada mensagem normal concede 1 XP, sem cooldown nem teto diário.
             xp_event = self.user_rpg.record_message(author, channel, is_command=content.startswith("*"))
+            # A preparação definitiva começa no nível configurado (padrão 8), sem bloquear o chat.
+            self._schedule_definitive_class_options(author, channel)
             if xp_event and xp_event.get("leveled") and self.is_feature_enabled(channel, "comment"):
                 self.send_level_up_notice(channel, author, xp_event["level"])
 
@@ -1027,7 +1133,8 @@ ESTILO OBRIGATÓRIO:
                             lore = self._generate_class_lore(author, channel, profile, previous_lore)
                             profile = self.user_rpg.get_profile(author) or profile
                             stage_label = "provisória" if profile.get("class_provisional") else "definitiva"
-                            self.send_message(channel, f"@{author}: classe {stage_label} — {profile['class_name']}. {lore}")
+                            message_text = f"@{author}: classe {stage_label} — {profile['class_name']}. {lore}"
+                            self.send_message(channel, self._limit_chat_text(message_text, 450))
                         elif reason == "chosen":
                             self.send_message(channel, f"@{author}, sua classe definitiva já é {profile.get('class_name')}.")
                         elif reason == "level":
@@ -1051,21 +1158,24 @@ ESTILO OBRIGATÓRIO:
 
                     level = int(profile.get("level", 1))
                     stage = "provisional" if level <= 9 else "definitive"
-                    options = profile.get("class_options") or []
-                    if profile.get("class_options_stage") != stage:
-                        options = []
+                    options = self.user_rpg.get_class_options(target, stage)
                     if not profile.get("class_name") or (profile.get("class_provisional") and level >= 10):
                         if not options:
                             options = self._generate_class_options(target, channel, stage)
                         label = "provisórias" if stage == "provisional" else "definitivas"
-                        choices = " | ".join(f"{i}. {item['name']} ({item['description']})" for i, item in enumerate(options, 1))
-                        self.send_message(channel, f"@{target} — classes {label}: {choices}. Escolha com *class 1, 2 ou 3.")
+                        choices = " | ".join(
+                            f"{i}. {item['name']} ({item['description']})"
+                            for i, item in enumerate(options, 1)
+                        )
+                        choice_message = f"@{target} — classes {label}: {choices}. Escolha com *class 1, 2 ou 3."
+                        self.send_message(channel, self._limit_chat_text(choice_message, 450))
                     else:
                         lore = profile.get("lore") or "Lore ainda não registrada."
                         class_display = profile.get("evolved_class_name") if profile.get("evolved") else profile["class_name"]
                         class_description = profile.get("evolved_description") if profile.get("evolved") else profile.get("class_description")
                         provisional_note = " (provisória; classe definitiva no nível 10)" if profile.get("class_provisional") else ""
-                        self.send_message(channel, f"@{target}: {class_display}{provisional_note}. {class_description or ''} Lore: {lore}")
+                        status_message = f"@{target}: {class_display}{provisional_note}. {class_description or ''} Lore: {lore}"
+                        self.send_message(channel, self._limit_chat_text(status_message, 450))
                     return
 
                 if command_raw == "tag":
