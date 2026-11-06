@@ -318,27 +318,35 @@ class CookieSystem:
         matches = self.COOKIE_COMMAND_PATTERN.findall(text)
 
         feedback_parts = []
-        MAX_TRANSACTION = 999
+        # Uma única transação por resposta: evita multiplicar o limite usando várias tags.
+        if len(matches) > 1:
+            logging.warning("[AI-BANK] Resposta continha %s tags; somente a primeira será considerada.", len(matches))
 
-        for action, user, amount_str in matches:
+        for action, user, amount_str in matches[:1]:
             try:
                 action = action.upper()
                 user = user.lower().strip()
                 amount = int(amount_str)
                 sign = "+"
-                
-                if amount > MAX_TRANSACTION:
-                    logging.warning(f"[AI-BANK] Tentativa de exploit detectada ({amount}). Limitando para {MAX_TRANSACTION}.")
-                    amount = MAX_TRANSACTION
-                
+                manager = getattr(self.bot, "user_rpg", None)
+                get_limit = getattr(manager, "get_ai_cookie_transaction_limit", None)
+                max_transaction = get_limit(user) if callable(get_limit) else 999
+
+                if amount > max_transaction:
+                    logging.warning(
+                        "[AI-BANK] Recompensa acima do limite dinâmico nick=%s level_limit=%s requested=%s",
+                        user, max_transaction, amount,
+                    )
+                    amount = max_transaction
+
                 if action == "GIVE":
-                    # Recompensa emitida pelo bot: conversão 1:1 em XP.
+                    # Recompensa emitida pelo bot: cada cookie concedido equivale a 1 XP.
                     self.add_cookies(user, amount, award_xp=True)
                     sign = "+"
                 elif action == "TAKE":
                     self.remove_cookies(user, amount)
                     sign = "-"
-                
+
                 if current_user and user.lower() != current_user.lower():
                     feedback_parts.append(f"({sign}{amount} 🍪 para {user})")
                 else:

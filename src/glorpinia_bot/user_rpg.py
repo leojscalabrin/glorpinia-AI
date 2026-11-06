@@ -21,7 +21,12 @@ class UserRPGManager:
     MESSAGE_XP = 1
     DIRECT_MENTION_XP = 3
     COMMENT_MENTION_XP = 2
-    MAX_COOKIE_XP_PER_EVENT = 25
+    COOKIE_REWARD_BASE_MIN = 1
+    COOKIE_REWARD_BASE_MAX = 10
+    COOKIE_REWARD_LEVEL_DIVISOR = 3
+    COOKIE_REWARD_LEVEL_MULTIPLIER = 2
+    AI_COOKIE_CAP_BASE = 999
+    AI_COOKIE_CAP_LEVEL_MULTIPLIER = 100
 
     def __init__(self, path=None):
         self.path = path or os.getenv("USER_RPG_FILE", self.DEFAULT_FILE)
@@ -50,8 +55,8 @@ class UserRPGManager:
     def xp_to_next(level):
         """XP para o próximo nível; curva ajustada para cookies com conversão de 1:1."""
         level = max(1, int(level))
-        # Total de 1.200 XP do nível 1 ao 10; valores maiores amortecem bônus grandes de cookies.
-        early_levels = (60, 70, 80, 100, 120, 140, 170, 210, 250)
+        # Os primeiros dez níveis exigem 500 XP no total, com progressão gradual.
+        early_levels = (30, 35, 40, 45, 50, 55, 60, 80, 105)
         if level <= 9:
             return early_levels[level - 1]
         if level < 100:
@@ -59,12 +64,72 @@ class UserRPGManager:
             return int(250 + distance * 18 + distance ** 1.5 * 0.6)
         return int(2500 + (level - 99) ** 1.7 * 90)
 
+    @staticmethod
+    def _normalized_level(level):
+        try:
+            return max(1, min(500, int(level)))
+        except (TypeError, ValueError):
+            return 1
+
+    @classmethod
+    def cookie_reward_range(cls, level):
+        """Faixa diária do *cookie; cresce suavemente com a participação acumulada."""
+        level = cls._normalized_level(level)
+        activity_steps = math.isqrt(level - 1)
+        minimum = cls.COOKIE_REWARD_BASE_MIN + activity_steps // cls.COOKIE_REWARD_LEVEL_DIVISOR
+        maximum = cls.COOKIE_REWARD_BASE_MAX + activity_steps * cls.COOKIE_REWARD_LEVEL_MULTIPLIER
+        return minimum, max(minimum, maximum)
+
+    @classmethod
+    def ai_cookie_transaction_limit(cls, level):
+        """Limite técnico por recompensa, escalonado pelo level do destinatário."""
+        level = cls._normalized_level(level)
+        return cls.AI_COOKIE_CAP_BASE + math.isqrt(level - 1) * cls.AI_COOKIE_CAP_LEVEL_MULTIPLIER
+
+    def get_cookie_reward_range(self, nick):
+        profile = self.get_profile(nick) or {}
+        return self.cookie_reward_range(profile.get("level", 1))
+
+    def get_ai_cookie_transaction_limit(self, nick):
+        profile = self.get_profile(nick) or {}
+        return self.ai_cookie_transaction_limit(profile.get("level", 1))
+
     def _ensure(self, nick):
         nick = self._nick(nick)
         if not nick: return None
         return self._users.setdefault(nick, {"xp": 0, "level": 1, "class_options": [],
-            "class_name": None, "class_description": None, "lore": None, "evolved": False,
+            "class_name": None, "class_description": None, "class_stage": None,
+            "class_provisional": False, "lore": None, "evolved": False,
             "last_channel": None, "last_message_at": 0})
+
+    def ensure_profile(self, nick):
+        """Create and return a profile when a user explicitly opens their RPG sheet."""
+        with self._lock:
+            profile = self._ensure(nick)
+            if not profile: return None
+            self._save()
+            return dict(profile)
+
+    def set_class_options(self, nick, options, stage):
+        """Persist three validated class choices for the requested progression stage."""
+        if stage not in ("provisional", "definitive") or not isinstance(options, list) or len(options) != 3:
+            return False
+        normalized = []
+        for item in options:
+            if not isinstance(item, dict): return False
+            name = str(item.get("name") or "").strip()[:60]
+            description = str(item.get("description") or "").strip()[:180]
+            if not name or not description: return False
+            normalized.append({"name": name, "description": description})
+        with self._lock:
+            p = self._ensure(nick)
+            if not p: return False
+            if stage == "provisional" and int(p.get("level", 1)) >= 10: return False
+            if stage == "definitive" and int(p.get("level", 1)) < 10: return False
+            p["class_options"] = normalized
+            p["class_options_stage"] = stage
+            self._save()
+            return True
 
     def _level_for_xp(self, xp):
         level, remaining = 1, max(0, int(xp))
@@ -81,7 +146,6 @@ class UserRPGManager:
         p["xp"] = max(0, xp_before + int(amount))
         p["level"] = self._level_for_xp(p["xp"])
         applied = p["xp"] - xp_before
-        # INFO para aparecer no journal mesmo quando o serviço não habilita DEBUG.
         logging.info(
             "[RPG][XP] nick=%s motivo=%s solicitado=%+d aplicado=%+d xp=%d->%d level=%d->%d",
             self._nick(nick), reason, int(amount), applied, xp_before, p["xp"], old, p["level"]
@@ -89,8 +153,11 @@ class UserRPGManager:
         if channel:
             p["last_channel"] = channel.lower().lstrip("#")
             p["last_message_at"] = time.time()
-        if p["level"] >= 10 and old < 10 and not p.get("class_name") and not p.get("class_options"):
-            p["class_options"] = [{"name": n, "description": d} for n, d in random.sample(CLASS_POOL, 3)]
+        # As opções definitivas são geradas sob demanda pelo comando *class,
+        # com contexto recente do usuário, em vez de usar um sorteio genérico aqui.
+        if p["level"] >= 10 and old < 10 and p.get("class_provisional"):
+            p["class_options"] = []
+            p["class_options_stage"] = None
         if p["level"] >= 100 and p.get("class_name") and not p.get("evolved"):
             p["evolved"] = True
             p["evolved_class_name"] = p["class_name"] + " Ascendente"
@@ -112,32 +179,45 @@ class UserRPGManager:
             if is_command:
                 self._save()
                 return None
-            # Cada mensagem normal concede XP; não há cooldown nem limite diário.
             return self._add_xp_locked(key, self.MESSAGE_XP, channel, reason="mensagem no chat")
 
     def record_cookie_change(self, nick, amount, gained=True):
         try: amount = max(0, int(amount))
         except (TypeError, ValueError): return None
-        if not amount: return None
-        # Ganhos de cookies convertem 1:1 em XP, sem teto por evento.
-        # Perdas mantêm a penalidade reduzida anterior para não zerar XP por uma transferência.
-        points = min(self.MAX_COOKIE_XP_PER_EVENT, max(1, int(math.log2(amount + 1) * 2.5)))
-        delta = amount if gained else -max(1, points // 2)
-        reason = f"cookies {'ganhos' if gained else 'perdidos'} ({amount}; conversão {'1:1' if gained else 'penalidade reduzida'})"
-        return self.add_xp(nick, delta, reason=reason)
+        if not amount or not gained:
+            return None
+        # Apenas recompensas confiáveis concedidas pelo próprio bot geram XP.
+        # Cada cookie ganho equivale exatamente a 1 XP; perdas/transferências não alteram XP.
+        return self.add_xp(nick, amount, reason=f"cookies ganhos pelo bot ({amount}; conversão 1:1)")
 
     def choose_class(self, nick, choice):
         with self._lock:
             p = self._ensure(nick)
-            if not p or p.get("level", 1) < 10: return False, "level", None
-            if p.get("class_name"): return False, "chosen", dict(p)
+            if not p: return False, "profile", None
+            level = int(p.get("level", 1))
+            stage = "provisional" if level <= 9 else "definitive"
+            options = p.get("class_options") or []
+            if p.get("class_options_stage") != stage or not options:
+                return False, "options", dict(p)
+            if p.get("class_name") and not p.get("class_provisional"):
+                return False, "chosen", dict(p)
             try: index = int(choice) - 1
             except (TypeError, ValueError): return False, "choice", dict(p)
-            options = p.get("class_options") or []
             if index not in range(len(options)): return False, "choice", dict(p)
             selected = options[index]
-            p.update(class_name=selected["name"], class_description=selected["description"], class_options=[], lore=None)
-            if p.get("level", 1) >= 100:
+            p.update(
+                class_name=selected["name"],
+                class_description=selected["description"],
+                class_options=[],
+                class_options_stage=None,
+                class_stage=stage,
+                class_provisional=(stage == "provisional"),
+                lore=None,
+                evolved=False,
+            )
+            p.pop("evolved_class_name", None)
+            p.pop("evolved_description", None)
+            if level >= 100:
                 p["evolved"] = True
                 p["evolved_class_name"] = p["class_name"] + " Ascendente"
                 p["evolved_description"] = "Uma forma desperta, mais rara e poderosa do seu arquétipo original."
@@ -152,30 +232,20 @@ class UserRPGManager:
             self._save()
             return True
 
-
     def get_profile(self, nick):
-        """Return a copy of a user RPG profile, or None if the user has no profile yet."""
         key = self._nick(nick)
-        if not key:
-            return None
+        if not key: return None
         with self._lock:
             profile = self._users.get(key)
             return dict(profile) if profile is not None else None
 
     def get_ranking(self, limit=5):
-        """Return profiles ordered by level, then total XP, descending."""
-        try:
-            limit = max(0, int(limit))
-        except (TypeError, ValueError):
-            limit = 5
+        try: limit = max(0, int(limit))
+        except (TypeError, ValueError): limit = 5
         with self._lock:
             ordered = sorted(
                 self._users.items(),
-                key=lambda item: (
-                    int(item[1].get("level", 1)),
-                    int(item[1].get("xp", 0)),
-                    item[0],
-                ),
+                key=lambda item: (int(item[1].get("level", 1)), int(item[1].get("xp", 0)), item[0]),
                 reverse=True,
             )
             return [(nick, dict(profile)) for nick, profile in ordered[:limit]]

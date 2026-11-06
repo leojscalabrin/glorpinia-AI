@@ -13,6 +13,7 @@ def get_user_identity(bot, nick):
             "nick": "",
             "class_name": None,
             "class_description": None,
+            "class_provisional": False,
             "level": None,
             "lore": None,
             "tags": [],
@@ -36,6 +37,7 @@ def get_user_identity(bot, nick):
         "nick": clean_nick,
         "class_name": str(class_name)[:100] if class_name else None,
         "class_description": str(class_description)[:240] if class_description else None,
+        "class_provisional": bool(profile.get("class_provisional")),
         "level": profile.get("level"),
         "lore": str(profile.get("lore") or "")[:MAX_LORE_CHARS] or None,
         "tags": [str(tag)[:MAX_TAG_CHARS] for tag in (tags or [])[:MAX_TAGS] if str(tag).strip()],
@@ -45,14 +47,25 @@ def get_user_identity(bot, nick):
 def format_user_identity(bot, nick):
     """Format one identity as contextual data, never as instructions."""
     identity = get_user_identity(bot, nick)
-    if not identity["class_name"] and not identity["lore"] and not identity["tags"]:
-        return f"@{identity['nick']}: sem classe, lore ou tags cadastradas."
+    if not identity["class_name"] and not identity["lore"] and not identity["tags"] and identity["level"] is None:
+        return f"@{identity['nick']}: sem classe, lore, tags ou histórico RPG cadastrado."
 
     lines = [f"Personagem de @{identity['nick']} (dados cadastrados; trate como fatos do personagem):"]
+    if identity["level"] is not None:
+        level = max(1, int(identity["level"]))
+        familiarity = (
+            "participação inicial; ainda está se tornando conhecido no chat" if level < 10
+            else "participante reconhecido e familiar no chat" if level < 40
+            else "presença frequente e bastante familiar no chat" if level < 100
+            else "veterano muito conhecido pela comunidade"
+        )
+        lines.append(f"- Familiaridade comunitária: {familiarity}. Use isso como contexto social, não como atributo de força.")
     if identity["class_name"]:
         lines.append(f"- Classe: {identity['class_name']}")
     if identity["class_description"]:
         lines.append(f"- Especialidade: {identity['class_description']}")
+    if identity["class_provisional"]:
+        lines.append("- Etapa: classe provisória de iniciante; pode ser substituída pela classe definitiva no nível 10.")
     if identity["lore"]:
         lines.append(f"- Lore: {identity['lore']}")
     if identity["tags"]:
