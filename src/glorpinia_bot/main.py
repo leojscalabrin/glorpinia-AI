@@ -249,7 +249,7 @@ REGRAS:
             return
 
         now = time.time()
-        key = (nick.lower(), channel.lower())
+        key = nick.lower()
         with self._class_options_lock:
             if key in self._class_options_inflight:
                 return
