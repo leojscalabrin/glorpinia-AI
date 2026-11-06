@@ -141,8 +141,9 @@ class SevenTVRegressionTests(unittest.TestCase):
     def test_concurrent_requests_share_one_cache_refresh(self):
         bot = type("Bot", (), {"send_message": lambda *args: None})()
         with tempfile.TemporaryDirectory() as directory:
-            feature = SevenTVEmote(bot)
-            feature._cache_path = os.path.join(directory, "cache.json")
+            cache_path = os.path.join(directory, "cache.json")
+            with patch.dict(os.environ, {"SEVENTV_EMOTE_CACHE_FILE": cache_path}):
+                feature = SevenTVEmote(bot)
             calls = []
 
             def fake_post(*args, **kwargs):
@@ -167,7 +168,10 @@ class SevenTVRegressionTests(unittest.TestCase):
 
     def test_graphql_rate_limit_is_detected_and_reset_is_respected(self):
         bot = type("Bot", (), {"send_message": lambda *args: None})()
-        feature = SevenTVEmote(bot)
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = os.path.join(directory, "cache.json")
+            with patch.dict(os.environ, {"SEVENTV_EMOTE_CACHE_FILE": cache_path}):
+                feature = SevenTVEmote(bot)
         payload = {
             "errors": [{
                 "message": "rate limit exceeded",
