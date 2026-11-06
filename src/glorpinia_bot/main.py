@@ -1019,9 +1019,10 @@ ESTILO OBRIGATÓRIO:
 
                     # Escolha numerada: classe provisória (níveis 1–9) ou definitiva (10+).
                     if len(parts) > 1 and parts[1].isdigit():
+                        old_profile = self.user_rpg.get_profile(author) or {}
+                        previous_lore = old_profile.get("lore")
                         success, reason, profile = self.user_rpg.choose_class(author, parts[1])
                         if success and profile:
-                            previous_lore = profile.get("lore")
                             lore = self._generate_class_lore(author, channel, profile, previous_lore)
                             profile = self.user_rpg.get_profile(author) or profile
                             stage_label = "provisória" if profile.get("class_provisional") else "definitiva"
