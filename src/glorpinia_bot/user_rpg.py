@@ -67,6 +67,17 @@ class UserRPGManager:
                 profile.setdefault("class_options_stage", None)
                 profile.setdefault("definitive_class_options", [])
                 profile.setdefault("definitive_class_options_ready", False)
+                # Migra opções definitivas salvas pelo formato anterior sem sobrescrever classes provisórias.
+                if (
+                    profile.get("class_options_stage") == "definitive"
+                    and profile.get("class_options")
+                    and not profile.get("definitive_class_options")
+                ):
+                    profile["definitive_class_options"] = list(profile["class_options"])
+                    profile["definitive_class_options_ready"] = True
+                    profile["class_options"] = []
+                    profile["class_options_stage"] = None
+                    migrated += 1
                 profile.setdefault("class_name", None)
                 profile.setdefault("class_description", None)
                 profile.setdefault("class_stage", None)
@@ -176,7 +187,6 @@ class UserRPGManager:
             p = self._ensure(nick)
             if not p: return False
             if stage == "provisional" and int(p.get("level", 1)) >= 10: return False
-            if stage == "definitive" and int(p.get("level", 1)) < 10: return False
             if stage == "provisional":
                 p["class_options"] = normalized
                 p["class_options_stage"] = stage
