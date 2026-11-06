@@ -35,6 +35,7 @@ from .features.analysis import AnalysisMode
 from .features.tarot import TarotReader
 from .features.rpg_roll import RPGRollFeature
 from .features.duel_narrator import DuelNarrator
+from .narrative.rpg_context import format_user_identity
 from .features.seventv_emote import SevenTVEmote
 from .features.steam_info import SteamInfo
 from .seventv_channel_sync import SevenTVChannelSync
@@ -1178,9 +1179,13 @@ class TwitchIRC:
                     target = target or author
                     percentage = random.randint(0, 100)
 
+                    identity_context = format_user_identity(self, target)
                     prompt = (
                         f"Gere UM comentário curto (máximo 12 palavras), em português, engraçado e leve "
-                        f"sobre {target} estar {percentage}% careca. Não use aspas, não use emojis."
+                        f"sobre {target} estar {percentage}% careca. "
+                        f"Contexto RPG opcional do alvo: {identity_context} "
+                        "Use classe, lore ou tags apenas se render uma piada natural; não force referências. "
+                        "Não invente fatos, não use aspas e não use emojis."
                     )
                     short_comment = "com potencial aerodinâmico em desenvolvimento."
                     try:
