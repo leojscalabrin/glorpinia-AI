@@ -207,7 +207,7 @@ REGRAS:
 - Na etapa provisória, use arquétipos simples, iniciais e flexíveis; não crie lore nem poderes exagerados.
 - Na etapa definitiva, crie classes mais específicas, com identidade de RPG.
 - Não invente fatos biográficos, características sensíveis ou eventos que não aparecem no contexto.
-- Cada descrição deve ter no máximo 100 caracteres.
+- Cada descrição deve ter no máximo 65 caracteres.
 - Não use o nome do usuário como nome da classe.
 - Retorne SOMENTE JSON válido neste formato:
 {{"classes":[{{"name":"Nome","description":"Descrição curta"}},{{"name":"Nome","description":"Descrição curta"}},{{"name":"Nome","description":"Descrição curta"}}]}}
@@ -255,6 +255,11 @@ REGRAS:
         key = nick.lower()
         with self._class_options_lock:
             if key in self._class_options_inflight:
+                return
+            # Revalida sob o lock para evitar duas gerações concorrentes no mesmo nick.
+            if not self.user_rpg.needs_class_options(
+                nick, stage="definitive", minimum_level=self.class_prep_level
+            ):
                 return
             last_attempt = self._class_options_last_attempt.get(nick.lower(), 0)
             if now - last_attempt < self.class_gen_retry_sec:
