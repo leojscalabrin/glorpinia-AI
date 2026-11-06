@@ -13,6 +13,7 @@ def get_user_identity(bot, nick):
             "nick": "",
             "class_name": None,
             "class_description": None,
+            "class_provisional": False,
             "level": None,
             "lore": None,
             "tags": [],
@@ -36,6 +37,7 @@ def get_user_identity(bot, nick):
         "nick": clean_nick,
         "class_name": str(class_name)[:100] if class_name else None,
         "class_description": str(class_description)[:240] if class_description else None,
+        "class_provisional": bool(profile.get("class_provisional")),
         "level": profile.get("level"),
         "lore": str(profile.get("lore") or "")[:MAX_LORE_CHARS] or None,
         "tags": [str(tag)[:MAX_TAG_CHARS] for tag in (tags or [])[:MAX_TAGS] if str(tag).strip()],
@@ -53,6 +55,8 @@ def format_user_identity(bot, nick):
         lines.append(f"- Classe: {identity['class_name']}")
     if identity["class_description"]:
         lines.append(f"- Especialidade: {identity['class_description']}")
+    if identity["class_provisional"]:
+        lines.append("- Etapa: classe provisória de iniciante; pode ser substituída pela classe definitiva no nível 10.")
     if identity["lore"]:
         lines.append(f"- Lore: {identity['lore']}")
     if identity["tags"]:
