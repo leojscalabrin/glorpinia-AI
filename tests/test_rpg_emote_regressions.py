@@ -44,6 +44,12 @@ class RPGRegressionTests(unittest.TestCase):
             self.assertEqual(profile["xp"], 500)
             self.assertEqual(profile["level"], 10)
 
+            first_message = manager.record_message("viewer", "channel")
+            self.assertFalse(first_message["leveled"])
+            self.assertEqual(first_message["old_level"], 10)
+            self.assertEqual(first_message["level"], 10)
+            self.assertEqual(manager.get_profile("viewer")["xp"], 501)
+
             # Reinicializações seguintes não devem continuar alterando o perfil.
             second_manager = UserRPGManager(path=path)
             self.assertEqual(second_manager.get_profile("viewer")["level"], 10)
