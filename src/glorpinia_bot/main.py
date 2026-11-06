@@ -212,25 +212,28 @@ REGRAS:
 - Retorne SOMENTE JSON válido neste formato:
 {{"classes":[{{"name":"Nome","description":"Descrição curta"}},{{"name":"Nome","description":"Descrição curta"}},{{"name":"Nome","description":"Descrição curta"}}]}}
 """
-        try:
-            raw = self.gemini_client.request_rpg_narration(prompt) or ""
-            match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-            payload = json.loads(match.group(0)) if match else {}
-            options = payload.get("classes", [])
-            if isinstance(options, list) and len(options) == 3:
-                normalized = []
-                for item in options:
-                    if not isinstance(item, dict):
-                        raise ValueError("opção de classe inválida")
-                    name = re.sub(r"[\r\n]+", " ", str(item.get("name") or "")).strip()[:60]
-                    description = re.sub(r"[\r\n]+", " ", str(item.get("description") or "")).strip()[:100]
-                    if not name or not description:
-                        raise ValueError("nome ou descrição vazios")
-                    normalized.append({"name": name, "description": description})
-                if self.user_rpg.set_class_options(nick, normalized, stage):
-                    return normalized
-        except Exception as exc:
-            logging.warning("[RPG] Falha ao gerar opções %s para %s: %s", stage, nick, exc)
+        if self.class_options_ai_enabled:
+            try:
+                raw = self.gemini_client.request_rpg_narration(prompt) or ""
+                match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+                payload = json.loads(match.group(0)) if match else {}
+                options = payload.get("classes", [])
+                if isinstance(options, list) and len(options) == 3:
+                    normalized = []
+                    seen_names = set()
+                    for item in options:
+                        if not isinstance(item, dict):
+                            raise ValueError("opção de classe inválida")
+                        name = self._sanitize_class_option_text(item.get("name"), 35)
+                        description = self._sanitize_class_option_text(item.get("description"), 65)
+                        if not name or not description or name.lower() in seen_names:
+                            raise ValueError("nome/descrição vazios ou classes duplicadas")
+                        seen_names.add(name.lower())
+                        normalized.append({"name": name, "description": description})
+                    if self.user_rpg.set_class_options(nick, normalized, stage):
+                        return normalized
+            except Exception as exc:
+                logging.warning("[RPG] Falha ao gerar opções %s para %s: %s", stage, nick, exc)
 
         if not allow_fallback:
             return []
@@ -287,6 +290,18 @@ REGRAS:
         finally:
             with self._class_options_lock:
                 self._class_options_inflight.discard(key)
+
+    @staticmethod
+    def _sanitize_class_option_text(value, limit):
+        """Remove menções, links e marcadores operacionais das opções geradas."""
+        clean = str(value or "")
+        clean = re.sub(r"https?://\S+", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"@\w+", "", clean)
+        clean = re.sub(r"\[\[.*?\]\]", "", clean)
+        clean = re.sub(r"(?<!\w)[*!/][A-Za-z_][\w-]*", "", clean)
+        clean = re.sub(r"[\r\n]+", " ", clean)
+        clean = re.sub(r"\s+", " ", clean).strip(" ,;:-")
+        return clean[:limit].strip()
 
     @staticmethod
     def _limit_chat_text(text, limit=450):
