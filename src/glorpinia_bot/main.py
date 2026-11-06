@@ -998,9 +998,10 @@ ESTILO OBRIGATÓRIO:
                         entries = []
                         for idx, (nick, profile) in enumerate(top, start=1):
                             class_name = profile.get("evolved_class_name") if profile.get("evolved") else profile.get("class_name")
-                            label = f" ({class_name})" if class_name else ""
-                            entries.append(f"#{idx} {nick} Nv.{profile.get('level', 1)}{label}")
-                        self.send_message(channel, "RPG: " + " | ".join(entries))
+                            label = f" ({class_name[:24]})" if class_name else ""
+                            entries.append(f"#{idx} {nick[:25]} Nv.{profile.get('level', 1)}{label}")
+                        # Uma única mensagem compacta, com margem para o limite de chat da Twitch.
+                        self.send_message(channel, "RPG: " + " | ".join(entries)[:450])
                     return
 
                 if command_raw == "level":
