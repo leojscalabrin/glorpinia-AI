@@ -4,6 +4,8 @@ import logging
 from datetime import date
 import random
 
+from ..narrative.rpg_context import format_user_identity
+
 # Separadores que o modelo costuma usar entre a frase do biscoito e um comentário.
 _COMMENT_SEPARATOR = re.compile(r"\s[-–—]\s")
 _EMOJI_PATTERN = re.compile(
@@ -78,18 +80,7 @@ class FortuneCookie:
 
     def _build_prompt(self, author: str) -> str:
         """Cria um prompt de biscoito da sorte variado e opcionalmente personalizado."""
-        profile = self.bot.user_rpg.get_profile(author) if getattr(self.bot, "user_rpg", None) else None
-        tags = self.bot.user_tags.get_tags(author) if getattr(self.bot, "user_tags", None) else []
-
-        identity_context = ""
-        if profile and profile.get("class_name"):
-            class_name = profile.get("evolved_class_name") if profile.get("evolved") else profile.get("class_name")
-            identity_context = (
-                f"Classe do usuário: {class_name}. "
-                f"Lore: {profile.get('lore') or 'ainda não definida'}. "
-            )
-        if tags:
-            identity_context += f"Tags e feitos: {', '.join(tags)}. "
+        identity_context = format_user_identity(self.bot, author)
 
         return f"""
         @{author} está abrindo um biscoito da sorte.
@@ -100,7 +91,7 @@ class FortuneCookie:
         Varie bastante o assunto, a construção das frases e o tipo de metáfora. Evite fórmulas prontas e não repita sempre a mesma ideia.
 
         **PERSONALIZAÇÃO OPCIONAL**
-        {identity_context or 'Não há contexto de personagem disponível.'}
+        {identity_context}
         Se houver classe, lore ou tags, você pode usar um detalhe de forma sutil quando combinar naturalmente com o provérbio.
         Não force referências ao personagem em toda resposta e não invente acontecimentos ou fatos pessoais.
         O provérbio deve continuar parecendo uma mensagem de biscoito da sorte, não uma ficha de RPG.
