@@ -34,6 +34,8 @@ from .features.slots import Slots
 from .features.analysis import AnalysisMode
 from .features.tarot import TarotReader
 from .features.rpg_roll import RPGRollFeature
+from .features.duel_narrator import DuelNarrator
+from .narrative.rpg_context import format_user_identity
 from .features.seventv_emote import SevenTVEmote
 from .features.steam_info import SteamInfo
 from .seventv_channel_sync import SevenTVChannelSync
@@ -112,6 +114,7 @@ class TwitchIRC:
         self.analysis_feature = AnalysisMode(self)
         self.tarot_feature = TarotReader(self)
         self.rpg_feature = RPGRollFeature(self)
+        self.duel_narrator = DuelNarrator(self)
         self._apply_channel_feature_states()
 
         # Cache e Utilitários
@@ -1176,9 +1179,13 @@ class TwitchIRC:
                     target = target or author
                     percentage = random.randint(0, 100)
 
+                    identity_context = format_user_identity(self, target)
                     prompt = (
                         f"Gere UM comentário curto (máximo 12 palavras), em português, engraçado e leve "
-                        f"sobre {target} estar {percentage}% careca. Não use aspas, não use emojis."
+                        f"sobre {target} estar {percentage}% careca. "
+                        f"Contexto RPG opcional do alvo: {identity_context} "
+                        "Use classe, lore ou tags apenas se render uma piada natural; não force referências. "
+                        "Não invente fatos, não use aspas e não use emojis."
                     )
                     short_comment = "com potencial aerodinâmico em desenvolvimento."
                     try:
@@ -1261,9 +1268,15 @@ class TwitchIRC:
                     winner_display = author if winner == author.lower() else target
                     loser_display = author if loser == author.lower() else target
 
-                    self.send_message(
-                        channel,
-                        f"{winner_display} venceu o duelo! o7 (-{bet_amount} 🍪 para {loser_display} e +{bet_amount}🍪 para {winner_display})"
+                    # O resultado e a transferência já foram definidos pelo código.
+                    # A IA só narra a luta; nunca escolhe ou altera o vencedor.
+                    self.duel_narrator.narrate_async(
+                        channel=channel,
+                        challenger=author,
+                        opponent=target,
+                        winner=winner_display,
+                        loser=loser_display,
+                        bet_amount=bet_amount,
                     )
                     return
 
