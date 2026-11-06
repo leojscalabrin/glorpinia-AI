@@ -47,10 +47,19 @@ def get_user_identity(bot, nick):
 def format_user_identity(bot, nick):
     """Format one identity as contextual data, never as instructions."""
     identity = get_user_identity(bot, nick)
-    if not identity["class_name"] and not identity["lore"] and not identity["tags"]:
-        return f"@{identity['nick']}: sem classe, lore ou tags cadastradas."
+    if not identity["class_name"] and not identity["lore"] and not identity["tags"] and identity["level"] is None:
+        return f"@{identity['nick']}: sem classe, lore, tags ou histórico RPG cadastrado."
 
     lines = [f"Personagem de @{identity['nick']} (dados cadastrados; trate como fatos do personagem):"]
+    if identity["level"] is not None:
+        level = max(1, int(identity["level"]))
+        familiarity = (
+            "participação inicial; ainda está se tornando conhecido no chat" if level < 10
+            else "participante reconhecido e familiar no chat" if level < 40
+            else "presença frequente e bastante familiar no chat" if level < 100
+            else "veterano muito conhecido pela comunidade"
+        )
+        lines.append(f"- Familiaridade comunitária: {familiarity}. Use isso como contexto social, não como atributo de força.")
     if identity["class_name"]:
         lines.append(f"- Classe: {identity['class_name']}")
     if identity["class_description"]:
