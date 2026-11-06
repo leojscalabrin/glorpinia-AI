@@ -519,7 +519,7 @@ ESTILO OBRIGATÓRIO:
         com outra mensagem do bot (que faria a Twitch descartar uma delas)."""
         notice = f"@{author} passou para o nível {new_level}! PogChamp"
         if new_level == 10:
-            notice += " Use *class para escolher sua classe!"
+            notice += " Use *class para escolher sua classe definitiva!"
 
         delay = 0 if self.is_bot_privileged(channel) else self.levelup_notice_delay_sec
         if delay <= 0:
