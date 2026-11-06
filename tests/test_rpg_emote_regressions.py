@@ -71,8 +71,10 @@ class RPGRegressionTests(unittest.TestCase):
                 {"name": "Oráculo de Neon", "description": "Lê sinais do chat."},
             ]
 
+            self.assertTrue(manager.needs_class_options("viewer", "definitive", minimum_level=8))
             self.assertTrue(manager.set_class_options("viewer", provisional, "provisional"))
             self.assertTrue(manager.set_class_options("viewer", definitive, "definitive"))
+            self.assertFalse(manager.needs_class_options("viewer", "definitive", minimum_level=8))
             self.assertEqual(manager.get_class_options("viewer", "provisional"), provisional)
             self.assertEqual(manager.get_class_options("viewer", "definitive"), definitive)
 
@@ -81,6 +83,28 @@ class RPGRegressionTests(unittest.TestCase):
             self.assertTrue(success)
             self.assertEqual(reason, "chosen")
             self.assertEqual(profile["class_name"], "Cronista do Vazio")
+
+    def test_legacy_definitive_options_are_migrated_without_losing_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "user_rpg.json")
+            legacy_options = [
+                {"name": "A", "description": "a"},
+                {"name": "B", "description": "b"},
+                {"name": "C", "description": "c"},
+            ]
+            with open(path, "w", encoding="utf-8") as profile_file:
+                json.dump({
+                    "viewer": {
+                        "xp": 500,
+                        "level": 10,
+                        "class_options": legacy_options,
+                        "class_options_stage": "definitive",
+                    }
+                }, profile_file)
+
+            manager = UserRPGManager(path=path)
+            self.assertEqual(manager.get_class_options("viewer", "definitive"), legacy_options)
+            self.assertEqual(manager.get_class_options("viewer", "provisional"), [])
 
     def test_lore_storage_is_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
