@@ -96,7 +96,7 @@ class UserRPGManager:
             self._users = loaded
             if migrated:
                 self._save()
-                logging.info("[RPG][MIGRATION] %s perfis sincronizados com a curva atual.", migrated)
+                logging.info("[RPG][MIGRATION] %s ajustes de perfil aplicados.", migrated)
         except Exception as exc:
             logging.error("[RPG] Falha ao carregar %s: %s", self.path, exc)
 
@@ -187,6 +187,8 @@ class UserRPGManager:
             p = self._ensure(nick)
             if not p: return False
             if stage == "provisional" and int(p.get("level", 1)) >= 10: return False
+            if stage == "definitive" and p.get("class_name") and not p.get("class_provisional"):
+                return False
             if stage == "provisional":
                 p["class_options"] = normalized
                 p["class_options_stage"] = stage
