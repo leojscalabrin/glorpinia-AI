@@ -312,8 +312,14 @@ class GeminiClient:
         if rpg_manager:
             profile = get_rpg_profile(author) if callable(get_rpg_profile) else None
             if profile:
-                power = "iniciante" if profile.get("level", 1) < 10 else ("experiente" if profile.get("level", 1) < 40 else ("muito poderoso" if profile.get("level", 1) < 100 else "lendário"))
-                details = [f"progressão de poder: {power}"]
+                level = int(profile.get("level", 1) or 1)
+                familiarity = (
+                    "participação inicial; ainda está se tornando conhecido no chat" if level < 10
+                    else "participante reconhecido e familiar no chat" if level < 40
+                    else "presença frequente e bastante familiar no chat" if level < 100
+                    else "veterano muito conhecido pela comunidade" 
+                )
+                details = [f"familiaridade comunitária: {familiarity} (marco RPG {level})"]
                 if profile.get("class_name"):
                     details.append(f"arquétipo: {profile.get('evolved_class_name') if profile.get('evolved') else profile['class_name']}")
                     if profile.get("evolved"):
@@ -333,16 +339,22 @@ class GeminiClient:
                 other = get_rpg_profile(mentioned_nick) if callable(get_rpg_profile) else None
                 if not other:
                     continue
-                other_power = "iniciante" if other.get("level", 1) < 10 else ("experiente" if other.get("level", 1) < 40 else ("muito poderoso" if other.get("level", 1) < 100 else "lendário"))
+                other_level = int(other.get("level", 1) or 1)
+                other_familiarity = (
+                    "participação inicial; ainda está se tornando conhecido no chat" if other_level < 10
+                    else "participante reconhecido e familiar no chat" if other_level < 40
+                    else "presença frequente e bastante familiar no chat" if other_level < 100
+                    else "veterano muito conhecido pela comunidade"
+                )
                 other_class = other.get("evolved_class_name") if other.get("evolved") else other.get("class_name")
-                summary = f"progressão de poder: {other_power}"
+                summary = f"familiaridade comunitária: {other_familiarity} (marco RPG {other_level})"
                 if other_class:
                     summary += f"; arquétipo: {other_class}"
                 if other.get("lore"):
                     summary += f"; lore: {other['lore']}"
                 tag_context_parts.append(f"Perfil implícito de @{mentioned_nick}: {summary}")
         if tag_context_parts:
-            tag_context_parts.append("Use tags, poder de RPG e situação econômica apenas para calibrar intimidade, respeito, confiança e brincadeiras de modo sutil. NÃO cite nível, nome da classe, XP ou saldo exato espontaneamente. Saldo negativo não autoriza grosseria automática nem novas punições: não continue tirando cookies em sequência; só proponha/performe perda quando a interação atual justificar claramente, respeitando os cooldowns e regras da economia.")
+            tag_context_parts.append("Use tags, familiaridade comunitária e situação econômica apenas para calibrar intimidade, respeito, confiança e brincadeiras de modo sutil. O level é um indicador aproximado de participação e familiaridade acumuladas, não de força, aleatoriedade ou valor pessoal; nunca trate alguém como figurante ou desconhecido só por ter nível baixo. NÃO cite nível, nome da classe, XP ou saldo exato espontaneamente. Saldo negativo não autoriza grosseria automática nem novas punições: não continue tirando cookies em sequência; só proponha/performe perda quando a interação atual justificar claramente, respeitando os cooldowns e regras da economia.")
             rag_context = "\n\n".join(part for part in [rag_context, "**CONTEXTO SOCIAL, TAGS, RPG E ECONOMIA (não recitar):**\n" + "\n".join(tag_context_parts)] if part.strip())
         logging.debug(
             "[Gemini] Contextos montados channel=%s author=%s chat=%s memory=%s web=%s total_chars=%s",
