@@ -39,12 +39,55 @@ class UserRPGManager:
         return (nick or "").strip().lstrip("@").lower()
 
     def _load(self):
-        if not os.path.exists(self.path): return
+        if not os.path.exists(self.path):
+            return
         try:
-            with open(self.path, encoding="utf-8") as f: data = json.load(f)
-            if isinstance(data, dict):
-                self._users = {self._nick(k): v for k, v in data.items() if self._nick(k) and isinstance(v, dict)}
-        except Exception as exc: logging.error("[RPG] Falha ao carregar %s: %s", self.path, exc)
+            with open(self.path, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                logging.warning("[RPG] Arquivo %s não contém um objeto de perfis.", self.path)
+                return
+
+            migrated = 0
+            loaded = {}
+            for raw_nick, raw_profile in data.items():
+                nick = self._nick(raw_nick)
+                if not nick or not isinstance(raw_profile, dict):
+                    continue
+                profile = dict(raw_profile)
+                try:
+                    xp = max(0, int(profile.get("xp", 0)))
+                except (TypeError, ValueError):
+                    xp = 0
+                stored_level = self._normalized_level(profile.get("level", 1))
+                canonical_level = self._level_for_xp(xp)
+                profile["xp"] = xp
+                profile["level"] = canonical_level
+                profile.setdefault("class_options", [])
+                profile.setdefault("class_options_stage", None)
+                profile.setdefault("definitive_class_options", [])
+                profile.setdefault("definitive_class_options_ready", False)
+                profile.setdefault("class_name", None)
+                profile.setdefault("class_description", None)
+                profile.setdefault("class_stage", None)
+                profile.setdefault("class_provisional", False)
+                profile.setdefault("lore", None)
+                profile.setdefault("evolved", False)
+                profile.setdefault("last_channel", None)
+                profile.setdefault("last_message_at", 0)
+                if stored_level != canonical_level:
+                    migrated += 1
+                    logging.warning(
+                        "[RPG][MIGRATION] perfil=%s level_salvo=%s level_calculado=%s xp=%s; nível sincronizado sem conceder XP.",
+                        nick, stored_level, canonical_level, xp,
+                    )
+                loaded[nick] = profile
+            self._users = loaded
+            if migrated:
+                self._save()
+                logging.info("[RPG][MIGRATION] %s perfis sincronizados com a curva atual.", migrated)
+        except Exception as exc:
+            logging.error("[RPG] Falha ao carregar %s: %s", self.path, exc)
 
     def _save(self):
         with open(self.path + ".tmp", "w", encoding="utf-8") as f:
@@ -97,10 +140,18 @@ class UserRPGManager:
     def _ensure(self, nick):
         nick = self._nick(nick)
         if not nick: return None
-        return self._users.setdefault(nick, {"xp": 0, "level": 1, "class_options": [],
+        profile = self._users.setdefault(nick, {
+            "xp": 0, "level": 1, "class_options": [], "class_options_stage": None,
+            "definitive_class_options": [], "definitive_class_options_ready": False,
             "class_name": None, "class_description": None, "class_stage": None,
             "class_provisional": False, "lore": None, "evolved": False,
-            "last_channel": None, "last_message_at": 0})
+            "last_channel": None, "last_message_at": 0,
+        })
+        profile.setdefault("class_options", [])
+        profile.setdefault("class_options_stage", None)
+        profile.setdefault("definitive_class_options", [])
+        profile.setdefault("definitive_class_options_ready", False)
+        return profile
 
     def ensure_profile(self, nick):
         """Create and return a profile when a user explicitly opens their RPG sheet."""
@@ -126,10 +177,47 @@ class UserRPGManager:
             if not p: return False
             if stage == "provisional" and int(p.get("level", 1)) >= 10: return False
             if stage == "definitive" and int(p.get("level", 1)) < 10: return False
-            p["class_options"] = normalized
-            p["class_options_stage"] = stage
+            if stage == "provisional":
+                p["class_options"] = normalized
+                p["class_options_stage"] = stage
+            else:
+                p["definitive_class_options"] = normalized
+                p["definitive_class_options_ready"] = True
+                p["definitive_class_options_generated_at"] = time.time()
             self._save()
             return True
+
+    def get_class_options(self, nick, stage):
+        with self._lock:
+            profile = self._users.get(self._nick(nick))
+            if not profile:
+                return []
+            if stage == "definitive":
+                return list(profile.get("definitive_class_options") or [])
+            if profile.get("class_options_stage") == "provisional":
+                return list(profile.get("class_options") or [])
+            return []
+
+    def needs_class_options(self, nick, stage="definitive", minimum_level=8):
+        with self._lock:
+            profile = self._users.get(self._nick(nick))
+            if not profile:
+                return False
+            level = self._normalized_level(profile.get("level", 1))
+            if stage == "definitive":
+                return (
+                    level >= minimum_level
+                    and not (profile.get("class_name") and not profile.get("class_provisional"))
+                    and not profile.get("definitive_class_options_ready")
+                )
+            return level <= 9 and not self.get_class_options(nick, "provisional")
+
+    def assign_fallback_class_options(self, nick, stage="definitive"):
+        options = [
+            {"name": name, "description": description}
+            for name, description in random.sample(CLASS_POOL, 3)
+        ]
+        return self.set_class_options(nick, options, stage)
 
     def _level_for_xp(self, xp):
         level, remaining = 1, max(0, int(xp))
@@ -196,8 +284,12 @@ class UserRPGManager:
             if not p: return False, "profile", None
             level = int(p.get("level", 1))
             stage = "provisional" if level <= 9 else "definitive"
-            options = p.get("class_options") or []
-            if p.get("class_options_stage") != stage or not options:
+            options = (
+                p.get("definitive_class_options") or []
+                if stage == "definitive"
+                else (p.get("class_options") or [])
+            )
+            if not options or (stage == "provisional" and p.get("class_options_stage") != stage):
                 return False, "options", dict(p)
             if p.get("class_name") and not p.get("class_provisional"):
                 return False, "chosen", dict(p)
@@ -210,6 +302,8 @@ class UserRPGManager:
                 class_description=selected["description"],
                 class_options=[],
                 class_options_stage=None,
+                definitive_class_options=[],
+                definitive_class_options_ready=False,
                 class_stage=stage,
                 class_provisional=(stage == "provisional"),
                 lore=None,
@@ -228,7 +322,7 @@ class UserRPGManager:
         with self._lock:
             p = self._ensure(nick)
             if not p or not p.get("class_name"): return False
-            p["lore"] = (lore or "").strip()[:900]
+            p["lore"] = (lore or "").strip()[:280]
             self._save()
             return True
 
