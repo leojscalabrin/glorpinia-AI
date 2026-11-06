@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import random
 import threading
 import time
@@ -33,27 +35,39 @@ query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!) {
 }
 """
 
-CANDIDATE_PAGE_SIZE = 50
+CANDIDATE_PAGE_SIZE = 30
 MIN_CHANNELS = 50
 CACHE_TTL_SECONDS = 3 * 60 * 60
 REQUEST_TIMEOUT_SECONDS = 12
+MAX_STALE_CACHE_AGE_SECONDS = 7 * 24 * 60 * 60
 
 SORT_TRENDING = {"sortBy": "TRENDING_WEEKLY", "order": "DESCENDING"}
 SORT_POPULAR = {"sortBy": "TOP_WEEKLY", "order": "DESCENDING"}
 
 
+class SevenTVRateLimitError(RuntimeError):
+    def __init__(self, message, retry_after=60):
+        super().__init__(message)
+        self.retry_after = max(1, int(retry_after or 60))
+
+
 class SevenTVEmote:
     """
-    Sorteia emotes conhecidos do 7TV, combinando trending semanal e
-    popularidade (mínimo de 50 canais). A pontuação de trending aumenta
-    proporcionalmente a chance de seleção.
+    Sorteia emotes conhecidos do 7TV com cache compartilhado, atualização única
+    concorrente (single-flight) e fallback para o último cache válido.
     """
 
     def __init__(self, bot):
         self.bot = bot
         self._candidate_cache = []
         self._cache_expires_at = 0
-        self._cache_lock = threading.Lock()
+        self._cache_updated_at = 0
+        self._cache_path = os.getenv("SEVENTV_EMOTE_CACHE_FILE", "seventv_emote_cache.json")
+        self._condition = threading.Condition(threading.Lock())
+        self._refreshing = False
+        self._rate_limit_until = 0
+        self._last_refresh_error = None
+        self._load_cache()
         print("[Feature] SevenTVEmote Initialized.")
 
     def get_random_emote(self, channel, author):
@@ -63,6 +77,22 @@ class SevenTVEmote:
             daemon=True,
         )
         thread.start()
+
+    @staticmethod
+    def _retry_after_from_error(error, response=None):
+        retry_after = None
+        if response is not None:
+            retry_after = response.headers.get("Retry-After")
+            if not retry_after:
+                retry_after = response.headers.get("x-ratelimit-search-reset")
+        if isinstance(error, dict):
+            extensions = error.get("extensions") or {}
+            headers = extensions.get("headers") or {}
+            retry_after = retry_after or headers.get("x-ratelimit-search-reset")
+        try:
+            return max(1, int(float(retry_after)))
+        except (TypeError, ValueError):
+            return 60
 
     def _search_emotes(self, sort):
         payload = {
@@ -79,11 +109,29 @@ class SevenTVEmote:
             json=payload,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
+        if response.status_code == 429:
+            raise SevenTVRateLimitError(
+                "7TV HTTP 429 rate limit exceeded",
+                self._retry_after_from_error({}, response),
+            )
         response.raise_for_status()
         data = response.json()
 
-        if data.get("errors"):
-            raise RuntimeError(f"7TV GraphQL errors: {data['errors']}")
+        errors = data.get("errors") or []
+        rate_limit_error = next(
+            (
+                error for error in errors
+                if (error.get("extensions") or {}).get("code") == "RATE_LIMIT_EXCEEDED"
+            ),
+            None,
+        )
+        if rate_limit_error:
+            raise SevenTVRateLimitError(
+                rate_limit_error.get("message", "7TV search rate limit exceeded"),
+                self._retry_after_from_error(rate_limit_error, response),
+            )
+        if errors:
+            raise RuntimeError(f"7TV GraphQL errors: {errors}")
 
         return data["data"]["emotes"]["search"]["items"]
 
@@ -100,11 +148,8 @@ class SevenTVEmote:
         )
 
     def _fetch_candidates(self):
-        # A consulta retorna a pontuação semanal e o total de canais
-        # para cada emote, evitando uma chamada HTTP por candidato.
         trending_items = self._search_emotes(SORT_TRENDING)
         popular_items = self._search_emotes(SORT_POPULAR)
-
         candidates_by_id = {}
 
         for emote in trending_items + popular_items:
@@ -115,8 +160,6 @@ class SevenTVEmote:
             channels = emote.get("channels") or {}
             trending_score = max(0, int(scores.get("trendingWeek") or 0))
             channel_count = max(0, int(channels.get("totalCount") or 0))
-
-            # Trending semanal OU presença em pelo menos 50 canais.
             if trending_score <= 0 and channel_count < MIN_CHANNELS:
                 continue
 
@@ -126,67 +169,124 @@ class SevenTVEmote:
                 "trending_score": trending_score,
                 "channel_count": channel_count,
             }
-
             previous = candidates_by_id.get(candidate["id"])
             if previous:
-                previous["trending_score"] = max(
-                    previous["trending_score"], trending_score
-                )
-                previous["channel_count"] = max(
-                    previous["channel_count"], channel_count
-                )
+                previous["trending_score"] = max(previous["trending_score"], trending_score)
+                previous["channel_count"] = max(previous["channel_count"], channel_count)
             else:
                 candidates_by_id[candidate["id"]] = candidate
 
         candidates = list(candidates_by_id.values())
         if not candidates:
             raise RuntimeError("Nenhum emote atende aos critérios de trending/popularidade.")
-
         return candidates
 
+    def _load_cache(self):
+        try:
+            with open(self._cache_path, encoding="utf-8") as cache_file:
+                payload = json.load(cache_file)
+            candidates = payload.get("candidates") or []
+            updated_at = float(payload.get("updated_at") or 0)
+            age = max(0, time.time() - updated_at)
+            if not candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
+                return
+            self._candidate_cache = candidates
+            self._cache_updated_at = updated_at
+            remaining = max(0, CACHE_TTL_SECONDS - age)
+            self._cache_expires_at = time.monotonic() + remaining
+            logging.info(
+                "[SevenTVEmote] Cache persistido carregado: %s candidatos (idade=%ss).",
+                len(candidates), int(age),
+            )
+        except FileNotFoundError:
+            return
+        except Exception as exc:
+            logging.warning("[SevenTVEmote] Não foi possível carregar cache persistido: %s", exc)
+
+    def _save_cache(self, candidates):
+        try:
+            temporary_path = self._cache_path + ".tmp"
+            with open(temporary_path, "w", encoding="utf-8") as cache_file:
+                json.dump(
+                    {"updated_at": time.time(), "candidates": candidates},
+                    cache_file,
+                    ensure_ascii=False,
+                )
+            os.replace(temporary_path, self._cache_path)
+        except Exception as exc:
+            logging.warning("[SevenTVEmote] Não foi possível persistir cache: %s", exc)
+
     def _get_candidates(self):
-        now = time.monotonic()
-        with self._cache_lock:
+        with self._condition:
+            now = time.monotonic()
             if self._candidate_cache and now < self._cache_expires_at:
                 return self._candidate_cache
 
-        try:
-            candidates = self._fetch_candidates()
-        except Exception:
-            # Se a API oscilar, ainda podemos usar o último conjunto válido.
-            with self._cache_lock:
+            if now < self._rate_limit_until:
                 if self._candidate_cache:
                     logging.warning(
-                        "[SevenTVEmote] Falha ao atualizar cache; usando candidatos anteriores.",
-                        exc_info=True,
+                        "[SevenTVEmote] Rate limit ativo; usando cache anterior por mais %ss.",
+                        int(self._rate_limit_until - now),
+                    )
+                    return self._candidate_cache
+                raise SevenTVRateLimitError(
+                    "7TV rate limit ativo e nenhum cache disponível.",
+                    self._rate_limit_until - now,
+                )
+
+            if self._refreshing:
+                deadline = now + REQUEST_TIMEOUT_SECONDS * 2 + 5
+                while self._refreshing and time.monotonic() < deadline:
+                    self._condition.wait(timeout=max(0.1, deadline - time.monotonic()))
+                if self._candidate_cache:
+                    return self._candidate_cache
+                if self._last_refresh_error:
+                    raise self._last_refresh_error
+                raise RuntimeError("Atualização do cache 7TV não terminou a tempo.")
+
+            self._refreshing = True
+
+        try:
+            candidates = self._fetch_candidates()
+        except Exception as exc:
+            with self._condition:
+                self._last_refresh_error = exc
+                if isinstance(exc, SevenTVRateLimitError):
+                    self._rate_limit_until = time.monotonic() + exc.retry_after
+                self._refreshing = False
+                self._condition.notify_all()
+                if self._candidate_cache:
+                    logging.warning(
+                        "[SevenTVEmote] Falha ao atualizar; usando %s candidatos do cache anterior: %s",
+                        len(self._candidate_cache), exc,
                     )
                     return self._candidate_cache
             raise
 
-        with self._cache_lock:
+        with self._condition:
             self._candidate_cache = candidates
+            self._cache_updated_at = time.time()
             self._cache_expires_at = time.monotonic() + CACHE_TTL_SECONDS
-            logging.info(
-                "[SevenTVEmote] Cache atualizado: %s candidatos (mínimo %s canais ou trending semanal).",
-                len(candidates),
-                MIN_CHANNELS,
-            )
-            return self._candidate_cache
+            self._rate_limit_until = 0
+            self._last_refresh_error = None
+            self._refreshing = False
+            self._condition.notify_all()
+        self._save_cache(candidates)
+        logging.info(
+            "[SevenTVEmote] Cache atualizado: %s candidatos (mínimo %s canais ou trending semanal).",
+            len(candidates), MIN_CHANNELS,
+        )
+        return candidates
 
     @staticmethod
     def _selection_weight(candidate):
-        # O peso base mantém emotes populares fora do trending elegíveis.
-        # A raiz suaviza diferenças extremas sem apagar a vantagem do trending.
-        score = candidate["trending_score"]
-        return 1.0 + (score ** 0.5)
+        return 1.0 + (candidate["trending_score"] ** 0.5)
 
     def _emote_aleatorio(self):
         candidates = self._get_candidates()
         weights = [self._selection_weight(item) for item in candidates]
         emote = random.choices(candidates, weights=weights, k=1)[0]
-        emote_url = self._humanize_link(
-            f"https://7tv.app/emotes/{emote['id']}"
-        )
+        emote_url = self._humanize_link(f"https://7tv.app/emotes/{emote['id']}")
         return emote["name"], emote_url
 
     @staticmethod
@@ -201,12 +301,17 @@ class SevenTVEmote:
         try:
             name, url = self._emote_aleatorio()
             self.bot.send_message(channel, f"@{author} glorp {name} -> {url}")
-        except Exception as error:
-            logging.error(
-                "[SevenTVEmote] Falha ao buscar emote: %s",
-                error,
-                exc_info=True,
+        except SevenTVRateLimitError as error:
+            logging.warning(
+                "[SevenTVEmote] 7TV temporariamente limitado; retry em %ss: %s",
+                error.retry_after, error,
             )
+            self.bot.send_message(
+                channel,
+                f"@{author}, o 7TV está temporariamente limitado; tente novamente em instantes Sadge",
+            )
+        except Exception as error:
+            logging.error("[SevenTVEmote] Falha ao buscar emote: %s", error)
             self.bot.send_message(
                 channel,
                 f"@{author}, o 7TV não respondeu direito agora Sadge",
