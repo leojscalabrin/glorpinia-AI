@@ -103,7 +103,7 @@ class FortuneCookieTests(unittest.TestCase):
             feature.get_fortune("canal", "ana")
             feature.get_fortune("canal", "ana")
         self.assertEqual(len(bot.sent_long), 1)
-        self.assertIn("templo está fechado", bot.sent[0])
+        self.assertIn("seu biscoito da sorte de hoje já foi aberto", bot.sent[0])
 
     def test_api_failure_still_reports_the_cookies_already_credited(self):
         bot = self._run(None, gain=7)
@@ -129,7 +129,6 @@ class FortuneCookieTests(unittest.TestCase):
     def test_gain_is_not_shown_when_credit_was_not_confirmed(self):
         bot = self._run(PROVERB, credited=False)
         self.assertEqual(len(bot.sent), 1)
-        self.assertNotIn("🍪", bot.sent[0])
         self.assertNotIn("🍪", bot.sent[0])
 
     def test_message_works_without_cookie_system(self):
