@@ -43,15 +43,26 @@ class FortuneCookie:
 
         # A recompensa diária acompanha o level, que representa familiaridade
         # e participação acumulada no chat. Sem ficha, o usuário começa na faixa base.
+        user_rpg = getattr(self.bot, "user_rpg", None)
         try:
-            reward_min, reward_max = self.bot.user_rpg.get_cookie_reward_range(author)
-        except Exception:
+            if user_rpg is not None:
+                reward_min, reward_max = user_rpg.get_cookie_reward_range(author)
+                profile = user_rpg.get_profile(author) or {}
+                user_level = profile.get("level", 1)
+            else:
+                reward_min, reward_max = (1, 10)
+                user_level = 1
+        except Exception as exc:
+            logging.warning(
+                "[FortuneCookie] Não foi possível consultar progressão RPG de %s; usando recompensa base: %s",
+                author, exc,
+            )
             reward_min, reward_max = (1, 10)
+            user_level = 1
         cookie_gain = random.randint(reward_min, reward_max)
         logging.info(
             "[FortuneCookie] recompensa calculada nick=%s faixa=%s-%s level=%s",
-            author, reward_min, reward_max,
-            (self.bot.user_rpg.get_profile(author) or {}).get("level", 1),
+            author, reward_min, reward_max, user_level,
         )
         lucky_numbers = sorted(random.sample(range(1, 61), 6))
         formatted_numbers = self._format_lucky_numbers(lucky_numbers)
