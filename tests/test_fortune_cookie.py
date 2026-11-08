@@ -22,6 +22,7 @@ class FortuneCookieTests(unittest.TestCase):
     def _bot(self, response, credited=True, with_cookie_system=True):
         bot = SimpleNamespace()
         bot.sent_long, bot.sent, bot.prompts, bot.cookies = [], [], [], []
+        bot.response_kwargs = []
 
         def add_cookies(nick, n):
             bot.cookies.append((nick, n))
@@ -35,8 +36,9 @@ class FortuneCookieTests(unittest.TestCase):
         bot.memory_mgr = object()
         bot.get_live_context = lambda ch: None
 
-        def get_response(query, channel, author, memory_mgr, skip_search, live_context):
+        def get_response(query, channel, author, memory_mgr, skip_search, live_context, **kwargs):
             bot.prompts.append(query)
+            bot.response_kwargs.append(kwargs)
             return response
         bot.gemini_client = SimpleNamespace(get_response=get_response)
         bot.send_long_message = lambda ch, msg: bot.sent_long.append(msg)
@@ -64,6 +66,7 @@ class FortuneCookieTests(unittest.TestCase):
         self.assertTrue(bot.sent[0].endswith("| ( +4 🍪)"))
         self.assertNotIn(" - ", bot.sent[0])
         self.assertEqual(bot.cookies, [("ana", 4)])
+        self.assertEqual(bot.response_kwargs[0].get("disable_cookie_actions"), True)
 
     # ---- comentário ----
     def test_prompt_no_longer_asks_for_a_persona_comment(self):
@@ -74,6 +77,7 @@ class FortuneCookieTests(unittest.TestCase):
         self.assertIn("Não inclua comentário, explicação", prompt)
         self.assertIn("Não gere números de sorte", prompt)
         self.assertIn("sem prefixo, menção ou nome do usuário", prompt)
+        self.assertIn("Não conceda, retire ou mencione cookies", prompt)
 
     def test_comment_is_removed_even_if_the_model_ignores_the_prompt(self):
         bot = self._run(OLD_STYLE)
