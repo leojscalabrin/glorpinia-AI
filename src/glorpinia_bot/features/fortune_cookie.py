@@ -160,6 +160,7 @@ class FortuneCookie:
                 memory_mgr=self.bot.memory_mgr,
                 skip_search=True,
                 live_context=self.bot.get_live_context(channel),
+                disable_cookie_actions=True,
             )
 
             if response:
