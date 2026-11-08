@@ -233,6 +233,7 @@ class GeminiClient:
         live_context=None,
         allow_cookie_actions=False,
         bypass_cookie_penalty_cooldown=False,
+        disable_cookie_actions=False,
     ):
         """
         Gera uma resposta. 
@@ -419,19 +420,24 @@ class GeminiClient:
         generated = self._clean_response(generated)
         generated = self._maybe_apply_glitch(generated, query, channel)
         if self.cookie_system:
-            generated = self._apply_cookie_command_guard(
-                generated_text=generated,
-                user_query=query,
-                channel=channel,
-                author=author,
-                bypass_cooldown=bypass_cookie_penalty_cooldown,
-            )
-            has_cookie_command = bool(self.cookie_system.COOKIE_COMMAND_PATTERN.search(generated or ""))
-            if allow_cookie_actions or has_cookie_command:
-                # Sempre converte tags de cookie em texto humano para nunca vazar comando cru no chat.
-                generated = self.cookie_system.process_ai_response(generated, current_user=author)
-            else:
+            if disable_cookie_actions:
+                # Chamadas utilitárias como *cookie não podem executar recompensas
+                # econômicas sugeridas pelo modelo; somente o código da feature credita.
                 generated = self.cookie_system.strip_cookie_commands(generated)
+            else:
+                generated = self._apply_cookie_command_guard(
+                    generated_text=generated,
+                    user_query=query,
+                    channel=channel,
+                    author=author,
+                    bypass_cooldown=bypass_cookie_penalty_cooldown,
+                )
+                has_cookie_command = bool(self.cookie_system.COOKIE_COMMAND_PATTERN.search(generated or ""))
+                if allow_cookie_actions or has_cookie_command:
+                    # Sempre converte tags de cookie em texto humano para nunca vazar comando cru no chat.
+                    generated = self.cookie_system.process_ai_response(generated, current_user=author)
+                else:
+                    generated = self.cookie_system.strip_cookie_commands(generated)
 
         # Salva e Retorna
         if generated and "Sadge" not in generated:
