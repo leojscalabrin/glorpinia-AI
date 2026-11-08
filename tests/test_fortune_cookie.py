@@ -27,6 +27,10 @@ class FortuneCookieTests(unittest.TestCase):
             bot.cookies.append((nick, n))
             return credited
         bot.cookie_system = SimpleNamespace(add_cookies=add_cookies) if with_cookie_system else None
+        bot.user_rpg = SimpleNamespace(
+            get_cookie_reward_range=lambda nick: (1, 10),
+            get_profile=lambda nick: {"level": 1},
+        )
         bot.training_logger = SimpleNamespace(log_interaction=lambda *a, **k: None)
         bot.memory_mgr = object()
         bot.get_live_context = lambda ch: None
@@ -58,7 +62,7 @@ class FortuneCookieTests(unittest.TestCase):
         self.assertIn("A água que contorna a pedra chega ao mar sem pressa.", bot.sent[0])
         self.assertIn("Números da sorte: [01-02-05-13-41-60]", bot.sent[0])
         self.assertTrue(bot.sent[0].endswith("| ( +4 🍪)"))
-        self.assertNotIn(" - ", bot.sent_long[0])
+        self.assertNotIn(" - ", bot.sent[0])
         self.assertEqual(bot.cookies, [("ana", 4)])
 
     # ---- comentário ----
@@ -73,8 +77,9 @@ class FortuneCookieTests(unittest.TestCase):
 
     def test_comment_is_removed_even_if_the_model_ignores_the_prompt(self):
         bot = self._run(OLD_STYLE)
-        self.assertEqual(bot.sent_long, [PROVERB + " | 🍀 Números da sorte: [01-02-05-13-41-60] | +4🍪"])
-        self.assertNotIn("Tofu", bot.sent_long[0])
+        self.assertEqual(len(bot.sent), 1)
+        self.assertNotIn("Tofu", bot.sent[0])
+        self.assertTrue(bot.sent[0].endswith("| ( +4 🍪)"))
 
     def test_strip_comment_handles_separator_variants(self):
         for sep in (" - ", " – ", " — "):
@@ -119,13 +124,13 @@ class FortuneCookieTests(unittest.TestCase):
     def test_message_shows_the_same_format_for_a_single_cookie(self):
         bot = self._run(PROVERB, gain=1)
         self.assertTrue(bot.sent[0].endswith("[01-02-05-13-41-60] | ( +1 🍪)"))
-        self.assertNotIn("cookie", bot.sent_long[0].lower())
+        self.assertNotIn("cookie", bot.sent[0].lower())
 
     def test_gain_is_not_shown_when_credit_was_not_confirmed(self):
         bot = self._run(PROVERB, credited=False)
         self.assertEqual(len(bot.sent), 1)
         self.assertNotIn("🍪", bot.sent[0])
-        self.assertNotIn("🍪", bot.sent_long[0])
+        self.assertNotIn("🍪", bot.sent[0])
 
     def test_message_works_without_cookie_system(self):
         bot = self._run(PROVERB, with_cookie_system=False)
