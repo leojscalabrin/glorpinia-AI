@@ -1234,7 +1234,13 @@ ESTILO OBRIGATÓRIO:
                     return
                 
                 if command_raw == "emote":
-                    self.seventv_emote_feature.get_random_emote(channel, author)
+                    emote_filter = parts[1].lower() if len(parts) > 1 else ""
+                    if emote_filter and emote_filter != "trending":
+                        self.send_message(channel, f"@{author}, use *emote ou *emote trending.")
+                        return
+                    self.seventv_emote_feature.get_random_emote(
+                        channel, author, trending_only=(emote_filter == "trending")
+                    )
                     return
 
                 if command_raw == "steam":
@@ -1352,7 +1358,7 @@ ESTILO OBRIGATÓRIO:
                         "ticket": "glorp compre 1 ticket do sorteio por 100 cookies (pode ficar negativo).",
                         "sorteio": "glorp (oziell) *sorteio shuffle para sortear e *sorteio list para ver participantes/pote.",
                         "8ball": "glorp Pergunte ao oráculo! *8ball [pergunta].",
-                        "emote": "glorp Sorteia um emote popular ou em alta no 7TV (50+ canais ou trending semanal). *emote.",
+                        "emote": "glorp *emote sorteia um emote aleatório presente em pelo menos 10 canais do 7TV; *emote trending sorteia um emote aleatório do ranking trending, sem filtro de canais.",
                         "steam": "glorp Info de um jogo na Steam (preço, metacritic, reviews...). *steam [nome do jogo].",
                         "cookie": "glorp Pegue seu biscoito da sorte diário.",
                         "balance": "glorp Veja seu saldo ou de outro. *balance @nick.",
