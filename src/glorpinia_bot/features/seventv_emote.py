@@ -147,11 +147,17 @@ class SevenTVEmote:
         total_count = max(0, int(first_page.get("totalCount") or 0))
         total_pages = max(1, (total_count + CANDIDATE_PAGE_SIZE - 1) // CANDIDATE_PAGE_SIZE)
         page_count = min(max_pages or RANDOM_PAGES_PER_SORT, total_pages)
-        selected_pages = random.sample(range(1, total_pages + 1), page_count)
+        # A primeira página já foi consultada para obter totalCount; sorteie
+        # somente páginas adicionais para nunca repetir nem exceder o orçamento.
+        additional_page_count = min(max(0, page_count - 1), max(0, total_pages - 1))
+        selected_pages = (
+            random.sample(range(2, total_pages + 1), additional_page_count)
+            if additional_page_count else []
+        )
 
-        sampled_items = []
+        sampled_items = list(first_page.get("items") or [])
         for page in selected_pages:
-            result = first_page if page == 1 else self._search_emotes(sort, page=page, query=query)
+            result = self._search_emotes(sort, page=page, query=query)
             sampled_items.extend(result.get("items") or [])
 
         # Uma página pode mudar entre consultas; deduplicar pelo ID evita peso duplicado.
