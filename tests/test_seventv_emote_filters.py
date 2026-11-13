@@ -62,12 +62,12 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
         ) as search:
             with patch(
                 "glorpinia_bot.features.seventv_emote.random.sample",
-                return_value=[2, 7, 10, 4, 1],
+                return_value=[2, 7, 10, 4],
             ) as sample_pages:
                 results = self.feature._search_emote_sample({"sortBy": "TOP_WEEKLY"})
 
         self.assertEqual({item["id"] for item in results}, {"first", "p2", "p7", "p10", "p4"})
-        sample_pages.assert_called_once_with(range(1, 11), 5)
+        sample_pages.assert_called_once_with(range(2, 11), 4)
         self.assertEqual(
             [call.kwargs["page"] for call in search.call_args_list],
             [1, 2, 7, 10, 4],
@@ -83,7 +83,7 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
         ):
             with patch(
                 "glorpinia_bot.features.seventv_emote.random.sample",
-                return_value=[1, 2],
+                return_value=[2],
             ):
                 results = self.feature._search_emote_sample({"sortBy": "TOP_WEEKLY"})
 
