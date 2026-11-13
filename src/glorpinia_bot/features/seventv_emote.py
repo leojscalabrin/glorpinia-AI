@@ -205,6 +205,23 @@ class SevenTVEmote:
             and flags.get("publicListed", True)
         )
 
+    @staticmethod
+    def _is_within_channel_range(candidate):
+        """Valida defensivamente o número de canais antes de qualquer sorteio."""
+        try:
+            channel_count = int(candidate.get("channel_count"))
+        except (AttributeError, TypeError, ValueError):
+            return False
+        return MIN_CHANNELS <= channel_count <= MAX_CHANNELS
+
+    @classmethod
+    def _filter_default_candidates(cls, candidates):
+        """O pool padrão nunca pode conter emotes fora da faixa de 10 a 100 canais."""
+        return [
+            candidate for candidate in candidates
+            if cls._is_within_channel_range(candidate)
+        ]
+
     def _fetch_candidates(self):
         """Retorna dois pools independentes: trending puro e emotes presentes em 10+ canais."""
         trending_items = self._search_emote_sample(SORT_TRENDING)
@@ -260,7 +277,14 @@ class SevenTVEmote:
             schema_version = payload.get("schema_version", 1)
             if schema_version not in (1, 2) or not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
                 return
-            self._candidate_cache = candidates
+            filtered_candidates = self._filter_default_candidates(candidates)
+            rejected_count = len(candidates) - len(filtered_candidates)
+            if rejected_count:
+                logging.warning(
+                    "[SevenTVEmote] Cache persistido continha %s candidatos fora da faixa de %s-%s canais; descartados.",
+                    rejected_count, MIN_CHANNELS, MAX_CHANNELS,
+                )
+            self._candidate_cache = filtered_candidates
             self._trending_candidate_cache = trending_candidates
             self._cache_updated_at = updated_at
             remaining = max(0, CACHE_TTL_SECONDS - age)
@@ -299,6 +323,10 @@ class SevenTVEmote:
     def _get_candidates(self, trending_only=False):
         with self._condition:
             now = time.monotonic()
+            if not trending_only:
+                # Revalida caches carregados em versões anteriores e qualquer
+                # conteúdo alterado externamente; o pool trending permanece separado.
+                self._candidate_cache = self._filter_default_candidates(self._candidate_cache)
             cache = self._trending_candidate_cache if trending_only else self._candidate_cache
             if cache and now < self._cache_expires_at:
                 return cache
@@ -319,6 +347,8 @@ class SevenTVEmote:
                 deadline = now + REQUEST_TIMEOUT_SECONDS * 2 + 5
                 while self._refreshing and time.monotonic() < deadline:
                     self._condition.wait(timeout=max(0.1, deadline - time.monotonic()))
+                if not trending_only:
+                    self._candidate_cache = self._filter_default_candidates(self._candidate_cache)
                 cache = self._trending_candidate_cache if trending_only else self._candidate_cache
                 if cache:
                     return cache
@@ -337,6 +367,8 @@ class SevenTVEmote:
                     self._rate_limit_until = time.monotonic() + exc.retry_after
                 self._refreshing = False
                 self._condition.notify_all()
+                if not trending_only:
+                    self._candidate_cache = self._filter_default_candidates(self._candidate_cache)
                 cache = self._trending_candidate_cache if trending_only else self._candidate_cache
                 if cache:
                     logging.warning(
@@ -369,7 +401,22 @@ class SevenTVEmote:
 
     def _emote_aleatorio(self, trending_only=False):
         candidates = self._get_candidates(trending_only=trending_only)
+        if not trending_only:
+            # Última barreira: mesmo que um cache/fonte inesperada esteja contaminado,
+            # *emote jamais sorteia um candidato fora do intervalo permitido.
+            candidates = self._filter_default_candidates(candidates)
+            if not candidates:
+                raise RuntimeError(
+                    f"Nenhum emote válido encontrado entre {MIN_CHANNELS} e {MAX_CHANNELS} canais."
+                )
         emote = random.choice(candidates)
+        logging.info(
+            "[SevenTVEmote] Sorteado: %s (%s canais; pool=%s; filtro=%s).",
+            emote.get("name"),
+            emote.get("channel_count", "desconhecido"),
+            "trending" if trending_only else "obscuro",
+            "desativado" if trending_only else f"{MIN_CHANNELS}-{MAX_CHANNELS}",
+        )
         emote_url = self._humanize_link(f"https://7tv.app/emotes/{emote['id']}")
         return emote["name"], emote_url
 
