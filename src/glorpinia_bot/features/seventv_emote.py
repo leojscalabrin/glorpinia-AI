@@ -304,17 +304,9 @@ class SevenTVEmote:
         )
         return selected_pool
 
-    @staticmethod
-    def _selection_weight(candidate):
-        return 1.0 + (candidate["trending_score"] ** 0.5)
-
     def _emote_aleatorio(self, trending_only=False):
         candidates = self._get_candidates(trending_only=trending_only)
-        if trending_only:
-            emote = random.choice(candidates)
-        else:
-            weights = [self._selection_weight(item) for item in candidates]
-            emote = random.choices(candidates, weights=weights, k=1)[0]
+        emote = random.choice(candidates)
         emote_url = self._humanize_link(f"https://7tv.app/emotes/{emote['id']}")
         return emote["name"], emote_url
 
