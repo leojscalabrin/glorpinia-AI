@@ -36,7 +36,7 @@ query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!) {
 """
 
 CANDIDATE_PAGE_SIZE = 30
-MIN_CHANNELS = 50
+MIN_CHANNELS = 10
 CACHE_TTL_SECONDS = 3 * 60 * 60
 REQUEST_TIMEOUT_SECONDS = 12
 MAX_STALE_CACHE_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -60,6 +60,7 @@ class SevenTVEmote:
     def __init__(self, bot):
         self.bot = bot
         self._candidate_cache = []
+        self._trending_candidate_cache = []
         self._cache_expires_at = 0
         self._cache_updated_at = 0
         self._cache_path = os.getenv("SEVENTV_EMOTE_CACHE_FILE", "seventv_emote_cache.json")
@@ -70,10 +71,10 @@ class SevenTVEmote:
         self._load_cache()
         print("[Feature] SevenTVEmote Initialized.")
 
-    def get_random_emote(self, channel, author):
+    def get_random_emote(self, channel, author, trending_only=False):
         thread = threading.Thread(
             target=self._fetch_and_send,
-            args=(channel, author),
+            args=(channel, author, trending_only),
             daemon=True,
         )
         thread.start()
@@ -148,67 +149,83 @@ class SevenTVEmote:
         )
 
     def _fetch_candidates(self):
+        """Retorna dois pools independentes: trending puro e emotes presentes em 10+ canais."""
         trending_items = self._search_emotes(SORT_TRENDING)
         popular_items = self._search_emotes(SORT_POPULAR)
-        candidates_by_id = {}
 
-        for emote in trending_items + popular_items:
+        trending_by_id = {}
+        for emote in trending_items:
             if not self._is_usable(emote):
                 continue
-
             scores = emote.get("scores") or {}
             channels = emote.get("channels") or {}
-            trending_score = max(0, int(scores.get("trendingWeek") or 0))
-            channel_count = max(0, int(channels.get("totalCount") or 0))
-            if trending_score <= 0 and channel_count < MIN_CHANNELS:
-                continue
-
             candidate = {
                 "id": emote["id"],
                 "name": emote["defaultName"],
-                "trending_score": trending_score,
-                "channel_count": channel_count,
+                "trending_score": max(0, int(scores.get("trendingWeek") or 0)),
+                "channel_count": max(0, int(channels.get("totalCount") or 0)),
             }
-            previous = candidates_by_id.get(candidate["id"])
-            if previous:
-                previous["trending_score"] = max(previous["trending_score"], trending_score)
-                previous["channel_count"] = max(previous["channel_count"], channel_count)
-            else:
-                candidates_by_id[candidate["id"]] = candidate
+            trending_by_id[candidate["id"]] = candidate
 
-        candidates = list(candidates_by_id.values())
-        if not candidates:
-            raise RuntimeError("Nenhum emote atende aos critérios de trending/popularidade.")
-        return candidates
+        popular_by_id = {}
+        for emote in trending_items + popular_items:
+            if not self._is_usable(emote):
+                continue
+            scores = emote.get("scores") or {}
+            channels = emote.get("channels") or {}
+            candidate = {
+                "id": emote["id"],
+                "name": emote["defaultName"],
+                "trending_score": max(0, int(scores.get("trendingWeek") or 0)),
+                "channel_count": max(0, int(channels.get("totalCount") or 0)),
+            }
+            if candidate["channel_count"] < MIN_CHANNELS:
+                continue
+            previous = popular_by_id.get(candidate["id"])
+            if previous:
+                previous["trending_score"] = max(previous["trending_score"], candidate["trending_score"])
+                previous["channel_count"] = max(previous["channel_count"], candidate["channel_count"])
+            else:
+                popular_by_id[candidate["id"]] = candidate
+
+        trending_candidates = list(trending_by_id.values())
+        candidates = list(popular_by_id.values())
+        return candidates, trending_candidates
 
     def _load_cache(self):
         try:
             with open(self._cache_path, encoding="utf-8") as cache_file:
                 payload = json.load(cache_file)
             candidates = payload.get("candidates") or []
+            trending_candidates = payload.get("trending_candidates") or []
             updated_at = float(payload.get("updated_at") or 0)
             age = max(0, time.time() - updated_at)
-            if not candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
+            if not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
                 return
             self._candidate_cache = candidates
+            self._trending_candidate_cache = trending_candidates
             self._cache_updated_at = updated_at
             remaining = max(0, CACHE_TTL_SECONDS - age)
             self._cache_expires_at = time.monotonic() + remaining
             logging.info(
-                "[SevenTVEmote] Cache persistido carregado: %s candidatos (idade=%ss).",
-                len(candidates), int(age),
+                "[SevenTVEmote] Cache persistido carregado: %s candidatos (10+ canais), %s trending (idade=%ss).",
+                len(candidates), len(trending_candidates), int(age),
             )
         except FileNotFoundError:
             return
         except Exception as exc:
             logging.warning("[SevenTVEmote] Não foi possível carregar cache persistido: %s", exc)
 
-    def _save_cache(self, candidates):
+    def _save_cache(self, candidates, trending_candidates):
         try:
             temporary_path = self._cache_path + ".tmp"
             with open(temporary_path, "w", encoding="utf-8") as cache_file:
                 json.dump(
-                    {"updated_at": time.time(), "candidates": candidates},
+                    {
+                        "updated_at": time.time(),
+                        "candidates": candidates,
+                        "trending_candidates": trending_candidates,
+                    },
                     cache_file,
                     ensure_ascii=False,
                 )
@@ -216,21 +233,22 @@ class SevenTVEmote:
         except Exception as exc:
             logging.warning("[SevenTVEmote] Não foi possível persistir cache: %s", exc)
 
-    def _get_candidates(self):
+    def _get_candidates(self, trending_only=False):
         with self._condition:
             now = time.monotonic()
-            if self._candidate_cache and now < self._cache_expires_at:
-                return self._candidate_cache
+            cache = self._trending_candidate_cache if trending_only else self._candidate_cache
+            if cache and now < self._cache_expires_at:
+                return cache
 
             if now < self._rate_limit_until:
-                if self._candidate_cache:
+                if cache:
                     logging.warning(
                         "[SevenTVEmote] Rate limit ativo; usando cache anterior por mais %ss.",
                         int(self._rate_limit_until - now),
                     )
-                    return self._candidate_cache
+                    return cache
                 raise SevenTVRateLimitError(
-                    "7TV rate limit ativo e nenhum cache disponível.",
+                    "7TV rate limit ativo e nenhum cache disponível para o filtro solicitado.",
                     self._rate_limit_until - now,
                 )
 
@@ -238,8 +256,9 @@ class SevenTVEmote:
                 deadline = now + REQUEST_TIMEOUT_SECONDS * 2 + 5
                 while self._refreshing and time.monotonic() < deadline:
                     self._condition.wait(timeout=max(0.1, deadline - time.monotonic()))
-                if self._candidate_cache:
-                    return self._candidate_cache
+                cache = self._trending_candidate_cache if trending_only else self._candidate_cache
+                if cache:
+                    return cache
                 if self._last_refresh_error:
                     raise self._last_refresh_error
                 raise RuntimeError("Atualização do cache 7TV não terminou a tempo.")
@@ -247,7 +266,7 @@ class SevenTVEmote:
             self._refreshing = True
 
         try:
-            candidates = self._fetch_candidates()
+            candidates, trending_candidates = self._fetch_candidates()
         except Exception as exc:
             with self._condition:
                 self._last_refresh_error = exc
@@ -255,37 +274,47 @@ class SevenTVEmote:
                     self._rate_limit_until = time.monotonic() + exc.retry_after
                 self._refreshing = False
                 self._condition.notify_all()
-                if self._candidate_cache:
+                cache = self._trending_candidate_cache if trending_only else self._candidate_cache
+                if cache:
                     logging.warning(
                         "[SevenTVEmote] Falha ao atualizar; usando %s candidatos do cache anterior: %s",
-                        len(self._candidate_cache), exc,
+                        len(cache), exc,
                     )
-                    return self._candidate_cache
+                    return cache
             raise
 
         with self._condition:
             self._candidate_cache = candidates
+            self._trending_candidate_cache = trending_candidates
             self._cache_updated_at = time.time()
             self._cache_expires_at = time.monotonic() + CACHE_TTL_SECONDS
             self._rate_limit_until = 0
             self._last_refresh_error = None
             self._refreshing = False
             self._condition.notify_all()
-        self._save_cache(candidates)
+        self._save_cache(candidates, trending_candidates)
+        selected_pool = trending_candidates if trending_only else candidates
+        if not selected_pool:
+            if trending_only:
+                raise RuntimeError("Nenhum emote disponível no ranking trending do 7TV.")
+            raise RuntimeError(f"Nenhum emote encontrado em pelo menos {MIN_CHANNELS} canais.")
         logging.info(
-            "[SevenTVEmote] Cache atualizado: %s candidatos (mínimo %s canais ou trending semanal).",
-            len(candidates), MIN_CHANNELS,
+            "[SevenTVEmote] Cache atualizado: %s emotes com mínimo de %s canais; %s emotes do trending sem filtro de canais.",
+            len(candidates), MIN_CHANNELS, len(trending_candidates),
         )
-        return candidates
+        return selected_pool
 
     @staticmethod
     def _selection_weight(candidate):
         return 1.0 + (candidate["trending_score"] ** 0.5)
 
-    def _emote_aleatorio(self):
-        candidates = self._get_candidates()
-        weights = [self._selection_weight(item) for item in candidates]
-        emote = random.choices(candidates, weights=weights, k=1)[0]
+    def _emote_aleatorio(self, trending_only=False):
+        candidates = self._get_candidates(trending_only=trending_only)
+        if trending_only:
+            emote = random.choice(candidates)
+        else:
+            weights = [self._selection_weight(item) for item in candidates]
+            emote = random.choices(candidates, weights=weights, k=1)[0]
         emote_url = self._humanize_link(f"https://7tv.app/emotes/{emote['id']}")
         return emote["name"], emote_url
 
@@ -297,9 +326,9 @@ class SevenTVEmote:
         domain = domain.replace(".", " . ")
         return f"{domain}/{path}" if path else domain
 
-    def _fetch_and_send(self, channel, author):
+    def _fetch_and_send(self, channel, author, trending_only=False):
         try:
-            name, url = self._emote_aleatorio()
+            name, url = self._emote_aleatorio(trending_only=trending_only)
             self.bot.send_message(channel, f"@{author} glorp {name} -> {url}")
         except SevenTVRateLimitError as error:
             logging.warning(
