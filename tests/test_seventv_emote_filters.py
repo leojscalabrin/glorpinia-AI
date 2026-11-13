@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from glorpinia_bot.features.seventv_emote import MIN_CHANNELS, SevenTVEmote
+from glorpinia_bot.features.seventv_emote import MAX_CHANNELS, MIN_CHANNELS, SevenTVEmote
 
 
 class DummyBot:
@@ -88,6 +88,53 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
                 results = self.feature._search_emote_sample({"sortBy": "TOP_WEEKLY"})
 
         self.assertEqual([item["id"] for item in results], ["same", "first", "second"])
+
+
+    def test_obscure_pool_uses_random_query_fragments(self):
+        with patch.object(self.feature, "_random_hash", side_effect=["a7", "k2", "m9", "z4"]):
+            with patch.object(self.feature, "_search_emote_sample", return_value=[]) as search:
+                self.feature._search_obscure_emotes()
+
+        self.assertEqual(search.call_count, 4)
+        self.assertEqual(
+            [call.kwargs for call in search.call_args_list],
+            [
+                {"query": "a7", "max_pages": 3},
+                {"query": "k2", "max_pages": 3},
+                {"query": "m9", "max_pages": 3},
+                {"query": "z4", "max_pages": 3},
+            ],
+        )
+
+    def test_default_pool_keeps_only_emotes_between_ten_and_one_hundred_channels(self):
+        def emote(identifier, channels):
+            return {
+                "id": identifier,
+                "defaultName": identifier,
+                "deleted": False,
+                "flags": {"private": False, "nsfw": False, "publicListed": True},
+                "scores": {"trendingWeek": 0},
+                "channels": {"totalCount": channels},
+            }
+
+        obscure = [
+            emote("below", 9),
+            emote("min", MIN_CHANNELS),
+            emote("max", MAX_CHANNELS),
+            emote("above", MAX_CHANNELS + 1),
+        ]
+        with patch.object(self.feature, "_search_emote_sample", return_value=[]):
+            with patch.object(self.feature, "_search_obscure_emotes", return_value=obscure):
+                candidates, trending = self.feature._fetch_candidates()
+
+        self.assertEqual({item["id"] for item in candidates}, {"min", "max"})
+        self.assertEqual(trending, [])
+
+    def test_random_hash_is_two_lowercase_alphanumeric_characters(self):
+        value = self.feature._random_hash()
+        self.assertEqual(len(value), 2)
+        self.assertTrue(value.isalnum())
+        self.assertEqual(value, value.lower())
 
 
 if __name__ == "__main__":
