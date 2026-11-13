@@ -222,13 +222,17 @@ class SevenTVEmote:
             if cls._is_within_channel_range(candidate)
         ]
 
-    def _fetch_candidates(self):
-        """Retorna dois pools independentes: trending puro e emotes presentes em 10+ canais."""
-        trending_items = self._search_emote_sample(SORT_TRENDING)
-        obscure_items = self._search_obscure_emotes()
+    def _fetch_candidates(self, trending_only=False):
+        """Atualiza somente o pool solicitado para evitar consultas desnecessárias ao 7TV."""
+        if trending_only:
+            items = self._search_emote_sample(SORT_TRENDING)
+        else:
+            # O comando padrão não consulta o ranking trending: explora somente
+            # fragmentos aleatórios e mantém o filtro de 10-100 canais.
+            items = self._search_obscure_emotes()
 
-        trending_by_id = {}
-        for emote in trending_items:
+        by_id = {}
+        for emote in items:
             if not self._is_usable(emote):
                 continue
             scores = emote.get("scores") or {}
@@ -239,32 +243,12 @@ class SevenTVEmote:
                 "trending_score": max(0, int(scores.get("trendingWeek") or 0)),
                 "channel_count": max(0, int(channels.get("totalCount") or 0)),
             }
-            trending_by_id[candidate["id"]] = candidate
-
-        popular_by_id = {}
-        for emote in obscure_items:
-            if not self._is_usable(emote):
+            if not trending_only and not MIN_CHANNELS <= candidate["channel_count"] <= MAX_CHANNELS:
                 continue
-            scores = emote.get("scores") or {}
-            channels = emote.get("channels") or {}
-            candidate = {
-                "id": emote["id"],
-                "name": emote["defaultName"],
-                "trending_score": max(0, int(scores.get("trendingWeek") or 0)),
-                "channel_count": max(0, int(channels.get("totalCount") or 0)),
-            }
-            if not MIN_CHANNELS <= candidate["channel_count"] <= MAX_CHANNELS:
-                continue
-            previous = popular_by_id.get(candidate["id"])
-            if previous:
-                previous["trending_score"] = max(previous["trending_score"], candidate["trending_score"])
-                previous["channel_count"] = max(previous["channel_count"], candidate["channel_count"])
-            else:
-                popular_by_id[candidate["id"]] = candidate
+            by_id[candidate["id"]] = candidate
 
-        trending_candidates = list(trending_by_id.values())
-        candidates = list(popular_by_id.values())
-        return candidates, trending_candidates
+        candidates = list(by_id.values())
+        return ([], candidates) if trending_only else (candidates, [])
 
     def _load_cache(self):
         try:
@@ -275,7 +259,7 @@ class SevenTVEmote:
             updated_at = float(payload.get("updated_at") or 0)
             age = max(0, time.time() - updated_at)
             schema_version = payload.get("schema_version", 1)
-            if schema_version not in (1, 2) or not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
+            if schema_version not in (1, 2) or not candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
                 return
             filtered_candidates = self._filter_default_candidates(candidates)
             rejected_count = len(candidates) - len(filtered_candidates)
@@ -359,7 +343,7 @@ class SevenTVEmote:
             self._refreshing = True
 
         try:
-            candidates, trending_candidates = self._fetch_candidates()
+            candidates, trending_candidates = self._fetch_candidates(trending_only=trending_only)
         except Exception as exc:
             with self._condition:
                 self._last_refresh_error = exc
@@ -379,8 +363,10 @@ class SevenTVEmote:
             raise
 
         with self._condition:
-            self._candidate_cache = candidates
-            self._trending_candidate_cache = trending_candidates
+            if trending_only:
+                self._trending_candidate_cache = trending_candidates
+            else:
+                self._candidate_cache = candidates
             self._cache_updated_at = time.time()
             self._cache_expires_at = time.monotonic() + CACHE_TTL_SECONDS
             self._rate_limit_until = 0
@@ -388,14 +374,14 @@ class SevenTVEmote:
             self._refreshing = False
             self._condition.notify_all()
         self._save_cache(candidates, trending_candidates)
-        selected_pool = trending_candidates if trending_only else candidates
+        selected_pool = self._trending_candidate_cache if trending_only else self._candidate_cache
         if not selected_pool:
             if trending_only:
                 raise RuntimeError("Nenhum emote disponível no ranking trending do 7TV.")
             raise RuntimeError(f"Nenhum emote encontrado entre {MIN_CHANNELS} e {MAX_CHANNELS} canais.")
         logging.info(
-            "[SevenTVEmote] Cache atualizado: %s emotes entre %s e %s canais; %s emotes do trending sem filtro de canais.",
-            len(candidates), MIN_CHANNELS, MAX_CHANNELS, len(trending_candidates),
+            "[SevenTVEmote] Pool atualizado: %s emotes (%s).",
+            len(selected_pool), "trending" if trending_only else f"{MIN_CHANNELS}-{MAX_CHANNELS} canais",
         )
         return selected_pool
 
