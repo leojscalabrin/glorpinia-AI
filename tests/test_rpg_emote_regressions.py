@@ -163,7 +163,7 @@ class SevenTVRegressionTests(unittest.TestCase):
                     thread.join(timeout=3)
 
             self.assertEqual(len(results), 8)
-            self.assertEqual(len(calls), 2)  # trending + popular, sem duplicação por usuário
+            self.assertEqual(len(calls), 5)  # 1 trending + 4 fragmentos; sem duplicação por usuário
             self.assertTrue(os.path.exists(feature._cache_path))
 
     def test_graphql_rate_limit_is_detected_and_reset_is_respected(self):

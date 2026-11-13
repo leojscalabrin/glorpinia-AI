@@ -39,7 +39,6 @@ query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!, $query: String) {
 CANDIDATE_PAGE_SIZE = 30
 RANDOM_PAGES_PER_SORT = 5
 RANDOM_HASHES_PER_REFRESH = 4
-RANDOM_PAGES_PER_HASH = 3
 MIN_CHANNELS = 10
 MAX_CHANNELS = 100
 CACHE_TTL_SECONDS = 3 * 60 * 60
@@ -148,11 +147,17 @@ class SevenTVEmote:
         total_count = max(0, int(first_page.get("totalCount") or 0))
         total_pages = max(1, (total_count + CANDIDATE_PAGE_SIZE - 1) // CANDIDATE_PAGE_SIZE)
         page_count = min(max_pages or RANDOM_PAGES_PER_SORT, total_pages)
-        selected_pages = random.sample(range(1, total_pages + 1), page_count)
+        # A primeira página já foi consultada para obter totalCount; sorteie
+        # somente páginas adicionais para nunca repetir nem exceder o orçamento.
+        additional_page_count = min(max(0, page_count - 1), max(0, total_pages - 1))
+        selected_pages = (
+            random.sample(range(2, total_pages + 1), additional_page_count)
+            if additional_page_count else []
+        )
 
-        sampled_items = []
+        sampled_items = list(first_page.get("items") or [])
         for page in selected_pages:
-            result = first_page if page == 1 else self._search_emotes(sort, page=page, query=query)
+            result = self._search_emotes(sort, page=page, query=query)
             sampled_items.extend(result.get("items") or [])
 
         # Uma página pode mudar entre consultas; deduplicar pelo ID evita peso duplicado.
@@ -173,7 +178,11 @@ class SevenTVEmote:
         for _ in range(RANDOM_HASHES_PER_REFRESH):
             random_hash = self._random_hash()
             try:
-                items = self._search_emote_sample(SORT_POPULAR, query=random_hash, max_pages=RANDOM_PAGES_PER_HASH)
+                # Uma única página por fragmento. _search_emote_sample faria uma
+                # consulta extra para descobrir totalCount e poderia buscar outras
+                # páginas, multiplicando o custo de cada fragmento.
+                result = self._search_emotes(SORT_POPULAR, page=1, query=random_hash)
+                items = result.get("items") or []
             except SevenTVRateLimitError:
                 raise
             except Exception as exc:
@@ -248,13 +257,18 @@ class SevenTVEmote:
             trending_candidates = payload.get("trending_candidates") or []
             updated_at = float(payload.get("updated_at") or 0)
             age = max(0, time.time() - updated_at)
-            if payload.get("schema_version") != 2 or not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
+            schema_version = payload.get("schema_version", 1)
+            if schema_version not in (1, 2) or not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
                 return
             self._candidate_cache = candidates
             self._trending_candidate_cache = trending_candidates
             self._cache_updated_at = updated_at
             remaining = max(0, CACHE_TTL_SECONDS - age)
-            self._cache_expires_at = time.monotonic() + remaining
+            # Cache legado continua como fallback, mas força uma atualização para
+            # aplicar a nova descoberta por fragmentos aleatórios e o limite de canais.
+            self._cache_expires_at = (
+                time.monotonic() + remaining if schema_version == 2 else 0
+            )
             logging.info(
                 "[SevenTVEmote] Cache persistido carregado: %s candidatos (10+ canais), %s trending (idade=%ss).",
                 len(candidates), len(trending_candidates), int(age),
