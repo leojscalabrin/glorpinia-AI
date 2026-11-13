@@ -1,3 +1,7 @@
+import json
+import os
+import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -129,6 +133,47 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
 
         self.assertEqual({item["id"] for item in candidates}, {"min", "max"})
         self.assertEqual(trending, [])
+
+
+    def test_default_selection_rejects_trending_sized_emotes_even_if_source_is_contaminated(self):
+        candidates = [
+            {"id": "valid", "name": "Valid", "channel_count": 42},
+            {"id": "too_popular", "name": "TooPopular", "channel_count": 8900},
+            {"id": "too_small", "name": "TooSmall", "channel_count": 9},
+        ]
+        with patch.object(self.feature, "_get_candidates", return_value=candidates):
+            with patch(
+                "glorpinia_bot.features.seventv_emote.random.choice",
+                side_effect=lambda pool: pool[0],
+            ) as choose:
+                name, _ = self.feature._emote_aleatorio(trending_only=False)
+
+        self.assertEqual(name, "Valid")
+        choose.assert_called_once_with([candidates[0]])
+
+    def test_persisted_cache_discards_candidates_outside_ten_to_one_hundred_channels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = os.path.join(directory, "cache.json")
+            with open(cache_path, "w", encoding="utf-8") as cache_file:
+                json.dump({
+                    "schema_version": 2,
+                    "updated_at": time.time(),
+                    "candidates": [
+                        {"id": "valid", "name": "Valid", "channel_count": 10},
+                        {"id": "popular", "name": "Popular", "channel_count": 8900},
+                        {"id": "missing", "name": "Missing"},
+                    ],
+                    "trending_candidates": [
+                        {"id": "trend", "name": "Trend", "channel_count": 8900}
+                    ],
+                }, cache_file)
+
+            with patch.dict(os.environ, {"SEVENTV_EMOTE_CACHE_FILE": cache_path}):
+                feature = SevenTVEmote(DummyBot())
+
+            self.assertEqual([item["id"] for item in feature._candidate_cache], ["valid"])
+            # O pool trending continua intencionalmente independente do filtro.
+            self.assertEqual([item["id"] for item in feature._trending_candidate_cache], ["trend"])
 
     def test_random_hash_is_two_lowercase_alphanumeric_characters(self):
         value = self.feature._random_hash()
