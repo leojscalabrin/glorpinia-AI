@@ -36,6 +36,7 @@ query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!) {
 """
 
 CANDIDATE_PAGE_SIZE = 30
+RANDOM_PAGES_PER_SORT = 5
 MIN_CHANNELS = 10
 CACHE_TTL_SECONDS = 3 * 60 * 60
 REQUEST_TIMEOUT_SECONDS = 12
@@ -95,12 +96,12 @@ class SevenTVEmote:
         except (TypeError, ValueError):
             return 60
 
-    def _search_emotes(self, sort):
+    def _search_emotes(self, sort, page=1):
         payload = {
             "operationName": "SearchEmotes",
             "query": SEARCH_QUERY,
             "variables": {
-                "page": 1,
+                "page": page,
                 "perPage": CANDIDATE_PAGE_SIZE,
                 "sort": sort,
             },
@@ -134,7 +135,27 @@ class SevenTVEmote:
         if errors:
             raise RuntimeError(f"7TV GraphQL errors: {errors}")
 
-        return data["data"]["emotes"]["search"]["items"]
+        return data["data"]["emotes"]["search"]
+
+    def _search_emote_sample(self, sort):
+        """Busca páginas aleatórias do ranking, em vez de ficar preso à primeira página."""
+        first_page = self._search_emotes(sort, page=1)
+        total_count = max(0, int(first_page.get("totalCount") or 0))
+        total_pages = max(1, (total_count + CANDIDATE_PAGE_SIZE - 1) // CANDIDATE_PAGE_SIZE)
+        page_count = min(RANDOM_PAGES_PER_SORT, total_pages)
+        selected_pages = random.sample(range(1, total_pages + 1), page_count)
+
+        sampled_items = []
+        for page in selected_pages:
+            result = first_page if page == 1 else self._search_emotes(sort, page=page)
+            sampled_items.extend(result.get("items") or [])
+
+        # Uma página pode mudar entre consultas; deduplicar pelo ID evita peso duplicado.
+        unique_items = {}
+        for emote in sampled_items:
+            if emote.get("id"):
+                unique_items[emote["id"]] = emote
+        return list(unique_items.values())
 
     @staticmethod
     def _is_usable(emote):
@@ -150,8 +171,8 @@ class SevenTVEmote:
 
     def _fetch_candidates(self):
         """Retorna dois pools independentes: trending puro e emotes presentes em 10+ canais."""
-        trending_items = self._search_emotes(SORT_TRENDING)
-        popular_items = self._search_emotes(SORT_POPULAR)
+        trending_items = self._search_emote_sample(SORT_TRENDING)
+        popular_items = self._search_emote_sample(SORT_POPULAR)
 
         trending_by_id = {}
         for emote in trending_items:
