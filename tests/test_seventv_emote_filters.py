@@ -127,12 +127,13 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
             emote("max", MAX_CHANNELS),
             emote("above", MAX_CHANNELS + 1),
         ]
-        with patch.object(self.feature, "_search_emote_sample", return_value=[]):
+        with patch.object(self.feature, "_search_emote_sample") as trending_search:
             with patch.object(self.feature, "_search_obscure_emotes", return_value=obscure):
                 candidates, trending = self.feature._fetch_candidates()
 
         self.assertEqual({item["id"] for item in candidates}, {"min", "max"})
         self.assertEqual(trending, [])
+        trending_search.assert_not_called()
 
 
     def test_default_selection_rejects_trending_sized_emotes_even_if_source_is_contaminated(self):
@@ -174,6 +175,22 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
             self.assertEqual([item["id"] for item in feature._candidate_cache], ["valid"])
             # O pool trending continua intencionalmente independente do filtro.
             self.assertEqual([item["id"] for item in feature._trending_candidate_cache], ["trend"])
+
+
+    def test_trending_refresh_does_not_search_obscure_pool(self):
+        trending = [{
+            "id": "trend", "defaultName": "Trend", "deleted": False,
+            "flags": {"private": False, "nsfw": False, "publicListed": True},
+            "scores": {"trendingWeek": 10}, "channels": {"totalCount": 9000},
+        }]
+        with patch.object(self.feature, "_search_emote_sample", return_value=trending) as trending_search:
+            with patch.object(self.feature, "_search_obscure_emotes") as obscure_search:
+                candidates, trending_candidates = self.feature._fetch_candidates(trending_only=True)
+
+        self.assertEqual(candidates, [])
+        self.assertEqual([item["id"] for item in trending_candidates], ["trend"])
+        trending_search.assert_called_once_with({"sortBy": "TRENDING_WEEKLY", "order": "DESCENDING"})
+        obscure_search.assert_not_called()
 
     def test_random_hash_is_two_lowercase_alphanumeric_characters(self):
         value = self.feature._random_hash()
