@@ -31,18 +31,20 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
         choose.assert_called_once_with(candidates)
         weighted_choose.assert_not_called()
 
-    def test_default_selection_uses_ten_channel_candidate_pool(self):
+    def test_default_selection_is_uniform_random_from_ten_channel_pool(self):
         candidates = [
             {"id": "a", "name": "PopularA", "trending_score": 0, "channel_count": 10},
             {"id": "b", "name": "PopularB", "trending_score": 0, "channel_count": 20},
         ]
         with patch.object(self.feature, "_get_candidates", return_value=candidates) as get_candidates:
-            with patch("glorpinia_bot.features.seventv_emote.random.choices", return_value=[candidates[0]]) as choose:
-                name, _ = self.feature._emote_aleatorio()
+            with patch("glorpinia_bot.features.seventv_emote.random.choice", return_value=candidates[1]) as choose:
+                with patch("glorpinia_bot.features.seventv_emote.random.choices") as weighted_choose:
+                    name, _ = self.feature._emote_aleatorio()
 
-        self.assertEqual(name, "PopularA")
+        self.assertEqual(name, "PopularB")
         get_candidates.assert_called_once_with(trending_only=False)
-        choose.assert_called_once()
+        choose.assert_called_once_with(candidates)
+        weighted_choose.assert_not_called()
 
 
 if __name__ == "__main__":
