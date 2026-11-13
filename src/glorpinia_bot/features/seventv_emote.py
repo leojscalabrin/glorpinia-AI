@@ -142,12 +142,12 @@ class SevenTVEmote:
 
         return data["data"]["emotes"]["search"]
 
-    def _search_emote_sample(self, sort, query=None):
+    def _search_emote_sample(self, sort, query=None, max_pages=None):
         """Busca páginas aleatórias do ranking, em vez de ficar preso à primeira página."""
         first_page = self._search_emotes(sort, page=1, query=query)
         total_count = max(0, int(first_page.get("totalCount") or 0))
         total_pages = max(1, (total_count + CANDIDATE_PAGE_SIZE - 1) // CANDIDATE_PAGE_SIZE)
-        page_count = min(RANDOM_PAGES_PER_SORT, total_pages)
+        page_count = min(max_pages or RANDOM_PAGES_PER_SORT, total_pages)
         selected_pages = random.sample(range(1, total_pages + 1), page_count)
 
         sampled_items = []
@@ -173,7 +173,9 @@ class SevenTVEmote:
         for _ in range(RANDOM_HASHES_PER_REFRESH):
             random_hash = self._random_hash()
             try:
-                items = self._search_emote_sample(SORT_POPULAR, query=random_hash)
+                items = self._search_emote_sample(SORT_POPULAR, query=random_hash, max_pages=RANDOM_PAGES_PER_HASH)
+            except SevenTVRateLimitError:
+                raise
             except Exception as exc:
                 logging.warning("[SevenTVEmote] Falha na busca aleatória '%s': %s", random_hash, exc)
                 continue
@@ -246,7 +248,7 @@ class SevenTVEmote:
             trending_candidates = payload.get("trending_candidates") or []
             updated_at = float(payload.get("updated_at") or 0)
             age = max(0, time.time() - updated_at)
-            if not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
+            if payload.get("schema_version") != 2 or not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
                 return
             self._candidate_cache = candidates
             self._trending_candidate_cache = trending_candidates
@@ -268,6 +270,7 @@ class SevenTVEmote:
             with open(temporary_path, "w", encoding="utf-8") as cache_file:
                 json.dump(
                     {
+                        "schema_version": 2,
                         "updated_at": time.time(),
                         "candidates": candidates,
                         "trending_candidates": trending_candidates,
