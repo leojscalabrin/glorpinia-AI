@@ -39,7 +39,6 @@ query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!, $query: String) {
 CANDIDATE_PAGE_SIZE = 30
 RANDOM_PAGES_PER_SORT = 5
 RANDOM_HASHES_PER_REFRESH = 4
-RANDOM_PAGES_PER_HASH = 1  # Uma página por fragmento: limita a coleta a 4 buscas + trending.
 MIN_CHANNELS = 10
 MAX_CHANNELS = 100
 CACHE_TTL_SECONDS = 3 * 60 * 60
@@ -173,7 +172,11 @@ class SevenTVEmote:
         for _ in range(RANDOM_HASHES_PER_REFRESH):
             random_hash = self._random_hash()
             try:
-                items = self._search_emote_sample(SORT_POPULAR, query=random_hash, max_pages=RANDOM_PAGES_PER_HASH)
+                # Uma única página por fragmento. _search_emote_sample faria uma
+                # consulta extra para descobrir totalCount e poderia buscar outras
+                # páginas, multiplicando o custo de cada fragmento.
+                result = self._search_emotes(SORT_POPULAR, page=1, query=random_hash)
+                items = result.get("items") or []
             except SevenTVRateLimitError:
                 raise
             except Exception as exc:
