@@ -99,10 +99,10 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
         self.assertEqual(
             [call.kwargs for call in search.call_args_list],
             [
-                {"query": "a7", "max_pages": 3},
-                {"query": "k2", "max_pages": 3},
-                {"query": "m9", "max_pages": 3},
-                {"query": "z4", "max_pages": 3},
+                {"query": "a7", "max_pages": 1},
+                {"query": "k2", "max_pages": 1},
+                {"query": "m9", "max_pages": 1},
+                {"query": "z4", "max_pages": 1},
             ],
         )
 
