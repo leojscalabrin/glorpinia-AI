@@ -39,7 +39,7 @@ query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!, $query: String) {
 CANDIDATE_PAGE_SIZE = 30
 RANDOM_PAGES_PER_SORT = 5
 RANDOM_HASHES_PER_REFRESH = 4
-RANDOM_PAGES_PER_HASH = 3
+RANDOM_PAGES_PER_HASH = 1  # Uma página por fragmento: limita a coleta a 4 buscas + trending.
 MIN_CHANNELS = 10
 MAX_CHANNELS = 100
 CACHE_TTL_SECONDS = 3 * 60 * 60
@@ -248,13 +248,18 @@ class SevenTVEmote:
             trending_candidates = payload.get("trending_candidates") or []
             updated_at = float(payload.get("updated_at") or 0)
             age = max(0, time.time() - updated_at)
-            if payload.get("schema_version") != 2 or not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
+            schema_version = payload.get("schema_version", 1)
+            if schema_version not in (1, 2) or not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
                 return
             self._candidate_cache = candidates
             self._trending_candidate_cache = trending_candidates
             self._cache_updated_at = updated_at
             remaining = max(0, CACHE_TTL_SECONDS - age)
-            self._cache_expires_at = time.monotonic() + remaining
+            # Cache legado continua como fallback, mas força uma atualização para
+            # aplicar a nova descoberta por fragmentos aleatórios e o limite de canais.
+            self._cache_expires_at = (
+                time.monotonic() + remaining if schema_version == 2 else 0
+            )
             logging.info(
                 "[SevenTVEmote] Cache persistido carregado: %s candidatos (10+ canais), %s trending (idade=%ss).",
                 len(candidates), len(trending_candidates), int(age),
