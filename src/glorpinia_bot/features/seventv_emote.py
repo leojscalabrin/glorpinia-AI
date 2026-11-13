@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import random
+import string
 import threading
 import time
 
@@ -10,9 +11,9 @@ import requests
 GQL_URL = "https://7tv.io/v4/gql"
 
 SEARCH_QUERY = """
-query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!) {
+query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!, $query: String) {
   emotes {
-    search(page: $page, perPage: $perPage, sort: $sort) {
+    search(page: $page, perPage: $perPage, sort: $sort, query: $query) {
       items {
         id
         defaultName
@@ -37,7 +38,10 @@ query SearchEmotes($page: Int!, $perPage: Int!, $sort: Sort!) {
 
 CANDIDATE_PAGE_SIZE = 30
 RANDOM_PAGES_PER_SORT = 5
+RANDOM_HASHES_PER_REFRESH = 4
+RANDOM_PAGES_PER_HASH = 3
 MIN_CHANNELS = 10
+MAX_CHANNELS = 100
 CACHE_TTL_SECONDS = 3 * 60 * 60
 REQUEST_TIMEOUT_SECONDS = 12
 MAX_STALE_CACHE_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -96,7 +100,7 @@ class SevenTVEmote:
         except (TypeError, ValueError):
             return 60
 
-    def _search_emotes(self, sort, page=1):
+    def _search_emotes(self, sort, page=1, query=None):
         payload = {
             "operationName": "SearchEmotes",
             "query": SEARCH_QUERY,
@@ -104,6 +108,7 @@ class SevenTVEmote:
                 "page": page,
                 "perPage": CANDIDATE_PAGE_SIZE,
                 "sort": sort,
+                "query": query,
             },
         }
         response = requests.post(
@@ -137,17 +142,17 @@ class SevenTVEmote:
 
         return data["data"]["emotes"]["search"]
 
-    def _search_emote_sample(self, sort):
+    def _search_emote_sample(self, sort, query=None, max_pages=None):
         """Busca páginas aleatórias do ranking, em vez de ficar preso à primeira página."""
-        first_page = self._search_emotes(sort, page=1)
+        first_page = self._search_emotes(sort, page=1, query=query)
         total_count = max(0, int(first_page.get("totalCount") or 0))
         total_pages = max(1, (total_count + CANDIDATE_PAGE_SIZE - 1) // CANDIDATE_PAGE_SIZE)
-        page_count = min(RANDOM_PAGES_PER_SORT, total_pages)
+        page_count = min(max_pages or RANDOM_PAGES_PER_SORT, total_pages)
         selected_pages = random.sample(range(1, total_pages + 1), page_count)
 
         sampled_items = []
         for page in selected_pages:
-            result = first_page if page == 1 else self._search_emotes(sort, page=page)
+            result = first_page if page == 1 else self._search_emotes(sort, page=page, query=query)
             sampled_items.extend(result.get("items") or [])
 
         # Uma página pode mudar entre consultas; deduplicar pelo ID evita peso duplicado.
@@ -156,6 +161,28 @@ class SevenTVEmote:
             if emote.get("id"):
                 unique_items[emote["id"]] = emote
         return list(unique_items.values())
+
+    @staticmethod
+    def _random_hash():
+        """Gera um fragmento aleatório para explorar diferentes regiões da busca por nome."""
+        return "".join(random.sample(string.ascii_lowercase + string.digits, 2))
+
+    def _search_obscure_emotes(self):
+        """Busca por fragmentos aleatórios, sem depender do ranking global de popularidade."""
+        sampled = {}
+        for _ in range(RANDOM_HASHES_PER_REFRESH):
+            random_hash = self._random_hash()
+            try:
+                items = self._search_emote_sample(SORT_POPULAR, query=random_hash, max_pages=RANDOM_PAGES_PER_HASH)
+            except SevenTVRateLimitError:
+                raise
+            except Exception as exc:
+                logging.warning("[SevenTVEmote] Falha na busca aleatória '%s': %s", random_hash, exc)
+                continue
+            for emote in items:
+                if emote.get("id"):
+                    sampled[emote["id"]] = emote
+        return list(sampled.values())
 
     @staticmethod
     def _is_usable(emote):
@@ -172,7 +199,7 @@ class SevenTVEmote:
     def _fetch_candidates(self):
         """Retorna dois pools independentes: trending puro e emotes presentes em 10+ canais."""
         trending_items = self._search_emote_sample(SORT_TRENDING)
-        popular_items = self._search_emote_sample(SORT_POPULAR)
+        obscure_items = self._search_obscure_emotes()
 
         trending_by_id = {}
         for emote in trending_items:
@@ -189,7 +216,7 @@ class SevenTVEmote:
             trending_by_id[candidate["id"]] = candidate
 
         popular_by_id = {}
-        for emote in trending_items + popular_items:
+        for emote in obscure_items:
             if not self._is_usable(emote):
                 continue
             scores = emote.get("scores") or {}
@@ -200,7 +227,7 @@ class SevenTVEmote:
                 "trending_score": max(0, int(scores.get("trendingWeek") or 0)),
                 "channel_count": max(0, int(channels.get("totalCount") or 0)),
             }
-            if candidate["channel_count"] < MIN_CHANNELS:
+            if not MIN_CHANNELS <= candidate["channel_count"] <= MAX_CHANNELS:
                 continue
             previous = popular_by_id.get(candidate["id"])
             if previous:
@@ -221,7 +248,7 @@ class SevenTVEmote:
             trending_candidates = payload.get("trending_candidates") or []
             updated_at = float(payload.get("updated_at") or 0)
             age = max(0, time.time() - updated_at)
-            if not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
+            if payload.get("schema_version") != 2 or not candidates or not trending_candidates or age > MAX_STALE_CACHE_AGE_SECONDS:
                 return
             self._candidate_cache = candidates
             self._trending_candidate_cache = trending_candidates
@@ -243,6 +270,7 @@ class SevenTVEmote:
             with open(temporary_path, "w", encoding="utf-8") as cache_file:
                 json.dump(
                     {
+                        "schema_version": 2,
                         "updated_at": time.time(),
                         "candidates": candidates,
                         "trending_candidates": trending_candidates,
@@ -318,10 +346,10 @@ class SevenTVEmote:
         if not selected_pool:
             if trending_only:
                 raise RuntimeError("Nenhum emote disponível no ranking trending do 7TV.")
-            raise RuntimeError(f"Nenhum emote encontrado em pelo menos {MIN_CHANNELS} canais.")
+            raise RuntimeError(f"Nenhum emote encontrado entre {MIN_CHANNELS} e {MAX_CHANNELS} canais.")
         logging.info(
-            "[SevenTVEmote] Cache atualizado: %s emotes com mínimo de %s canais; %s emotes do trending sem filtro de canais.",
-            len(candidates), MIN_CHANNELS, len(trending_candidates),
+            "[SevenTVEmote] Cache atualizado: %s emotes entre %s e %s canais; %s emotes do trending sem filtro de canais.",
+            len(candidates), MIN_CHANNELS, MAX_CHANNELS, len(trending_candidates),
         )
         return selected_pool
 
