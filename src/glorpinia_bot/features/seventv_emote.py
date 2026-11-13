@@ -190,10 +190,6 @@ class SevenTVEmote:
 
         trending_candidates = list(trending_by_id.values())
         candidates = list(popular_by_id.values())
-        if not trending_candidates:
-            raise RuntimeError("Nenhum emote disponível no ranking trending do 7TV.")
-        if not candidates:
-            raise RuntimeError(f"Nenhum emote encontrado em pelo menos {MIN_CHANNELS} canais.")
         return candidates, trending_candidates
 
     def _load_cache(self):
@@ -297,11 +293,16 @@ class SevenTVEmote:
             self._refreshing = False
             self._condition.notify_all()
         self._save_cache(candidates, trending_candidates)
+        selected_pool = trending_candidates if trending_only else candidates
+        if not selected_pool:
+            if trending_only:
+                raise RuntimeError("Nenhum emote disponível no ranking trending do 7TV.")
+            raise RuntimeError(f"Nenhum emote encontrado em pelo menos {MIN_CHANNELS} canais.")
         logging.info(
             "[SevenTVEmote] Cache atualizado: %s emotes com mínimo de %s canais; %s emotes do trending sem filtro de canais.",
             len(candidates), MIN_CHANNELS, len(trending_candidates),
         )
-        return trending_candidates if trending_only else candidates
+        return selected_pool
 
     @staticmethod
     def _selection_weight(candidate):
