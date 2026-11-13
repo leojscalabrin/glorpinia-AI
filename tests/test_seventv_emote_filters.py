@@ -92,17 +92,17 @@ class SevenTVEmoteFilterTests(unittest.TestCase):
 
     def test_obscure_pool_uses_random_query_fragments(self):
         with patch.object(self.feature, "_random_hash", side_effect=["a7", "k2", "m9", "z4"]):
-            with patch.object(self.feature, "_search_emote_sample", return_value=[]) as search:
+            with patch.object(self.feature, "_search_emotes", return_value={"items": []}) as search:
                 self.feature._search_obscure_emotes()
 
         self.assertEqual(search.call_count, 4)
         self.assertEqual(
             [call.kwargs for call in search.call_args_list],
             [
-                {"query": "a7", "max_pages": 1},
-                {"query": "k2", "max_pages": 1},
-                {"query": "m9", "max_pages": 1},
-                {"query": "z4", "max_pages": 1},
+                {"page": 1, "query": "a7"},
+                {"page": 1, "query": "k2"},
+                {"page": 1, "query": "m9"},
+                {"page": 1, "query": "z4"},
             ],
         )
 
