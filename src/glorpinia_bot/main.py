@@ -418,6 +418,23 @@ ESTILO OBRIGATÓRIO:
         default_state = self._default_feature_states().get(feature_name, False)
         return bool(channel_state.get(feature_name, default_state))
 
+    def _sync_comment_with_live_status(self, channel, is_live):
+        """Mantém o Comment inverso ao estado da live, sem anunciar a alteração."""
+        desired_state = not bool(is_live)
+        current_state = self.is_feature_enabled(channel, "comment")
+        if current_state == desired_state:
+            return
+
+        if self.comment_feature:
+            self.comment_feature.set_enabled(channel, desired_state)
+        self.set_feature_state(channel, "comment", desired_state)
+        logging.info(
+            "[Comment] Sincronizado com live: channel=%s live=%s comment=%s",
+            channel,
+            "ON" if is_live else "OFF",
+            "ON" if desired_state else "OFF",
+        )
+
     def set_feature_state(self, channel, feature_name, state):
         if channel not in self.channel_feature_states:
             self.channel_feature_states[channel] = self._default_feature_states()
@@ -1992,6 +2009,7 @@ ESTILO OBRIGATÓRIO:
                         if channel not in self.live_status_initialized:
                             self.live_status[channel] = is_live
                             self.live_status_initialized.add(channel)
+                            self._sync_comment_with_live_status(channel, is_live)
                             print(f"[Monitor] Estado inicial de #{channel}: {'AO VIVO' if is_live else 'OFFLINE'} (sem trigger).")
                             continue
 
@@ -2007,10 +2025,12 @@ ESTILO OBRIGATÓRIO:
                             continue
 
                         if is_live and not was_live:
+                            self._sync_comment_with_live_status(channel, is_live)
                             print(f"[Monitor] {channel} entrou AO VIVO!")
                             self.social_dynamics.reset_drama_state(channel, reason="new_stream")
                             self._trigger_welcome_message(channel, self.get_live_context(channel))
                         elif not is_live and was_live:
+                            self._sync_comment_with_live_status(channel, is_live)
                             print(f"[Monitor] {channel} ficou OFFLINE!")
                             last_context = self.live_stream_context.get(channel, {})
                             self._trigger_goodbye_message(channel, last_context)

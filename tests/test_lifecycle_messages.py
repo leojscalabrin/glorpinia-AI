@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 
 from glorpinia_bot.emote_manager import EmoteManager
 from glorpinia_bot.main import TwitchIRC
@@ -31,6 +32,27 @@ class LifecycleMessageTests(unittest.TestCase):
             ),
             "@glorp finalmente chegou",
         )
+
+    def test_comment_is_silently_synced_with_live_state(self):
+        bot = TwitchIRC.__new__(TwitchIRC)
+        bot.comment_feature = Mock()
+        bot.channel_feature_states = {"glorp": {"chat": True, "listen": False, "comment": True}}
+        bot._save_channel_feature_states = Mock()
+        bot.send_message = Mock()
+
+        # Live ON deve desligar Comment.
+        bot._sync_comment_with_live_status("glorp", True)
+        self.assertFalse(bot.is_feature_enabled("glorp", "comment"))
+        bot.comment_feature.set_enabled.assert_called_once_with("glorp", False)
+
+        # Live OFF deve reativar Comment.
+        bot.comment_feature.set_enabled.reset_mock()
+        bot._sync_comment_with_live_status("glorp", False)
+        self.assertTrue(bot.is_feature_enabled("glorp", "comment"))
+        bot.comment_feature.set_enabled.assert_called_once_with("glorp", True)
+
+        # A sincronização não deve publicar notificações no chat.
+        bot.send_message.assert_not_called()
 
     def test_zero_width_emote_is_sent_with_non_zero_width_companion(self):
         manager = EmoteManager(base_path=".")
