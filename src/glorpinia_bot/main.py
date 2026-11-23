@@ -635,20 +635,66 @@ ESTILO OBRIGATÓRIO:
         """True se o bot é VIP/mod/broadcaster no canal. Desconhecido conta como não-VIP."""
         return self.bot_privileged_channels.get(channel.lower(), False)
 
+    LEVELUP_ACTIVE_WINDOW_SEC = 300
+
+    def _has_recent_chat_activity(self, channel, author, now=None):
+        """Confirma atividade recente do usuário no histórico do mesmo canal."""
+        channel_key = (channel or "").strip().lower().lstrip("#")
+        author_key = (author or "").strip().lstrip("@").lower()
+        if not channel_key or not author_key:
+            return False
+
+        bot_nick = (getattr(self.auth, "bot_nick", "") or "").strip().lower()
+        current_time = time.time() if now is None else now
+        history = self.recent_messages.get(channel_key, ())
+        for entry in reversed(history):
+            if (entry.get("author") or "").strip().lstrip("@").lower() != author_key:
+                continue
+            try:
+                timestamp = float(entry.get("timestamp", 0))
+            except (TypeError, ValueError):
+                continue
+            age = current_time - timestamp
+            if timestamp > 0 and 0 <= age <= self.LEVELUP_ACTIVE_WINDOW_SEC and author_key != bot_nick:
+                return True
+        return False
+
+    def _send_level_up_notice_if_active(self, channel, author, notice, delay=0):
+        """Revalida a atividade após o atraso antes de publicar o aviso."""
+        if delay > 0:
+            time.sleep(delay)
+        if not self._has_recent_chat_activity(channel, author):
+            logging.info(
+                "[RPG][LEVELUP] aviso_cancelado_inativo channel=%s author=%s janela=%ss",
+                channel, author, self.LEVELUP_ACTIVE_WINDOW_SEC,
+            )
+            return
+        self.send_message(channel, notice)
+
     def send_level_up_notice(self, channel, author, new_level):
-        """Avisa o level up. Se o bot não for VIP/mod, atrasa o envio para não colidir
-        com outra mensagem do bot (que faria a Twitch descartar uma delas)."""
+        """Só anuncia level up se o usuário falou recentemente neste canal."""
+        if not self._has_recent_chat_activity(channel, author):
+            logging.info(
+                "[RPG][LEVELUP] aviso_ignorado_sem_atividade channel=%s author=%s janela=%ss",
+                channel, author, self.LEVELUP_ACTIVE_WINDOW_SEC,
+            )
+            return
+
         notice = f"@{author} passou para o nível {new_level}! PogChamp"
         if new_level == 10:
             notice += " Use *class para escolher sua classe definitiva!"
 
         delay = 0 if self.is_bot_privileged(channel) else self.levelup_notice_delay_sec
         if delay <= 0:
-            self.send_message(channel, notice)
+            self._send_level_up_notice_if_active(channel, author, notice)
             return
 
         logging.debug("[Main] levelup_notice_delayed channel=%s author=%s delay=%.1fs", channel, author, delay)
-        t = threading.Thread(target=self._send_message_part, args=(channel, notice, delay), daemon=True)
+        t = threading.Thread(
+            target=self._send_level_up_notice_if_active,
+            args=(channel, author, notice, delay),
+            daemon=True,
+        )
         t.start()
 
     def _register_recent_message(self, channel, author, content):
